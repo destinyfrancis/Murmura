@@ -1,3 +1,5 @@
+import dataclasses
+
 import pytest
 from backend.app.models.platform_identity import (
     PlatformIdentity,
@@ -18,7 +20,7 @@ def test_platform_identity_immutable():
         tone_shift=0.1,
         moderation_risk=0.05,
     )
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         pi.handle = "changed"  # type: ignore[misc]
 
 
