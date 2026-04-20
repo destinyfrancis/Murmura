@@ -24,6 +24,7 @@ from backend.app.models.platform_identity import (
     build_platform_identity,
 )
 from backend.app.models.universal_agent_profile import UniversalAgentProfile
+from backend.app.utils.db import get_db
 from backend.app.utils.llm_client import LLMClient, get_step_provider_model
 from backend.app.utils.logger import get_logger
 from backend.prompts.agent_generation_prompts import (
@@ -304,6 +305,53 @@ class KGAgentFactory:
 
         logger.info("agents.csv written: %d rows → %s", len(rows), abs_path)
         return abs_path
+
+    async def save_platform_identities_to_db(
+        self,
+        session_id: str,
+        identities: list,
+    ) -> None:
+        """Persist platform identities to the ``platform_identities`` DB table.
+
+        Idempotent — uses INSERT OR REPLACE so re-runs don't duplicate rows.
+        Best-effort: logs on failure but never raises.
+        """
+        if not identities:
+            return
+        try:
+            async with get_db() as db:
+                for pi in identities:
+                    await db.execute(
+                        """
+                        INSERT OR REPLACE INTO platform_identities
+                            (session_id, agent_id, platform, handle,
+                             anonymity_level, activity_vector_24h,
+                             audience_size, tone_shift, moderation_risk)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            session_id,
+                            pi.agent_id,
+                            pi.platform.value,
+                            pi.handle,
+                            pi.anonymity_level,
+                            ",".join(str(v) for v in pi.activity_vector_24h),
+                            pi.audience_size,
+                            pi.tone_shift,
+                            pi.moderation_risk,
+                        ),
+                    )
+                await db.commit()
+            logger.info(
+                "save_platform_identities_to_db: %d rows for session=%s",
+                len(identities),
+                session_id,
+            )
+        except Exception:
+            logger.exception(
+                "save_platform_identities_to_db failed for session=%s — skipping",
+                session_id,
+            )
 
     # ------------------------------------------------------------------
     # Stage 1: eligibility filter

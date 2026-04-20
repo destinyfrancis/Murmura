@@ -488,6 +488,13 @@ async def generate_agents(
         factory = await KGAgentFactory.create(graph_id=graph_id, llm_client=llm)
         profiles = await factory.generate_from_kg(kg_nodes, kg_edges, seed_text)
         written_path = factory.generate_agents_csv(profiles, csv_path)
+        # Persist platform identities to DB for simulation runtime lookup.
+        all_platform_ids = [
+            pi
+            for p in profiles
+            for pi in p.platform_identities
+        ]
+        await factory.save_platform_identities_to_db(session_id, all_platform_ids)
         logger.info(
             "KGAgentFactory: generated %d profiles for session %s at %s",
             len(profiles),
