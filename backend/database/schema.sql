@@ -240,6 +240,40 @@ CREATE INDEX IF NOT EXISTS idx_action_session_agent ON simulation_actions(sessio
 -- parent_action_id INTEGER REFERENCES simulation_actions(id)
 -- spread_depth INTEGER DEFAULT 0
 
+-- ============================================================
+-- platform_identities: Platform-specific agent identities (multi-layer network support)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS platform_identities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL REFERENCES simulation_sessions(id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL,
+    platform TEXT NOT NULL CHECK(platform IN ('twitter','reddit','forum','wechat','news')),
+    handle TEXT NOT NULL,
+    anonymity_level REAL NOT NULL DEFAULT 0.0,
+    audience_size INTEGER NOT NULL DEFAULT 0,
+    tone_shift REAL NOT NULL DEFAULT 0.0,
+    moderation_risk REAL NOT NULL DEFAULT 0.02,
+    activity_vector_json TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(session_id, agent_id, platform)
+);
+CREATE INDEX IF NOT EXISTS idx_platform_identities_session ON platform_identities(session_id);
+
+-- ============================================================
+-- platform_actions: Platform action log (which platform each simulation action was posted on)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS platform_actions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL REFERENCES simulation_sessions(id) ON DELETE CASCADE,
+    round_number INTEGER NOT NULL,
+    agent_id TEXT NOT NULL,
+    platform TEXT NOT NULL CHECK(platform IN ('twitter','reddit','forum','wechat','news')),
+    action_type TEXT,
+    moderation_event TEXT CHECK(moderation_event IS NULL OR moderation_event IN ('delete', 'shadow_ban')),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_platform_actions_session_round ON platform_actions(session_id, round_number);
+
 -- Phase 17: Polarization snapshots
 CREATE TABLE IF NOT EXISTS polarization_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
