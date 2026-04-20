@@ -77,8 +77,8 @@ async def test_init_multi_layer_network_builds_network_from_db():
     network = instance._multi_layer_networks["sess-abc"]
     platforms = network.get_agent_platforms("agent_a")
     assert len(platforms) == 2
-    assert instance._agent_moderation_risks["sess-abc"]["agent_a"] > 0
-    assert instance._agent_moderation_risks["sess-abc"]["agent_b"] > 0
+    assert instance._agent_moderation_risks["sess-abc"]["agent_a"] == pytest.approx(0.02)
+    assert instance._agent_moderation_risks["sess-abc"]["agent_b"] == pytest.approx(0.03)
 
 
 @pytest.mark.asyncio

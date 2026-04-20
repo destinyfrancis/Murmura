@@ -243,10 +243,10 @@ class KGHooksMixin:
                     mod_risks[str(agent_id)] = max(
                         mod_risks.get(str(agent_id), 0.0), float(risk)
                     )
-                except Exception:
+                except Exception as exc:
                     logger.debug(
-                        "_init_multi_layer_network: skipping malformed row agent=%s platform=%s",
-                        agent_id, platform_str,
+                        "_init_multi_layer_network: skipping malformed row agent=%s platform=%s: %s",
+                        agent_id, platform_str, exc,
                     )
 
             self._multi_layer_networks[session_id] = network
