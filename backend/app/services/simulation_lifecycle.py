@@ -410,6 +410,11 @@ class SimulationLifecycleMixin:
         self._activation_rngs.pop(session_id, None)
         self._pending_arousal_deltas.pop(session_id, None)
 
+        # Multi-platform identity runtime state
+        self._multi_layer_networks.pop(session_id, None)
+        self._round_active_agents.pop(session_id, None)
+        self._agent_moderation_risks.pop(session_id, None)
+
         # kg_driven state
         self._kg_mode.pop(session_id, None)
         self._kg_sessions.pop(session_id, None)
