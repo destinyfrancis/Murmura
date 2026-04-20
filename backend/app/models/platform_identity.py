@@ -86,6 +86,12 @@ class PlatformIdentity:
     moderation_risk: float
 
     def __post_init__(self) -> None:
+        if not self.agent_id.strip():
+            raise ValueError("agent_id must not be empty")
+        if not self.handle.strip():
+            raise ValueError("handle must not be empty")
+        if self.audience_size < 0:
+            raise ValueError(f"audience_size must be >= 0, got {self.audience_size}")
         if len(self.activity_vector_24h) != _VECTOR_LEN:
             raise ValueError(
                 f"activity_vector_24h must have exactly {_VECTOR_LEN} elements, "
@@ -117,6 +123,8 @@ def build_platform_identity(
 
     Scales the template by base_activity_rate.
     """
+    if not (0.0 <= base_activity_rate <= 1.0):
+        raise ValueError(f"base_activity_rate must be in [0,1], got {base_activity_rate}")
     template = PLATFORM_ACTIVITY_TEMPLATES[platform]
     scaled = tuple(min(1.0, v * base_activity_rate) for v in template)
     return PlatformIdentity(
