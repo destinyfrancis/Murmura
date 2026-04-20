@@ -7,6 +7,7 @@ from backend.app.models.platform_identity import (
     PlatformType,
     build_platform_identity,
 )
+from backend.app.models.universal_agent_profile import UniversalAgentProfile
 
 
 def test_platform_identity_immutable():
@@ -102,9 +103,6 @@ def test_validation_rejects_out_of_range_values():
         PlatformIdentity(**{**base, "audience_size": -1})
     with pytest.raises(ValueError):
         build_platform_identity("a3", PlatformType.FORUM, "a3", base_activity_rate=-0.5)
-
-
-from backend.app.models.universal_agent_profile import UniversalAgentProfile
 
 
 def test_universal_agent_profile_has_platform_identities():
