@@ -187,6 +187,83 @@ class KGHooksMixin:
                 session_id,
             )
 
+    async def _init_multi_layer_network(self, session_id: str) -> None:
+        """Load platform_identities from DB and build a MultiLayerNetwork for this session.
+
+        Only runs for kg_driven sessions. Idempotent — skips if already initialised.
+        Also populates ``self._agent_moderation_risks[session_id]`` keyed by agent_id.
+        """
+        if not self._kg_mode.get(session_id):
+            return
+        if session_id in self._multi_layer_networks:
+            return
+        try:
+            from backend.app.models.platform_identity import PlatformIdentity, PlatformType  # noqa: PLC0415
+            from backend.app.services.multi_layer_network import MultiLayerNetwork  # noqa: PLC0415
+            from backend.app.utils.db import get_db  # noqa: PLC0415
+
+            async with get_db() as db:
+                cursor = await db.execute(
+                    """
+                    SELECT agent_id, platform, handle, anonymity_level,
+                           activity_vector_json, audience_size, tone_shift, moderation_risk
+                    FROM platform_identities
+                    WHERE session_id = ?
+                    """,
+                    (session_id,),
+                )
+                rows = await cursor.fetchall()
+
+            if not rows:
+                logger.debug(
+                    "_init_multi_layer_network: no platform_identities for session=%s — skipping",
+                    session_id,
+                )
+                return
+
+            network = MultiLayerNetwork()
+            mod_risks: dict[str, float] = {}
+
+            for row in rows:
+                agent_id, platform_str, handle, anon, vec_str, audience, tone, risk = row
+                try:
+                    platform = PlatformType(platform_str)
+                    vec = tuple(float(v) for v in str(vec_str).split(","))
+                    pi = PlatformIdentity(
+                        agent_id=str(agent_id),
+                        platform=platform,
+                        handle=str(handle),
+                        anonymity_level=float(anon),
+                        activity_vector_24h=vec,
+                        audience_size=int(audience),
+                        tone_shift=float(tone),
+                        moderation_risk=float(risk),
+                    )
+                    network.register_agent(pi)
+                    mod_risks[str(agent_id)] = max(
+                        mod_risks.get(str(agent_id), 0.0), float(risk)
+                    )
+                except Exception:
+                    logger.debug(
+                        "_init_multi_layer_network: skipping malformed row agent=%s platform=%s",
+                        agent_id, platform_str,
+                    )
+
+            self._multi_layer_networks[session_id] = network
+            self._agent_moderation_risks[session_id] = mod_risks
+
+            logger.info(
+                "_init_multi_layer_network: %d agents, %d rows for session=%s",
+                len(mod_risks),
+                len(rows),
+                session_id,
+            )
+        except Exception:
+            logger.exception(
+                "_init_multi_layer_network failed for session=%s — continuing without multi-layer network",
+                session_id,
+            )
+
     async def _process_supply_chain_cascade(self, session_id: str, round_number: int) -> None:
         """Group 3 periodic: propagate supply chain disruption through KG edges.
 
