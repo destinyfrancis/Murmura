@@ -699,16 +699,18 @@ class SimulationRunner(
     ) -> bool:
         """Return True if the agent is temporally active in this round.
 
-        Falls back to True (always active) when no profile is available,
-        ensuring backward compatibility with sessions created before Phase 1B.
+        When a MultiLayerNetwork is loaded for this session, selects a platform
+        for the agent and passes its PlatformIdentity to TemporalActivationService,
+        overriding the global activity vector with the platform-specific one.
+        Records the chosen platform in ``_round_active_agents[session_id]``.
         """
         profiles = self._activity_profiles.get(session_id)
         if not profiles:
-            return True  # No profiles loaded — always active
+            return True
 
         agent_data = profiles.get(username)
         if agent_data is None:
-            return True  # Unknown agent — always active
+            return True
 
         try:
             from backend.app.models.activity_profile import ActivityProfile  # noqa: PLC0415
@@ -722,18 +724,36 @@ class SimulationRunner(
             )
             rng = self._activation_rngs.get(session_id)
             if rng is None:
+                import random  # noqa: PLC0415
                 rng = random.Random(session_id)
                 self._activation_rngs[session_id] = rng
 
+            # Platform selection: use MultiLayerNetwork when available for this session.
+            platform_identity = None
+            network = self._multi_layer_networks.get(session_id)
+            if network is not None:
+                import random as _random  # noqa: PLC0415
+                hour = (8 + round_number) % 24
+                platform = network.select_platform_for_round(
+                    agent_id=username,
+                    hour=hour,
+                    rng=_random.Random(hash(f"{username}_{round_number}")),
+                )
+                if platform is not None:
+                    platform_identity = network.get_platform_identity(username, platform)
+                    if session_id not in self._round_active_agents:
+                        self._round_active_agents[session_id] = {}
+                    self._round_active_agents[session_id][username] = platform.value
+
             svc = TemporalActivationService()
-            return svc.should_activate(profile, round_number, rng)
+            return svc.should_activate(profile, round_number, rng, platform_identity=platform_identity)
         except Exception:
             logger.debug(
                 "Temporal activation check failed for %s round %d",
                 username,
                 round_number,
             )
-            return True  # Fail open
+            return True
 
     # ------------------------------------------------------------------
 
