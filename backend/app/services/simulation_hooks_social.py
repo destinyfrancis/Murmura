@@ -751,6 +751,73 @@ class SocialHooksMixin:
                 round_num,
             )
 
+    async def _select_active_platform(
+        self,
+        agent_id: str,
+        round_number: int,
+    ) -> str | None:
+        """Return the platform name this agent posts on for the given round.
+
+        Uses MultiLayerNetwork if initialized, falls back to None (single-layer mode).
+        """
+        try:
+            if not hasattr(self, "_multi_layer_network") or self._multi_layer_network is None:
+                return None
+            import random  # noqa: PLC0415
+            hour = (8 + round_number) % 24
+            platform = self._multi_layer_network.select_platform_for_round(
+                agent_id=agent_id,
+                hour=hour,
+                rng=random.Random(hash(f"{agent_id}_{round_number}")),
+            )
+            return platform.value if platform else None
+        except Exception:
+            logger.exception("_select_active_platform failed agent=%s", agent_id)
+            return None
+
+    async def _process_moderation(
+        self,
+        session_id: str,
+        round_number: int,
+    ) -> None:
+        """Run moderation events for agents that posted this round.
+
+        For each moderated agent, increments neuroticism in the emotional engine.
+        """
+        try:
+            from backend.app.services.moderation_engine import ModerationEngine  # noqa: PLC0415
+
+            if not hasattr(self, "_moderation_engine"):
+                self._moderation_engine = ModerationEngine()
+
+            if not hasattr(self, "_round_active_agents"):
+                return
+
+            import random  # noqa: PLC0415
+            rng = random.Random(hash(f"mod_{session_id}_{round_number}"))
+
+            for agent_id, platform in self._round_active_agents.items():
+                moderation_risk = getattr(self, "_agent_moderation_risks", {}).get(agent_id, 0.02)
+                event = self._moderation_engine.evaluate(
+                    agent_id=str(agent_id),
+                    platform=platform or "forum",
+                    moderation_risk=moderation_risk,
+                    rng=rng,
+                )
+                if event and hasattr(self, "_emotional_engine") and self._emotional_engine:
+                    await self._emotional_engine.apply_neuroticism_shock(
+                        session_id=session_id,
+                        agent_id=agent_id,
+                        delta=event.neuroticism_delta,
+                        reason=f"moderation_{event.event_type.value}",
+                    )
+                    logger.debug(
+                        "Moderation applied: agent=%s platform=%s delta=%.3f session=%s",
+                        agent_id, platform, event.neuroticism_delta, session_id,
+                    )
+        except Exception:
+            logger.exception("_process_moderation failed session=%s round=%d", session_id, round_number)
+
     async def _generate_emergence_scorecard(self, session_id: str) -> None:
         """Generate emergence scorecard at simulation completion."""
         try:
