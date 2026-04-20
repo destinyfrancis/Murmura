@@ -28,7 +28,7 @@ async def test_save_platform_identities_to_db_writes_rows():
     mock_db.__aenter__ = AsyncMock(return_value=mock_db)
     mock_db.__aexit__ = AsyncMock(return_value=False)
 
-    with patch("backend.app.services.kg_agent_factory.get_db", return_value=mock_db):
+    with patch("backend.app.utils.db.get_db", return_value=mock_db):
         factory = KGAgentFactory.__new__(KGAgentFactory)
         factory._graph_id = "sess-1234"
         await factory.save_platform_identities_to_db(
@@ -40,6 +40,7 @@ async def test_save_platform_identities_to_db_writes_rows():
     call_args = mock_db.execute.call_args_list[0]
     sql = call_args[0][0]
     assert "platform_identities" in sql
+    assert "activity_vector_json" in sql
     params = call_args[0][1]
     assert params[0] == "sess-1234"
     assert params[1] == "abc"

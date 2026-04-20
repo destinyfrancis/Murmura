@@ -24,7 +24,6 @@ from backend.app.models.platform_identity import (
     build_platform_identity,
 )
 from backend.app.models.universal_agent_profile import UniversalAgentProfile
-from backend.app.utils.db import get_db
 from backend.app.utils.llm_client import LLMClient, get_step_provider_model
 from backend.app.utils.logger import get_logger
 from backend.prompts.agent_generation_prompts import (
@@ -309,7 +308,7 @@ class KGAgentFactory:
     async def save_platform_identities_to_db(
         self,
         session_id: str,
-        identities: list,
+        identities: list[PlatformIdentity],
     ) -> None:
         """Persist platform identities to the ``platform_identities`` DB table.
 
@@ -319,13 +318,15 @@ class KGAgentFactory:
         if not identities:
             return
         try:
+            from backend.app.utils.db import get_db  # noqa: PLC0415
+
             async with get_db() as db:
                 for pi in identities:
                     await db.execute(
                         """
                         INSERT OR REPLACE INTO platform_identities
                             (session_id, agent_id, platform, handle,
-                             anonymity_level, activity_vector_24h,
+                             anonymity_level, activity_vector_json,
                              audience_size, tone_shift, moderation_risk)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
