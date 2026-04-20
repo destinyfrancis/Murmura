@@ -102,3 +102,44 @@ def test_validation_rejects_out_of_range_values():
         PlatformIdentity(**{**base, "audience_size": -1})
     with pytest.raises(ValueError):
         build_platform_identity("a3", PlatformType.FORUM, "a3", base_activity_rate=-0.5)
+
+
+from backend.app.models.universal_agent_profile import UniversalAgentProfile
+
+
+def test_universal_agent_profile_has_platform_identities():
+    pi_tw = build_platform_identity("agent_x", PlatformType.TWITTER, "@agent_x", base_activity_rate=0.7)
+    pi_rc = build_platform_identity("agent_x", PlatformType.REDDIT, "u/agent_x", base_activity_rate=0.6)
+
+    profile = UniversalAgentProfile(
+        id="agent_x",
+        name="Test Agent",
+        role="Analyst",
+        entity_type="Person",
+        persona="A careful analyst.",
+        goals=("understand trends",),
+        capabilities=("data analysis",),
+        stance_axes=(("support", 0.6),),
+        relationships=(),
+        kg_node_id="node_001",
+        platform_identities=(pi_tw, pi_rc),
+    )
+    assert len(profile.platform_identities) == 2
+    assert profile.get_platform_identity(PlatformType.TWITTER) == pi_tw
+    assert profile.get_platform_identity(PlatformType.FORUM) is None
+
+
+def test_universal_agent_profile_defaults_empty_platform_identities():
+    profile = UniversalAgentProfile(
+        id="agent_y",
+        name="Y",
+        role="r",
+        entity_type="Person",
+        persona="p",
+        goals=(),
+        capabilities=(),
+        stance_axes=(),
+        relationships=(),
+        kg_node_id="n1",
+    )
+    assert profile.platform_identities == ()

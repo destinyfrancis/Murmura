@@ -10,6 +10,8 @@ import hashlib
 import re
 from dataclasses import dataclass
 
+from backend.app.models.platform_identity import PlatformIdentity, PlatformType
+
 
 @dataclass(frozen=True)
 class UniversalAgentProfile:
@@ -78,6 +80,10 @@ class UniversalAgentProfile:
     """How this agent behaves differently across platforms.
     e.g. 'Facebook: 長文理性分析; Instagram: 短句情緒化+標籤'"""
 
+    platform_identities: tuple[PlatformIdentity, ...] = ()
+    """Structured per-platform identities. One entry per platform this agent uses.
+    Replaces the free-text platform_persona string for runtime behaviour."""
+
     # ------------------------------------------------------------------
     # Behavioral params (stakeholder identification + stochastic activation)
     # ------------------------------------------------------------------
@@ -144,6 +150,20 @@ class UniversalAgentProfile:
             if name == axis:
                 return value
         return default
+
+    def get_platform_identity(self, platform: PlatformType) -> PlatformIdentity | None:
+        """Return the PlatformIdentity for the given platform, or None.
+
+        Args:
+            platform: The platform type to look up.
+
+        Returns:
+            The PlatformIdentity for this platform, or None if not found.
+        """
+        for pi in self.platform_identities:
+            if pi.platform == platform:
+                return pi
+        return None
 
 
 # ---------------------------------------------------------------------------
