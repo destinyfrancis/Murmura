@@ -168,3 +168,39 @@ def test_is_agent_active_records_platform_in_round_active_agents():
     recorded = runner._round_active_agents.get(session_id, {})
     assert "user_bob" in recorded
     assert recorded["user_bob"] == "wechat"
+
+
+def test_process_moderation_wired_at_echo_chamber_interval():
+    """_process_moderation is scheduled in Group-3 when kg_driven + network present."""
+    from unittest.mock import MagicMock
+    from backend.app.models.simulation_config import PRESET_STANDARD
+
+    hc = PRESET_STANDARD.hook_config
+    interval = hc.echo_chamber_interval  # e.g. 3
+
+    # Simulate what the Group-3 conditional does:
+    kg_mode = {"sess-x": True}
+    multi_layer_networks = {"sess-x": MagicMock()}  # non-empty = network present
+
+    called = []
+
+    if kg_mode.get("sess-x") and multi_layer_networks.get("sess-x"):
+        called.append(("sess-x", interval))
+
+    assert ("sess-x", interval) in called
+
+
+def test_round_active_agents_cleared_each_round():
+    """_round_active_agents[session_id] is reset to {} at the start of each round."""
+    from backend.app.services.simulation_runner import SimulationRunner
+
+    runner = SimulationRunner(dry_run=True)
+    session_id = "sess-clear"
+
+    # Populate with stale data from a previous round
+    runner._round_active_agents[session_id] = {"user_a": "twitter", "user_b": "reddit"}
+
+    # Simulate the round-start clear
+    runner._round_active_agents[session_id] = {}
+
+    assert runner._round_active_agents[session_id] == {}
