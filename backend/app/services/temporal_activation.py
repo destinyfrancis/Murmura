@@ -15,6 +15,7 @@ from __future__ import annotations
 import random
 
 from backend.app.models.activity_profile import ActivityProfile, Chronotype
+from backend.app.models.platform_identity import PlatformIdentity
 
 # ---------------------------------------------------------------------------
 # Hourly activity templates (relative probabilities in [0.0, 1.0])
@@ -189,8 +190,12 @@ class TemporalActivationService:
         profile: ActivityProfile,
         round_number: int,
         rng: random.Random,
+        platform_identity: PlatformIdentity | None = None,
     ) -> bool:
         """Return True if the agent should act in this round.
+
+        If platform_identity is provided, its activity_vector_24h overrides
+        the global ActivityProfile vector for this round.
 
         Performs a Bernoulli draw with p derived from the agent's 24-dim
         activity vector.  During primetime hours a ``primetime_multiplier``
@@ -198,7 +203,12 @@ class TemporalActivationService:
         clamped to [_MIN_ACTIVATION_P, 1.0].
         """
         hour = self.round_to_hour(round_number)
-        base_p = profile.probability_at_hour(hour)
+
+        if platform_identity is not None:
+            base_p = platform_identity.probability_at_hour(hour)
+        else:
+            base_p = profile.probability_at_hour(hour)
+
         multiplier = self._primetime_multiplier if hour in self._primetime_hours else 1.0
         p = min(1.0, max(_MIN_ACTIVATION_P, base_p * multiplier))
         return rng.random() < p
