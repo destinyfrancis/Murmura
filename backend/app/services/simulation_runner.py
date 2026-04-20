@@ -313,6 +313,8 @@ class SimulationRunner(
             )
             rows = []
         self._round_profiles[session_id] = rows
+        # Clear per-round platform selections (populated by _is_agent_active).
+        self._round_active_agents[session_id] = {}
 
         # Populate RoundCache with agent data keyed by oasis_username for O(1) lookups
         try:
@@ -481,6 +483,11 @@ class SimulationRunner(
                 session_id,
                 self._process_echo_chambers(session_id, round_num),
             )
+            if self._kg_mode.get(session_id) and self._multi_layer_networks.get(session_id):
+                self._create_tracked_task(
+                    session_id,
+                    self._process_moderation(session_id, round_num),
+                )
         if round_num > 0 and round_num % hc.macro_feedback_interval == 0:
             self._create_tracked_task(
                 session_id,
