@@ -90,3 +90,17 @@ def test_moderation_engine_integration_smoke():
     for ev in events:
         assert 0 < ev.neuroticism_delta <= 0.1
         assert ev.platform == "wechat"
+
+
+import asyncio
+import types
+
+
+def test_social_hooks_mixin_has_platform_methods():
+    """Verify SocialHooksMixin has the new methods."""
+    from backend.app.services.simulation_hooks_social import SocialHooksMixin
+
+    assert hasattr(SocialHooksMixin, "_select_active_platform")
+    assert hasattr(SocialHooksMixin, "_process_moderation")
+    assert asyncio.iscoroutinefunction(SocialHooksMixin._select_active_platform)
+    assert asyncio.iscoroutinefunction(SocialHooksMixin._process_moderation)
