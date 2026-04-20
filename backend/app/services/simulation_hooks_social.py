@@ -753,19 +753,18 @@ class SocialHooksMixin:
 
     async def _select_active_platform(
         self,
+        session_id: str,
         agent_id: str,
         round_number: int,
     ) -> str | None:
-        """Return the platform name this agent posts on for the given round.
-
-        Uses MultiLayerNetwork if initialized, falls back to None (single-layer mode).
-        """
+        """Return the platform name this agent posts on for the given round."""
         try:
-            if not hasattr(self, "_multi_layer_network") or self._multi_layer_network is None:
+            network = self._multi_layer_networks.get(session_id) if hasattr(self, "_multi_layer_networks") else None
+            if network is None:
                 return None
             import random  # noqa: PLC0415
             hour = (8 + round_number) % 24
-            platform = self._multi_layer_network.select_platform_for_round(
+            platform = network.select_platform_for_round(
                 agent_id=agent_id,
                 hour=hour,
                 rng=random.Random(hash(f"{agent_id}_{round_number}")),
@@ -780,24 +779,32 @@ class SocialHooksMixin:
         session_id: str,
         round_number: int,
     ) -> None:
-        """Run moderation events for agents that posted this round.
-
-        For each moderated agent, increments neuroticism in the emotional engine.
-        """
+        """Run moderation events for agents that posted this round."""
         try:
             from backend.app.services.moderation_engine import ModerationEngine  # noqa: PLC0415
 
             if not hasattr(self, "_moderation_engine"):
                 self._moderation_engine = ModerationEngine()
 
-            if not hasattr(self, "_round_active_agents"):
+            round_agents = (
+                self._round_active_agents.get(session_id, {})
+                if hasattr(self, "_round_active_agents")
+                else {}
+            )
+            if not round_agents:
                 return
+
+            session_risks = (
+                self._agent_moderation_risks.get(session_id, {})
+                if hasattr(self, "_agent_moderation_risks")
+                else {}
+            )
 
             import random  # noqa: PLC0415
             rng = random.Random(hash(f"mod_{session_id}_{round_number}"))
 
-            for agent_id, platform in self._round_active_agents.items():
-                moderation_risk = getattr(self, "_agent_moderation_risks", {}).get(agent_id, 0.02)
+            for agent_id, platform in round_agents.items():
+                moderation_risk = session_risks.get(agent_id, 0.02)
                 event = self._moderation_engine.evaluate(
                     agent_id=str(agent_id),
                     platform=platform or "forum",

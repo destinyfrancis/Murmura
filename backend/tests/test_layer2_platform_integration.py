@@ -93,3 +93,78 @@ async def test_init_multi_layer_network_skips_non_kg_driven():
     await KGHooksMixin._init_multi_layer_network(instance, "sess-xyz")
 
     assert "sess-xyz" not in instance._multi_layer_networks
+
+
+def test_is_agent_active_uses_platform_identity_when_network_available():
+    """_is_agent_active() picks a PlatformIdentity from MultiLayerNetwork and passes it to should_activate."""
+    from backend.app.services.simulation_runner import SimulationRunner
+    from backend.app.models.platform_identity import PlatformIdentity, PlatformType
+    from backend.app.services.multi_layer_network import MultiLayerNetwork
+
+    runner = SimulationRunner(dry_run=True)
+    session_id = "test-sess"
+
+    pi = PlatformIdentity(
+        agent_id="user_alice",
+        platform=PlatformType.TWITTER,
+        handle="@alice",
+        anonymity_level=0.0,
+        activity_vector_24h=tuple([1.0] * 24),
+        audience_size=100,
+        tone_shift=0.0,
+        moderation_risk=0.02,
+    )
+    network = MultiLayerNetwork()
+    network.register_agent(pi)
+    runner._multi_layer_networks[session_id] = network
+
+    # Base rate 0 would never activate without platform override
+    runner._activity_profiles[session_id] = {
+        "user_alice": {
+            "agent_id": 1,
+            "chronotype": "standard",
+            "activity_vector": [0.0] * 24,
+            "base_activity_rate": 0.0,
+        }
+    }
+
+    result = runner._is_agent_active(session_id, "user_alice", round_number=8)
+    # Platform vector (all 1.0) overrides zero base rate — should activate
+    assert result is True
+
+
+def test_is_agent_active_records_platform_in_round_active_agents():
+    """_is_agent_active() writes the chosen platform to _round_active_agents[session_id]."""
+    from backend.app.services.simulation_runner import SimulationRunner
+    from backend.app.models.platform_identity import PlatformIdentity, PlatformType
+    from backend.app.services.multi_layer_network import MultiLayerNetwork
+
+    runner = SimulationRunner(dry_run=True)
+    session_id = "test-sess-2"
+
+    pi = PlatformIdentity(
+        agent_id="user_bob",
+        platform=PlatformType.WECHAT,
+        handle="bob_wc",
+        anonymity_level=0.0,
+        activity_vector_24h=tuple([1.0] * 24),
+        audience_size=300,
+        tone_shift=0.0,
+        moderation_risk=0.03,
+    )
+    network = MultiLayerNetwork()
+    network.register_agent(pi)
+    runner._multi_layer_networks[session_id] = network
+    runner._activity_profiles[session_id] = {
+        "user_bob": {
+            "agent_id": 2,
+            "chronotype": "standard",
+            "activity_vector": [1.0] * 24,
+            "base_activity_rate": 1.0,
+        }
+    }
+
+    runner._is_agent_active(session_id, "user_bob", round_number=10)
+    recorded = runner._round_active_agents.get(session_id, {})
+    assert "user_bob" in recorded
+    assert recorded["user_bob"] == "wechat"
