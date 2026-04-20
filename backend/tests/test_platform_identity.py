@@ -141,3 +141,44 @@ def test_universal_agent_profile_defaults_empty_platform_identities():
         kg_node_id="n1",
     )
     assert profile.platform_identities == ()
+
+
+from backend.app.services.kg_agent_factory import _assign_platform_identities
+
+
+def test_assign_platform_identities_person_returns_identities():
+    identities = _assign_platform_identities(
+        agent_id="agent_z",
+        entity_type="Person",
+        communication_style="formal_academic",
+        activity_level=0.7,
+    )
+    assert isinstance(identities, tuple)
+    assert len(identities) >= 1
+    platforms = {pi.platform for pi in identities}
+    assert PlatformType.TWITTER in platforms or PlatformType.REDDIT in platforms
+
+
+def test_assign_platform_identities_casual_gen_z():
+    identities = _assign_platform_identities(
+        agent_id="student_01",
+        entity_type="Person",
+        communication_style="casual_gen_z",
+        activity_level=0.8,
+    )
+    platforms = {pi.platform for pi in identities}
+    assert PlatformType.REDDIT in platforms
+    assert PlatformType.FORUM in platforms
+
+
+def test_assign_platform_identities_organization():
+    identities = _assign_platform_identities(
+        agent_id="org_x",
+        entity_type="Organization",
+        communication_style="strategic_institutional",
+        activity_level=0.5,
+    )
+    platforms = {pi.platform for pi in identities}
+    assert PlatformType.NEWS in platforms or PlatformType.TWITTER in platforms
+    for pi in identities:
+        assert pi.anonymity_level < 0.5

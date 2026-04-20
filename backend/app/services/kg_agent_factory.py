@@ -18,6 +18,11 @@ import json
 import os
 from typing import Any
 
+from backend.app.models.platform_identity import (
+    PlatformIdentity,
+    PlatformType,
+    build_platform_identity,
+)
 from backend.app.models.relationship_state import AttachmentStyle
 from backend.app.models.universal_agent_profile import UniversalAgentProfile
 from backend.app.services.relationship_engine import infer_attachment_style
@@ -59,6 +64,79 @@ _AGENT_ELIGIBLE_TYPES: frozenset[str] = frozenset(
 
 # Fallback minimum agents when all LLM calls fail
 _MIN_FALLBACK_AGENTS = 1
+
+# Platform presets by entity type: (platform, base_activity_rate, anonymity_level)
+_ENTITY_PLATFORM_MAP: dict[str, list[tuple[PlatformType, float, float]]] = {
+    "Person": [
+        (PlatformType.TWITTER, 0.7, 0.1),
+        (PlatformType.REDDIT, 0.5, 0.3),
+        (PlatformType.WECHAT, 0.6, 0.0),
+    ],
+    "Organization": [
+        (PlatformType.TWITTER, 0.8, 0.0),
+        (PlatformType.NEWS, 0.6, 0.0),
+    ],
+    "MediaOutlet": [
+        (PlatformType.TWITTER, 0.9, 0.0),
+        (PlatformType.NEWS, 0.95, 0.0),
+    ],
+    "PoliticalFigure": [
+        (PlatformType.TWITTER, 0.85, 0.0),
+        (PlatformType.NEWS, 0.7, 0.0),
+        (PlatformType.WECHAT, 0.4, 0.0),
+    ],
+    "Country": [
+        (PlatformType.NEWS, 0.9, 0.0),
+        (PlatformType.TWITTER, 0.7, 0.0),
+    ],
+}
+
+_CASUAL_STYLES: frozenset[str] = frozenset({"casual_gen_z", "informal_social", "emotional_expressive"})
+
+_MODERATION_RISK_BY_ENTITY: dict[str, float] = {
+    "Person": 0.03,
+    "Organization": 0.005,
+    "MediaOutlet": 0.002,
+    "PoliticalFigure": 0.08,
+    "Country": 0.001,
+}
+
+
+def _assign_platform_identities(
+    agent_id: str,
+    entity_type: str,
+    communication_style: str,
+    activity_level: float,
+) -> tuple[PlatformIdentity, ...]:
+    """Generate platform identities for an agent based on entity type and communication style."""
+    presets = _ENTITY_PLATFORM_MAP.get(entity_type, _ENTITY_PLATFORM_MAP["Person"])
+
+    if communication_style in _CASUAL_STYLES and entity_type == "Person":
+        presets = [
+            (PlatformType.TWITTER, 0.75, 0.15),
+            (PlatformType.REDDIT, 0.70, 0.40),
+            (PlatformType.FORUM, 0.55, 0.35),
+            (PlatformType.WECHAT, 0.50, 0.05),
+        ]
+
+    mod_risk = _MODERATION_RISK_BY_ENTITY.get(entity_type, 0.03)
+
+    identities = []
+    for platform, base_rate, anonymity in presets:
+        effective_rate = min(1.0, base_rate * activity_level * 2)
+        identities.append(
+            build_platform_identity(
+                agent_id=agent_id,
+                platform=platform,
+                handle=f"{platform.value}_{agent_id[:12]}",
+                base_activity_rate=max(0.01, effective_rate),
+                anonymity_level=anonymity,
+                audience_size=int(100 * activity_level * (2.0 if platform == PlatformType.TWITTER else 1.0)),
+                tone_shift=0.05 if anonymity > 0.3 else 0.0,
+                moderation_risk=mod_risk,
+            )
+        )
+    return tuple(identities)
 
 
 async def _load_persona_keys(graph_id: str) -> list[str]:
@@ -634,24 +712,35 @@ class KGAgentFactory:
             goals = tuple(str(g) for g in raw.get("goals", []))
             capabilities = tuple(str(c) for c in raw.get("capabilities", []))
 
+            agent_id = str(raw["id"])
+            entity_type = str(raw["entity_type"])
+            activity_level = _clamp(float(raw.get("activity_level", 0.5)))
+            communication_style = str(raw.get("communication_style", ""))
+
             return UniversalAgentProfile(
-                id=str(raw["id"]),
+                id=agent_id,
                 name=str(raw["name"]),
                 role=str(raw["role"]),
-                entity_type=str(raw["entity_type"]),
+                entity_type=entity_type,
                 persona=str(raw["persona"]),
                 goals=goals,
                 capabilities=capabilities,
                 stance_axes=stance_axes,
                 relationships=relationships,
                 kg_node_id=str(raw.get("kg_node_id", raw["id"])),
-                activity_level=_clamp(float(raw.get("activity_level", 0.5))),
+                activity_level=activity_level,
                 influence_weight=_clamp(float(raw.get("influence_weight", 1.0)), 0.0, 3.0),
                 openness=_clamp(float(raw.get("openness", 0.5))),
                 conscientiousness=_clamp(float(raw.get("conscientiousness", 0.5))),
                 extraversion=_clamp(float(raw.get("extraversion", 0.5))),
                 agreeableness=_clamp(float(raw.get("agreeableness", 0.5))),
                 neuroticism=_clamp(float(raw.get("neuroticism", 0.5))),
+                platform_identities=_assign_platform_identities(
+                    agent_id=agent_id,
+                    entity_type=entity_type,
+                    communication_style=communication_style,
+                    activity_level=activity_level,
+                ),
             )
 
         except (KeyError, ValueError, TypeError) as exc:
