@@ -8,6 +8,7 @@ from backend.app.models.platform_identity import (
     build_platform_identity,
 )
 from backend.app.models.universal_agent_profile import UniversalAgentProfile
+from backend.app.services.kg_agent_factory import _assign_platform_identities
 
 
 def test_platform_identity_immutable():
@@ -141,9 +142,6 @@ def test_universal_agent_profile_defaults_empty_platform_identities():
         kg_node_id="n1",
     )
     assert profile.platform_identities == ()
-
-
-from backend.app.services.kg_agent_factory import _assign_platform_identities
 
 
 def test_assign_platform_identities_person_returns_identities():
