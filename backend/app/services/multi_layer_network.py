@@ -101,8 +101,8 @@ class MultiLayerNetwork:
     def get_platform_identity(
         self,
         agent_id: str,
-        platform: "PlatformType",
-    ) -> "PlatformIdentity | None":
+        platform: PlatformType,
+    ) -> PlatformIdentity | None:
         """Return the PlatformIdentity for agent_id on platform, or None."""
         return self._agent_platforms.get(agent_id, {}).get(platform)
 

@@ -724,7 +724,6 @@ class SimulationRunner(
             )
             rng = self._activation_rngs.get(session_id)
             if rng is None:
-                import random  # noqa: PLC0415
                 rng = random.Random(session_id)
                 self._activation_rngs[session_id] = rng
 
@@ -732,12 +731,11 @@ class SimulationRunner(
             platform_identity = None
             network = self._multi_layer_networks.get(session_id)
             if network is not None:
-                import random as _random  # noqa: PLC0415
                 hour = (8 + round_number) % 24
                 platform = network.select_platform_for_round(
                     agent_id=username,
                     hour=hour,
-                    rng=_random.Random(hash(f"{username}_{round_number}")),
+                    rng=random.Random(hash(f"{username}_{round_number}")),
                 )
                 if platform is not None:
                     platform_identity = network.get_platform_identity(username, platform)
