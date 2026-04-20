@@ -23,9 +23,7 @@ from backend.app.models.platform_identity import (
     PlatformType,
     build_platform_identity,
 )
-from backend.app.models.relationship_state import AttachmentStyle
 from backend.app.models.universal_agent_profile import UniversalAgentProfile
-from backend.app.services.relationship_engine import infer_attachment_style
 from backend.app.utils.llm_client import LLMClient, get_step_provider_model
 from backend.app.utils.logger import get_logger
 from backend.prompts.agent_generation_prompts import (
