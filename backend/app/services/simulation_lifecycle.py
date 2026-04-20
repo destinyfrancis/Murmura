@@ -174,6 +174,8 @@ class SimulationLifecycleMixin:
 
         # Phase 1B: Load temporal activity profiles for this session.
         self._load_activity_profiles(session_id)
+        # Multi-platform identity: build per-session MultiLayerNetwork from persisted identities.
+        await self._init_multi_layer_network(session_id)
 
         # Write the full config (without API key) to a session-specific file.
         full_config = _build_full_config(config, session_id)

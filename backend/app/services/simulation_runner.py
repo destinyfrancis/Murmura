@@ -128,6 +128,12 @@ class SimulationRunner(
         # Phase 4D: optional shard coordinator for large-scale subprocess sharding
         # Activated only when DB_SHARDING_ENABLED=true env var is set.
         self._shard_coordinators: dict[str, Any] = {}
+        # Multi-platform identity runtime state (populated by _init_multi_layer_network)
+        self._multi_layer_networks: dict[str, Any] = {}
+        # Per-session: agent_id → platform string for the current round
+        self._round_active_agents: dict[str, dict[str, str]] = {}
+        # Per-session: agent_id → max moderation_risk across that agent's platforms
+        self._agent_moderation_risks: dict[str, dict[str, float]] = {}
         self._init_batch_writer()
 
     def _init_batch_writer(self) -> None:
