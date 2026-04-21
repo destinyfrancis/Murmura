@@ -100,7 +100,5 @@ def test_social_hooks_mixin_has_platform_methods():
     """Verify SocialHooksMixin has the new methods."""
     from backend.app.services.simulation_hooks_social import SocialHooksMixin
 
-    assert hasattr(SocialHooksMixin, "_select_active_platform")
     assert hasattr(SocialHooksMixin, "_process_moderation")
-    assert asyncio.iscoroutinefunction(SocialHooksMixin._select_active_platform)
     assert asyncio.iscoroutinefunction(SocialHooksMixin._process_moderation)

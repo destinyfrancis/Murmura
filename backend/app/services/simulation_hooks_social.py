@@ -751,29 +751,6 @@ class SocialHooksMixin:
                 round_num,
             )
 
-    async def _select_active_platform(
-        self,
-        session_id: str,
-        agent_id: str,
-        round_number: int,
-    ) -> str | None:
-        """Return the platform name this agent posts on for the given round."""
-        try:
-            network = self._multi_layer_networks.get(session_id) if hasattr(self, "_multi_layer_networks") else None
-            if network is None:
-                return None
-            import random  # noqa: PLC0415
-            hour = (8 + round_number) % 24
-            platform = network.select_platform_for_round(
-                agent_id=agent_id,
-                hour=hour,
-                rng=random.Random(hash(f"{agent_id}_{round_number}")),
-            )
-            return platform.value if platform else None
-        except Exception:
-            logger.exception("_select_active_platform failed agent=%s", agent_id)
-            return None
-
     async def _process_moderation(
         self,
         session_id: str,

@@ -21,6 +21,7 @@ import os
 import random
 import random as _random
 import time as _time
+import zlib
 from collections import defaultdict
 from collections.abc import Callable, Coroutine
 from pathlib import Path
@@ -742,7 +743,7 @@ class SimulationRunner(
                 platform = network.select_platform_for_round(
                     agent_id=username,
                     hour=hour,
-                    rng=random.Random(hash(f"{username}_{round_number}")),
+                    rng=random.Random(zlib.crc32(f"{username}_{round_number}".encode())),
                 )
                 if platform is not None:
                     platform_identity = network.get_platform_identity(username, platform)
