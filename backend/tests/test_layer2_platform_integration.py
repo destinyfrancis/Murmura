@@ -204,3 +204,57 @@ def test_round_active_agents_cleared_each_round():
     runner._round_active_agents[session_id] = {}
 
     assert runner._round_active_agents[session_id] == {}
+
+
+def test_generate_agents_csv_includes_platform_notes():
+    """generate_agents_csv() appends platform notes to user_char when platform_identities present."""
+    import csv
+    import os
+    import tempfile
+
+    from backend.app.models.platform_identity import PlatformIdentity, PlatformType
+    from backend.app.models.universal_agent_profile import UniversalAgentProfile
+    from backend.app.services.kg_agent_factory import KGAgentFactory
+
+    pi = PlatformIdentity(
+        agent_id="node_abc",
+        platform=PlatformType.TWITTER,
+        handle="@alice_tw",
+        anonymity_level=0.1,
+        activity_vector_24h=tuple([0.5] * 24),
+        audience_size=500,
+        tone_shift=0.2,
+        moderation_risk=0.05,
+    )
+    profile = UniversalAgentProfile(
+        id="node_abc",
+        name="Alice",
+        role="Tech blogger",
+        entity_type="Person",
+        persona="A tech blogger who writes about AI and society.",
+        goals=("spread awareness",),
+        capabilities=("write articles", "post on social media"),
+        stance_axes=(("pro_tech", 0.8),),
+        relationships=(),
+        kg_node_id="node_abc",
+        platform_identities=(pi,),
+    )
+
+    factory = KGAgentFactory.__new__(KGAgentFactory)
+    factory._graph_id = "g-1"
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        tmp_path = f.name
+    try:
+        factory.generate_agents_csv([profile], tmp_path)
+        with open(tmp_path, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+    finally:
+        os.unlink(tmp_path)
+
+    assert len(rows) == 1
+    user_char = rows[0]["user_char"]
+    assert "twitter" in user_char.lower()
+    assert "@alice_tw" in user_char
+    assert "[platforms:" in user_char
