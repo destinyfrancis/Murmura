@@ -1,6 +1,10 @@
 """Layer 2 integration tests — platform identity DB persistence and network init."""
 from __future__ import annotations
 
+import csv
+import os
+import tempfile
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -208,10 +212,6 @@ def test_round_active_agents_cleared_each_round():
 
 def test_generate_agents_csv_includes_platform_notes():
     """generate_agents_csv() appends platform notes to user_char when platform_identities present."""
-    import csv
-    import os
-    import tempfile
-
     from backend.app.models.platform_identity import PlatformIdentity, PlatformType
     from backend.app.models.universal_agent_profile import UniversalAgentProfile
     from backend.app.services.kg_agent_factory import KGAgentFactory
