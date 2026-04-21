@@ -298,7 +298,7 @@ class KGAgentFactory:
                     f"{pi.platform.value}:{pi.handle}(anon={pi.anonymity_level:.1f},tone_shift={pi.tone_shift:+.2f})"
                     for pi in p.platform_identities
                 )
-                oasis_row["user_char"] = f"{oasis_row['user_char']} [platforms: {platform_notes}]"
+                oasis_row = {**oasis_row, "user_char": f"{oasis_row['user_char']} [platforms: {platform_notes}]"}
             # OASIS agents_generator expects a 'description' column alongside user_char
             oasis_row["description"] = oasis_row["user_char"]
             rows.append(oasis_row)
