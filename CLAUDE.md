@@ -37,7 +37,7 @@ cp .env.example .env && docker compose up -d   # Live mode (Requires API key)
 docker compose --profile observability up -d   # + Jaeger at 16686
 
 # ── Testing ─────────────────────────────────────────────────────────────────
-make test                # Unit only (~2700 tests, ~20s)
+make test                # Unit only (~2914 tests, ~50s)
 make test-int            # Integration only
 make test-all            # Full suite (~65s)
 make test-cov            # Unit + HTML coverage report (htmlcov/)
@@ -111,7 +111,10 @@ Step 1: Graph Build → Step 2: Env Setup → Step 3: Simulation → Step 4: Rep
 | `SimulationWorker` | Polling Job Queue; `enqueue()`/`process()`; handles `interrupted` zombies |
 | `OASISCompatibility` | `oasis_compatibility.py`: Graceful UI degradation if Python 3.12+ or OASIS missing |
 | `ZeroConfigService` | `detect_mode_async()`: HK keyword fast-path + LLM fallback |
-| `KGAgentFactory` | filter → profile → fingerprint; `create(graph_id)`; `mark_stakeholders()` |
+| `KGAgentFactory` | filter → profile → fingerprint; `create(graph_id)`; `mark_stakeholders()`; `save_platform_identities_to_db()` |
+| `MultiLayerNetwork` | Per-platform edge sets; `register_agent(pi)`; `select_platform_for_round(agent_id, hour, rng)`; `get_platform_identity(agent_id, platform)` |
+| `ModerationEngine` | Per-round shadow-ban/delete events; `evaluate(agent_id, platform, risk, rng)` → `ModerationEvent \| None`; feeds neuroticism shock |
+| `TemporalActivationService` | `should_activate(profile, round, rng, platform_identity=None)` — uses platform vector when provided |
 | `CompanyFactory` | Bulk generates B2B company profiles based on sector/size distributions |
 | `SupplyChainBuilder` | Generates deterministic supply chain graphs (`REL_SUPPLIES_TO`, `REL_FINANCES`) between generated companies |
 | `CognitiveAgentEngine` | Stochastic LLM deliberation → `DeliberationResult`; Big Five + attachment |
@@ -138,7 +141,7 @@ Step 1: Graph Build → Step 2: Env Setup → Step 3: Simulation → Step 4: Rep
 - **Pre-Group-1:** feed ranking; kg_driven: world event generation†
 - **Group 1 (parallel):** memories, trust, emotional state*, relationship states†*
 - **Group 2 (sequential):** decisions, belief update*; kg_driven: strategic planning† + LLM deliberation† + debate†(3) + propagation†
-- **Group 3 (periodic):** echo chambers(3), virality*(3), macro(5), polarization(5), TDMI(5); kg_driven: faction+tipping(3)†, relationship lifecycle(3)†*
+- **Group 3 (periodic):** echo chambers(3), virality*(3), macro(5), polarization(5), TDMI(5); kg_driven: faction+tipping(3)†, relationship lifecycle(3)†*, **moderation events(3)†**
 
 `*` emergence_enabled only · `†` kg_driven only · `(N)` every N rounds
 
@@ -168,6 +171,7 @@ Step 1: Graph Build → Step 2: Env Setup → Step 3: Simulation → Step 4: Rep
 | Emergence | `network_events`, `agent_feeds`, `belief_states`, `emotional_states`, `polarization_snapshots`, `emergence_metrics` |
 | Auth | `users`, `workspaces`, `workspace_members`, `comments` |
 | Cognitive Theater | `cognitive_fingerprints`, `world_events`, `faction_snapshots_v2`, `tipping_points`, `debate_rounds` |
+| Multi-Platform | `platform_identities` (session_id, agent_id, platform UNIQUE; `activity_vector_json` CSV-encoded), `platform_actions` |
 | Config | `app_settings` (runtime key-value store for Settings page) |
 
 ---
