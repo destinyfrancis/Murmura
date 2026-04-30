@@ -1,4 +1,4 @@
-"""Statistical validation framework for the MurmuraScope prediction engine.
+"""Statistical validation framework for the Murmura prediction engine.
 
 Provides stationarity testing (ADF + KPSS dual test), Granger causality
 analysis, forecast accuracy metrics (MAPE, RMSE, Theil's U), and a full

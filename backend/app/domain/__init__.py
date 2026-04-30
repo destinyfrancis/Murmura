@@ -1,4 +1,4 @@
-"""Domain pack abstractions for MurmuraScope."""
+"""Domain pack abstractions for Murmura."""
 
 import backend.app.domain.global_macro  # noqa: F401
 import backend.app.domain.public_narrative  # noqa: F401

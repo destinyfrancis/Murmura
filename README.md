@@ -1,4 +1,4 @@
-# MurmuraScope
+# Murmura
 
 <div align="center">
 
@@ -19,10 +19,10 @@
 ## Overview · 概覽
 
 **[EN]**
-MurmuraScope is a multi-agent social simulation engine that transforms any seed text — a news article, a geopolitical brief, a novel excerpt, a company memo — into a dynamic world populated by AI agents. Each agent has a distinct personality, belief system, and memory. They interact, form factions, debate, spread information, and respond to shocks over simulated time, producing statistically rigorous forecasts of collective behaviour.
+Murmura is a multi-agent social simulation engine that transforms any seed text — a news article, a geopolitical brief, a novel excerpt, a company memo — into a dynamic world populated by AI agents. Each agent has a distinct personality, belief system, and memory. They interact, form factions, debate, spread information, and respond to shocks over simulated time, producing statistically rigorous forecasts of collective behaviour.
 
 **[繁中]**
-MurmuraScope 是一個多智能體社會模擬引擎，能將任意 seed text（新聞文章、地緣政治簡報、小說片段、公司備忘錄）轉化為一個由 AI agents 組成的動態世界。每個 agent 具備獨特的人格、信仰體系及記憶。它們互動、組成派系、辯論、傳播資訊、回應衝擊，歷經模擬時間後產出集體行為的統計嚴謹預測。
+Murmura 是一個多智能體社會模擬引擎，能將任意 seed text（新聞文章、地緣政治簡報、小說片段、公司備忘錄）轉化為一個由 AI agents 組成的動態世界。每個 agent 具備獨特的人格、信仰體系及記憶。它們互動、組成派系、辯論、傳播資訊、回應衝擊，歷經模擬時間後產出集體行為的統計嚴謹預測。
 
 ---
 
@@ -49,7 +49,7 @@ MurmuraScope 是一個多智能體社會模擬引擎，能將任意 seed text（
 ### 1-Minute Bootstrap · 一分鐘一鍵啟動（最快）
 **Requirements · 需求：** Docker & Git
 ```bash
-curl -fsSL https://raw.githubusercontent.com/destinyfrancis/MurmuraScope/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/destinyfrancis/Murmura/main/scripts/install.sh | bash
 ```
 
 ### Option A — Local Development · 本地開發（推薦）
@@ -57,8 +57,8 @@ curl -fsSL https://raw.githubusercontent.com/destinyfrancis/MurmuraScope/main/sc
 **Requirements · 需求：** Python 3.10 or 3.11 · Node.js 18+
 
 ```bash
-git clone https://github.com/destinyfrancis/MurmuraScope.git
-cd MurmuraScope
+git clone https://github.com/destinyfrancis/Murmura.git
+cd Murmura
 make quickstart
 ```
 
@@ -172,9 +172,9 @@ Each step is stateful and independently resumable. Sessions persist in SQLite so
 
 ### Actor Discovery Pipeline · 演員發現流程
 
-**[EN]** MurmuraScope discovers simulation actors in 4 recursive stages, each from a different angle, to ensure no significant stakeholder is missed.
+**[EN]** Murmura discovers simulation actors in 4 recursive stages, each from a different angle, to ensure no significant stakeholder is missed.
 
-**[繁中]** MurmuraScope 透過 4 個遞進階段從不同角度發現模擬演員，確保不遺漏任何重要持份者。
+**[繁中]** Murmura 透過 4 個遞進階段從不同角度發現模擬演員，確保不遺漏任何重要持份者。
 
 ```
 Seed Text
@@ -251,9 +251,9 @@ Agent Profile
 
 ### Belief Dynamics · 信念動力學
 
-**[EN]** MurmuraScope uses genuine Bayesian belief revision, not simple linear averaging:
+**[EN]** Murmura uses genuine Bayesian belief revision, not simple linear averaging:
 
-**[繁中]** MurmuraScope 使用真正的貝葉斯信念修正，而非簡單的線性平均：
+**[繁中]** Murmura 使用真正的貝葉斯信念修正，而非簡單的線性平均：
 
 ```
 Belief Update Flow (per round per agent)
@@ -333,9 +333,9 @@ Round N
 
 ### Swarm Ensemble · 群體集成預測
 
-**[EN]** For probabilistic forecasting, MurmuraScope forks the simulation at the point of maximum divergence:
+**[EN]** For probabilistic forecasting, Murmura forks the simulation at the point of maximum divergence:
 
-**[繁中]** 對於概率預測，MurmuraScope 在最大分歧點分叉模擬：
+**[繁中]** 對於概率預測，Murmura 在最大分歧點分叉模擬：
 
 ```
 Phase A: Single full LLM run
@@ -367,9 +367,9 @@ Phase A: Single full LLM run
 
 ### Macroeconomic Integration · 宏觀經濟整合
 
-**[EN]** MurmuraScope tracks 10 macro indicators and updates them bidirectionally with agent sentiment:
+**[EN]** Murmura tracks 10 macro indicators and updates them bidirectionally with agent sentiment:
 
-**[繁中]** MurmuraScope 追蹤 10 個宏觀指標，並與 agent 情緒雙向更新：
+**[繁中]** Murmura 追蹤 10 個宏觀指標，並與 agent 情緒雙向更新：
 
 ```
 Macro Indicators: gdp_growth · inflation_rate · unemployment_rate ·
@@ -567,7 +567,7 @@ Copy `.env.example` to `.env`. Most settings can also be changed live in the **S
 ## Project Structure · 項目結構
 
 ```
-MurmuraScope/
+Murmura/
 │
 ├── backend/
 │   ├── app/
@@ -631,9 +631,9 @@ MurmuraScope/
 
 ## Limitations · 限制
 
-**[EN]** MurmuraScope is a research and exploration tool. Please interpret outputs accordingly:
+**[EN]** Murmura is a research and exploration tool. Please interpret outputs accordingly:
 
-**[繁中]** MurmuraScope 是一個研究和探索工具。請相應地解讀輸出：
+**[繁中]** Murmura 是一個研究和探索工具。請相應地解讀輸出：
 
 | Suitable for · 適合 | Not suitable for · 不適合 |
 |--------------------|--------------------------|

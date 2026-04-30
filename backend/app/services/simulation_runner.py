@@ -1,4 +1,4 @@
-"""OASIS subprocess orchestration for MurmuraScope.
+"""OASIS subprocess orchestration for Murmura.
 
 Launches and monitors the OASIS Twitter simulation as an external subprocess,
 reading JSONL progress updates from stdout, pushing them to the WebSocket

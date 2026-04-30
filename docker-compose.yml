@@ -1,6 +1,6 @@
 services:
   backend:
-    image: ghcr.io/destinyfrancis/murmurascope-backend:latest
+    image: ghcr.io/destinyfrancis/murmura-backend:latest
     pull_policy: always
     build:
       context: .
@@ -36,7 +36,7 @@ services:
       - demo
 
   frontend:
-    image: ghcr.io/destinyfrancis/murmurascope-frontend:latest
+    image: ghcr.io/destinyfrancis/murmura-frontend:latest
     pull_policy: always
     build:
       context: ./frontend

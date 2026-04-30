@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# MurmuraScope Demo Script
+# Murmura Demo Script
 # Usage: ./scripts/demo.sh
 
-echo "=== MurmuraScope Demo ==="
+echo "=== Murmura Demo ==="
 
 # 1. Check API key
 if [ -z "${OPENROUTER_API_KEY:-}" ]; then

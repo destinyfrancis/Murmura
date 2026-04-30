@@ -21,7 +21,7 @@ function checkL5Q2(ans) {
 <template>
   <div class="lesson-content">
     <div class="lesson-text">
-      <p>MurmuraScope 唔只輸出一條預測線，而係整個概率分佈。拖動滑桿調整情景強度：</p>
+      <p>Murmura 唔只輸出一條預測線，而係整個概率分佈。拖動滑桿調整情景強度：</p>
     </div>
     <div class="percentile-chart glass-panel">
       <div class="chart-label">樓價信心指數預測</div>

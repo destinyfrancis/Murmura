@@ -7,8 +7,8 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME_BACKEND: destinyfrancis/murmurascope-backend
-  IMAGE_NAME_FRONTEND: destinyfrancis/murmurascope-frontend
+  IMAGE_NAME_BACKEND: destinyfrancis/murmura-backend
+  IMAGE_NAME_FRONTEND: destinyfrancis/murmura-frontend
 
 jobs:
   build-and-push:

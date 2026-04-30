@@ -1,4 +1,4 @@
-"""Session lifecycle state machine for MurmuraScope simulations.
+"""Session lifecycle state machine for Murmura simulations.
 
 Manages simulation sessions through their lifecycle:
   created → running → completed | failed

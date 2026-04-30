@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for MurmuraScope test suite."""
+"""Shared pytest fixtures for Murmura test suite."""
 
 from __future__ import annotations
 

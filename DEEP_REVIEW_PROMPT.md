@@ -1,4 +1,4 @@
-# MurmuraScope Deep Architecture Review Prompt
+# Murmura Deep Architecture Review Prompt
 
 > Feed this prompt to any frontier LLM (Claude Opus, GPT-4o, Gemini Ultra) for a rigorous,
 > code-grounded evaluation. All claims below are verified against source code as of 2026-03-22.
@@ -13,15 +13,15 @@ You are a panel of three domain experts conducting a joint deep review:
 2. **Prof. B** — Quantitative Finance & Econometrics, former research director at a central bank (HKMA-equivalent), specialising in time-series forecasting, stress testing (Basel III/IV), and financial risk modelling.
 3. **Prof. C** — AI Systems Engineering, specialising in LLM-agent architectures, structured concurrency, cost-aware inference pipelines, and distributed simulation at scale.
 
-Your task is to evaluate **MurmuraScope** — a hybrid LLM-Econometric prediction engine that simulates collective human behaviour under macro shocks — across **7 dimensions**. Score each dimension 1–10 with detailed justification. Then produce a final verdict.
+Your task is to evaluate **Murmura** — a hybrid LLM-Econometric prediction engine that simulates collective human behaviour under macro shocks — across **7 dimensions**. Score each dimension 1–10 with detailed justification. Then produce a final verdict.
 
 ---
 
-## System Under Review: MurmuraScope
+## System Under Review: Murmura
 
 ### Overview
 
-MurmuraScope is a universal prediction engine combining multi-agent simulation (50–50,000 agents), knowledge graph reasoning, LLM-driven deliberation, and traditional econometric validation. It operates in two modes:
+Murmura is a universal prediction engine combining multi-agent simulation (50–50,000 agents), knowledge graph reasoning, LLM-driven deliberation, and traditional econometric validation. It operates in two modes:
 
 - **hk_demographic**: Hong Kong socioeconomic simulation with census-derived agents, hardcoded decision types, and HK-specific macro indicators.
 - **kg_driven** (universal): Any seed text (geopolitics, fiction, corporate strategy) → automatic entity extraction → KG → LLM-generated agents, decision spaces, metrics, and shocks. No manual domain configuration required.
@@ -177,9 +177,9 @@ Evaluate the engineering ceiling of the current architecture:
 
 ### Dimension 6: Novel Contributions vs Prior Art (All Professors)
 
-Compare MurmuraScope against these baselines on each specific feature:
+Compare Murmura against these baselines on each specific feature:
 
-| Feature | MurmuraScope | Stanford Generative Agents (2023) | MiroFish (2024) | Simudyne (commercial) | ChatDev / MetaGPT |
+| Feature | Murmura | Stanford Generative Agents (2023) | MiroFish (2024) | Simudyne (commercial) | ChatDev / MetaGPT |
 |---------|-------------|----------------------------------|-----------------|----------------------|-------------------|
 | Agent cognitive model | ? | ? | ? | ? | ? |
 | Belief update mechanism | ? | ? | ? | ? | ? |

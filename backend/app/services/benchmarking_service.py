@@ -1,4 +1,4 @@
-"""Structural/Accuracy Benchmarking Service for MurmuraScope Knowledge Graphs.
+"""Structural/Accuracy Benchmarking Service for Murmura Knowledge Graphs.
 
 This service calculates Precision, Recall, and F1 scores for knowledge graphs,
 comparing a generated 'belief' or 'extracted' graph against a 'truth' or 'reference' graph.

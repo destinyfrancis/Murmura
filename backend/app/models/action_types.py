@@ -1,6 +1,6 @@
-"""Extended action type taxonomy for MurmuraScope.
+"""Extended action type taxonomy for Murmura.
 
-Decouples MurmuraScope's action tracking from OASIS internals, enabling
+Decouples Murmura's action tracking from OASIS internals, enabling
 category-level analytics and action diversity scoring.
 """
 
@@ -43,7 +43,7 @@ class ActionCategory(str, Enum):
 
 
 class ExtendedActionType(str, Enum):
-    """Action types tracked by MurmuraScope.
+    """Action types tracked by Murmura.
 
     Values match OASIS ActionType.value strings for zero-cost mapping.
     """

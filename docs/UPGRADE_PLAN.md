@@ -2,7 +2,7 @@
 
 **版本目標：** 品牌統一、全站雙語、每步驟模型設定、教學重建  
 **執行方式：** 逐 Phase 完成，每完成一個 Phase 在對應核取方塊打勾  
-**品牌名稱：** Murmura（全站統一，不再使用 MurmuraScope）
+**品牌名稱：** Murmura（全站統一，不再使用 Murmura）
 
 ---
 
@@ -21,7 +21,7 @@
 
 ## Phase 1 — 品牌統一
 
-**目標：** 全站移除舊名「Morai」/「MurmuraScope」，統一為「Murmura」，並套用新 Logo。
+**目標：** 全站移除舊名「Morai」/「Murmura」，統一為「Murmura」，並套用新 Logo。
 
 **Logo 來源：** `/Volumes/4TB/francistam/Downloads/Gemini_Generated_Image_hs5xvjhs5xvjhs5x.png`
 
@@ -71,7 +71,7 @@
 
 - [ ] **1.7** 驗證：搜尋是否還有殘留
   ```bash
-  grep -r "Morai\|MORAI\|MurmuraScope" frontend/src --include="*.vue" --include="*.js" --include="*.html"
+  grep -r "Morai\|MORAI\|Murmura" frontend/src --include="*.vue" --include="*.js" --include="*.html"
   ```
   預期結果：**零筆**
 
@@ -703,7 +703,7 @@ grep -r '>[^<{]*[\u4e00-\u9fff]' frontend/src --include="*.vue" | grep -v "i18n\
 - [ ] **4.8** `LessonPercentiles.vue` — 雙語化
 
 - [ ] **4.9** `LessonUncertainty.vue` — 雙語化
-  - 移除 `MurmuraScope` 舊名 → `Murmura`
+  - 移除 `Murmura` 舊名 → `Murmura`
 
 - [ ] **4.10** `LessonChallenges.vue` — 更新 + 雙語化
   - 加入 Swarm Ensemble、Monte Carlo 說明
@@ -733,7 +733,7 @@ grep -r '>[^<{]*[\u4e00-\u9fff]' frontend/src --include="*.vue" | grep -v "i18n\
 
 ```bash
 # 確認無舊品牌名稱殘留
-grep -r "Morai\|MORAI\|MurmuraScope" frontend/src --include="*.vue" --include="*.js"
+grep -r "Morai\|MORAI\|Murmura" frontend/src --include="*.vue" --include="*.js"
 
 # 確認無廣東話殘留（基本檢查）
 grep -r "唔\|係咪\|喎\|咁\|囉\|囉\|啩" frontend/src --include="*.vue"

@@ -1,4 +1,4 @@
-"""Calibration parameter configuration for MurmuraScope macro feedback loop.
+"""Calibration parameter configuration for Murmura macro feedback loop.
 
 All magic numbers from ``macro_controller.update_from_actions()`` are
 centralised here as a frozen dataclass.  Pass a ``CalibrationParams``

@@ -1,4 +1,4 @@
-"""Calibrated Coefficients loader for MurmuraScope.
+"""Calibrated Coefficients loader for Murmura.
 
 Reads sentiment → indicator regression coefficients from
 ``data/calibration_coefficients.json`` (produced by CalibrationPipeline).

@@ -1,4 +1,4 @@
-"""Calibration Pipeline for MurmuraScope.
+"""Calibration Pipeline for Murmura.
 
 Fits OLS regression coefficients mapping social sentiment ratios to economic
 indicator changes. Outputs calibration_coefficients.json which is consumed by

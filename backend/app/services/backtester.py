@@ -1,4 +1,4 @@
-"""Walk-forward backtesting framework for MurmuraScope time series models.
+"""Walk-forward backtesting framework for Murmura time series models.
 
 Implements walk-forward validation:
   - Train on data up to ``train_end`` (default 2022-Q4).

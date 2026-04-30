@@ -1,4 +1,4 @@
-"""Public Narrative DomainPack for MurmuraScope."""
+"""Public Narrative DomainPack for Murmura."""
 
 from __future__ import annotations
 

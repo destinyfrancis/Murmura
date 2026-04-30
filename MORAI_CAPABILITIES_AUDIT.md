@@ -1,6 +1,6 @@
 # 全系統能力深度診斷與 MiroFish 基準對比 (Morai Engine 2026 Audit)
 
-這是一份對 Morai（前 MurmuraScope）目前系統核心代碼（`CLAUDE.md`, `belief_system.py`, `cognitive_agent_engine.py`, `emergence_metrics.py`）進行的源碼級嚴格審核報告。
+這是一份對 Morai（前 Murmura）目前系統核心代碼（`CLAUDE.md`, `belief_system.py`, `cognitive_agent_engine.py`, `emergence_metrics.py`）進行的源碼級嚴格審核報告。
 
 ---
 

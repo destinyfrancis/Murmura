@@ -1,4 +1,4 @@
-"""Personality evolution engine for MurmuraScope.
+"""Personality evolution engine for Murmura.
 
 Tracks Big Five trait drift across simulation rounds. Agents' personalities
 are not static — repeated interactions, emotional experiences, and significant
