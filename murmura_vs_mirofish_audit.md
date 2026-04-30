@@ -1,4 +1,4 @@
-# 系統技術審核報告：MurmuraScope 與 MiroFish 深度剖析
+# 系統技術審核報告：Murmura 與 MiroFish 深度剖析
 
 本報告基於對兩套系統實際代碼層面的代碼庫（Codebase）審核而撰寫。評估全程秉持客觀分析準則，所有結論均建立於原始檔案與實作邏輯之上。
 
@@ -6,7 +6,7 @@
 
 ## Step 1. 基礎結構分析
 
-### 專案 A：MurmuraScope
+### 專案 A：Murmura
 - **檔案結構與模組**：系統呈現重型分散式架構。核心邏輯放置於 `backend/app/services/` 下，設有獨立的 `domain/` 子模組處理特定領域演算，以及完整的 `data_pipeline/` 處理原始數據提取。
 - **資料流程**：外部資訊經 `data_pipeline/download_all.py` 進入 -> 由 `entity_extractor.py` 與 `triple_extractor.py` 處理結構化 -> 寫入 SQLite/LanceDB (`graph_builder.py`) -> 經由 `simulation_runner.py` 及其 `monte_carlo.py` 推演 -> 透過 `graph_rag.py` 及 `report_orchestrator.py` 生成洞察。
 - **關鍵技術棧**：Python Backend (FastAPI), Vue.js Frontend。數據儲存使用 SQLite 做關聯資料與狀態紀錄，LanceDB 作為向量檢索，DuckDB 作為大數據查詢。不依賴外部封閉雲端 Graph 服務，屬於**自研全棧實作**。
@@ -20,7 +20,7 @@
 
 ## Step 2. 核心模組逐一審核
 
-| 評估模組 | MurmuraScope | MiroFish | 證據與函數 / 檔案名稱 |
+| 評估模組 | Murmura | MiroFish | 證據與函數 / 檔案名稱 |
 |---------|---------------|----------|------------------------|
 | **Input ingestion** | ✅ | ⚠️ | **Murmura**: 足足有逾 20 個爬蟲與正規化腳本 (`data_pipeline/china_macro_downloader.py`, `hkgolden_downloader.py`)。<br>**MiroFish**: 主要依賴簡單的 `file_parser.py`。 |
 | **Entity / relation extraction** | ✅ | ❌ | **Murmura**: 本地使用 `triple_extractor.py` 與 `text_processor.py` 利用 LLM 提取。<br>**MiroFish**: 無本地提取代碼，純靠調用 `zep_cloud.client` (見 `zep_graph_memory_updater.py`)。 |
@@ -37,7 +37,7 @@
 
 ## Step 3. GraphRAG 驗證清單
 
-### MurmuraScope (Authentic GraphRAG)
+### Murmura (Authentic GraphRAG)
 1. **Graph nodes 生成**：本地利用 `entity_extractor.py` 使用 LLM 基於文本建立。
 2. **Edges 抽取**：同樣在本地由 `triple_extractor.py` 判定及保存入 `kg_edges` 表。
 3. **有無 schema / ontology**：有，`ontology_generator.py` 有明確定義與防呆。
@@ -68,40 +68,40 @@
 | 系統 | 分級判定 | 結構及實證描述 |
 |---|---|---|
 | **MiroFish** | **Semi‑dynamic agent templating** | 利用 `oasis_profile_generator.py`，從配置檔與預定Prompt直接抽樣產出背景，屬於靜態模板填充，互動中人設不會基於信念網絡突變。未見由圖譜自動派生深層關係鏈的邏輯。 |
-| **MurmuraScope** | **Rich autonomous identity generation** | 透過 `kg_agent_factory.py` 加上 `cognitive_agent_engine.py`。Agent 除了基礎檔案，還擁有動態的信念狀態 (`belief_propagation.py`) 及情感引擎 (`emotional_engine.py`)。它能由圖譜中現存的 entity 屬性自動派生對立與結盟角色，構成完整的 interaction loop。 |
+| **Murmura** | **Rich autonomous identity generation** | 透過 `kg_agent_factory.py` 加上 `cognitive_agent_engine.py`。Agent 除了基礎檔案，還擁有動態的信念狀態 (`belief_propagation.py`) 及情感引擎 (`emotional_engine.py`)。它能由圖譜中現存的 entity 屬性自動派生對立與結盟角色，構成完整的 interaction loop。 |
 
 ***
 
 ## Step 5. 能力矩陣比較
 
-| 能力項目 | MurmuraScope | MiroFish | 程式碼證據 | 技術判斷 |
+| 能力項目 | Murmura | MiroFish | 程式碼證據 | 技術判斷 |
 |-----------|---------------|----------|--------------|------------|
-| Input ingestion flexibility | 🟢 高 | 🔴 低 | `data_pipeline/domain_dispatcher.py` | MurmuraScope 完整超越 |
-| Entity extraction quality | 🟢 高 | ⚠️ 黑箱 | `triple_extractor.py` vs API | MurmuraScope 掌控度極高 |
-| Relation extraction quality | 🟢 高 | ⚠️ 黑箱 | `kg_graph_updater.py` | MurmuraScope 可自定義層級 |
+| Input ingestion flexibility | 🟢 高 | 🔴 低 | `data_pipeline/domain_dispatcher.py` | Murmura 完整超越 |
+| Entity extraction quality | 🟢 高 | ⚠️ 黑箱 | `triple_extractor.py` vs API | Murmura 掌控度極高 |
+| Relation extraction quality | 🟢 高 | ⚠️ 黑箱 | `kg_graph_updater.py` | Murmura 可自定義層級 |
 | Graph construction correctness | 🟢 全面 | 🔴 稀缺 | `schema.sql` 嚴格約束 | MiroFish 無本地圖譜運算能力 |
-| GraphRAG 是否真實實作 | 🟢 是 | 🔴 否 (外判) | `graph_rag.py` CTE | MurmuraScope 擁有原生產權 |
-| Graph 是否可 traversal/query | 🟢 是 | 🔴 否 | SQL Recursive Traverse | MurmuraScope 完全透明 |
-| Hidden actor discovery | 🟢 有 | 🔴 無 | `implicit_stakeholder_service.py` | MurmuraScope 獨有能力 |
-| Agent diversity & autonomy | 🟢 高 | 🟡 中 | `personality_evolution.py` | MurmuraScope 演化系統更強 |
+| GraphRAG 是否真實實作 | 🟢 是 | 🔴 否 (外判) | `graph_rag.py` CTE | Murmura 擁有原生產權 |
+| Graph 是否可 traversal/query | 🟢 是 | 🔴 否 | SQL Recursive Traverse | Murmura 完全透明 |
+| Hidden actor discovery | 🟢 有 | 🔴 無 | `implicit_stakeholder_service.py` | Murmura 獨有能力 |
+| Agent diversity & autonomy | 🟢 高 | 🟡 中 | `personality_evolution.py` | Murmura 演化系統更強 |
 | Memory persistence | 🟢 SQLite/向量 | 🟡 Cloud API | `agent_memory.py` | MiroFish 受限於外部服務 |
-| Multi-agent interaction realism | 🟢 高 | 🟡 中 | `consensus_debate_engine.py` | MurmuraScope 有辯論及情緒模組 |
-| World simulation depth | 🟢 經濟/社會 | 🟡 單一對話 | `domain/global_macro.py` | MurmuraScope 支援多重系統模擬 |
+| Multi-agent interaction realism | 🟢 高 | 🟡 中 | `consensus_debate_engine.py` | Murmura 有辯論及情緒模組 |
+| World simulation depth | 🟢 經濟/社會 | 🟡 單一對話 | `domain/global_macro.py` | Murmura 支援多重系統模擬 |
 | Evaluation/benchmarking | 🟢 完備 | 🔴 無 | `benchmarking_service.py` | MiroFish 缺乏科學回測測試 |
-| Observability/logging | 🟢 分散遙測 | 🟡 基礎 | `telemetry.py` vs `ReportLogger` | 兩者各有千秋，MurmuraScope 更深 |
+| Observability/logging | 🟢 分散遙測 | 🟡 基礎 | `telemetry.py` vs `ReportLogger` | 兩者各有千秋，Murmura 更深 |
 | Deployment maturity | 🟢 高 | 🟢 高 | `Dockerfile` & CI | 兩者均具備微服務化能力 |
-| Overall technical maturity | 🟢 企業級 | 🟡 原型級 | 全局架構複雜度 | MurmuraScope 架構遙遙領先 |
+| Overall technical maturity | 🟢 企業級 | 🟡 原型級 | 全局架構複雜度 | Murmura 架構遙遙領先 |
 
 ### 文字分析與結論
-- **MurmuraScope 已超越項**：全棧知識圖譜實作、多維度社會與經濟推演引擎、隱藏角色發現、完備的 Benchmark 驗證與儀表板可視化。
-- **MurmuraScope 接近但未完成項**：依據代碼看，多語言無縫在地化（MiroFish 有完整的 `locales` i18n 機制，MurmuraScope 此部分較依賴硬代碼提示詞）。
-- **MiroFish 有而 MurmuraScope 沒有的核心能力**：沒有。MiroFish 的強項在於其整合了 Zep Cloud，大幅降低了技術實作門檻。就其本身的原始碼而言，只是一個輕量級的中介軟體，缺乏核心演算法資產。
+- **Murmura 已超越項**：全棧知識圖譜實作、多維度社會與經濟推演引擎、隱藏角色發現、完備的 Benchmark 驗證與儀表板可視化。
+- **Murmura 接近但未完成項**：依據代碼看，多語言無縫在地化（MiroFish 有完整的 `locales` i18n 機制，Murmura 此部分較依賴硬代碼提示詞）。
+- **MiroFish 有而 Murmura 沒有的核心能力**：沒有。MiroFish 的強項在於其整合了 Zep Cloud，大幅降低了技術實作門檻。就其本身的原始碼而言，只是一個輕量級的中介軟體，缺乏核心演算法資產。
 
 ***
 
 ## Step 6. 隱藏人物／潛在角色推理能力評估
 
-MurmuraScope 能透過其 `implicit_stakeholder_service.py` 與 `knowledge_graph` 完成多層推理：
+Murmura 能透過其 `implicit_stakeholder_service.py` 與 `knowledge_graph` 完成多層推理：
 
 1. **明文抽取人物**：透過 `entity_extractor.py`（實作機制：LLM Prompt -> 結構化 JSON）。
 2. **由事件／關係推斷隱含人物**：透過 `schema_detector.py` 找出孤立事件點間的缺失連結（實作機制：Graph Reasoning）。
@@ -123,7 +123,7 @@ MurmuraScope 能透過其 `implicit_stakeholder_service.py` 與 `knowledge_graph
 | **Breaking news propagation** | 9/10 | 由於具備 `virality_scorer.py` 及傳染病模型理念，十分有效。瓶頸：需大量 Agents 持續佔用運算資源。 |
 | **Public opinion simulation** | 9/10 | `belief_propagation.py` 能很好地模擬回音室及極化效應。 |
 | **Financial narrative tracking** | 7/10 | 有 `stock_forecaster.py`，但財經預測本身對微觀時間序列要求極高，單靠 narrative 可能有雜音。需補足 Backtesting 數據。 |
-| **Novel/story continuation** | 6/10 | MurmuraScope 為分析平台，並非純虛構說書工具，Prompt 對世界觀生成不如單純寫作 Agent 靈活。 |
+| **Novel/story continuation** | 6/10 | Murmura 為分析平台，並非純虛構說書工具，Prompt 對世界觀生成不如單純寫作 Agent 靈活。 |
 | **Conspiracy/hidden network** | 8/10 | 圖譜檢索實作了 Truth vs Belief Conflict 檢測，具備強大陰謀論挖掘邏輯。 |
 | **Organization power mapping** | 8/10 | Subgraph traversal CTE 能精準劃清勢力分佈。 |
 | **Multi-step what-if** | 8/10 | 具備 `monte_carlo.py` 可行多輪測試。瓶頸：運算延遲大。 |
@@ -169,13 +169,13 @@ MurmuraScope 能透過其 `implicit_stakeholder_service.py` 與 `knowledge_graph
 ## Step 9. Executive Verdict & Future Recommendation
 
 **1. 一句話總評**  
-MurmuraScope 是一套具有自主產權、架構精密且真實驗證的巨無霸級預測引擎；MiroFish 則更像是掛載 Zep Cloud API 上的輕量對話前端。
+Murmura 是一套具有自主產權、架構精密且真實驗證的巨無霸級預測引擎；MiroFish 則更像是掛載 Zep Cloud API 上的輕量對話前端。
 
-**2. MurmuraScope 當前完成度（0–100%）**  
+**2. Murmura 當前完成度（0–100%）**  
 **85%**。基礎建設、大數據攝取與圖譜運算極為成熟，目前已處於可商用部署邊緣，需進一步穩定效能或除錯。
 
 **3. 對標 MiroFish 完成度（0–100%）**  
-**1500%**。MurmuraScope 在程式碼深度與技術資產上已經遠遠超越 MiroFish，甚至解決了 MiroFish 對第三方的黑箱依賴問題。
+**1500%**。Murmura 在程式碼深度與技術資產上已經遠遠超越 MiroFish，甚至解決了 MiroFish 對第三方的黑箱依賴問題。
 
 **4. 投入開發建議**  
 **Yes (強烈建議)**。此專案具備作為戰略級 SaaS 或研發旗艦的能力，具有不可取代性。

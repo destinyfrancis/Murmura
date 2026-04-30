@@ -1,4 +1,4 @@
-"""Ensemble analyzer for MurmuraScope.
+"""Ensemble analyzer for Murmura.
 
 Reads final macro snapshots from all trial branch sessions, computes
 percentile bands using numpy, and generates user-facing probability

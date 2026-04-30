@@ -1,5 +1,5 @@
 """
-MurmuraScope OASIS Reddit Simulation Runner
+Murmura OASIS Reddit Simulation Runner
 
 Usage: python run_reddit_simulation.py --config /path/to/config.json
 
@@ -427,7 +427,7 @@ def load_config(config_path: str) -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="MurmuraScope Reddit Simulation (OASIS)")
+    parser = argparse.ArgumentParser(description="Murmura Reddit Simulation (OASIS)")
     parser.add_argument("--config", required=True, help="Path to config JSON file")
     args = parser.parse_args()
 

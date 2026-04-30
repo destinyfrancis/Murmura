@@ -1,9 +1,9 @@
-# MurmuraScope 超越計劃：次世代社會模擬引擎藍圖 (Beyond MiroFish)
+# Murmura 超越計劃：次世代社會模擬引擎藍圖 (Beyond MiroFish)
 
 ## 1. 戰略願景：從「研究原型」到「次世代真相與模擬平台」
 MiroFish 的成功在於其出色的「工程管道一致性 (Pipeline Coherence)」——它確保了資料流從文件到圖譜再到報告的單向暢通。
-然而，MurmuraScope 真正的護城河與潛力在於其**「社會動力學的深度與廣度」**。
-為了解決落差並實現超越，我們不只要追平 MiroFish 的 E2E 工程流暢度，更要引入 MiroFish 沒有的**高維度溯源架構 (High-Dimensional Provenance)** 與**雙軌圖譜系統 (Dual-Track Graph System)**，將 MurmuraScope 打造成具備自我修正與時序推理能力的頂級產品。
+然而，Murmura 真正的護城河與潛力在於其**「社會動力學的深度與廣度」**。
+為了解決落差並實現超越，我們不只要追平 MiroFish 的 E2E 工程流暢度，更要引入 MiroFish 沒有的**高維度溯源架構 (High-Dimensional Provenance)** 與**雙軌圖譜系統 (Dual-Track Graph System)**，將 Murmura 打造成具備自我修正與時序推理能力的頂級產品。
 
 ---
 

@@ -1,5 +1,5 @@
 """
-MurmuraScope OASIS Twitter Simulation Runner
+Murmura OASIS Twitter Simulation Runner
 
 Usage: python run_twitter_simulation.py --config /path/to/config.json
 
@@ -410,7 +410,7 @@ async def run_simulation(config: dict[str, Any]) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="MurmuraScope Twitter Simulation")
+    parser = argparse.ArgumentParser(description="Murmura Twitter Simulation")
     parser.add_argument("--config", required=True, help="Config JSON path")
     args = parser.parse_args()
 

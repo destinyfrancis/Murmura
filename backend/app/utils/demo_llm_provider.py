@@ -38,7 +38,7 @@ class DemoLLMClient:
         """Route prompt to appropriate fixture and return a response."""
         p_lower = prompt.lower()
         
-        # Routing logic based on common patterns in MurmuraScope
+        # Routing logic based on common patterns in Murmura
         if "entity" in p_lower or "extraction" in p_lower:
             fixture = self._load_fixture("entity_extraction")
             return json.dumps(fixture) if fixture else "[]"

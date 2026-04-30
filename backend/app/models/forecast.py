@@ -1,4 +1,4 @@
-"""Time series forecast result models for MurmuraScope.
+"""Time series forecast result models for Murmura.
 
 All dataclasses are frozen (immutable) per project coding style.
 """

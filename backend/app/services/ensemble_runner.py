@@ -1,4 +1,4 @@
-"""EnsembleRunner for MurmuraScope Phase A.
+"""EnsembleRunner for Murmura Phase A.
 
 Runs N real simulation trials by:
 1. Reading the parent session's MacroState baseline.

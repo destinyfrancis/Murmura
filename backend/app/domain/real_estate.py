@@ -1,4 +1,4 @@
-"""Real Estate Market DomainPack for MurmuraScope."""
+"""Real Estate Market DomainPack for Murmura."""
 
 from __future__ import annotations
 

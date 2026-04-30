@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# MurmuraScope One-liner Installer
+# Murmura One-liner Installer
 # Usage: curl -fsSL https://... | bash
 
 RED='\033[0;31m'
@@ -9,8 +9,8 @@ GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-echo -e "${BLUE}========================= ⬡ MurmuraScope ⬡ =========================${NC}"
-echo -e "正在初始化 MurmuraScope 部署環境..."
+echo -e "${BLUE}========================= ⬡ Murmura ⬡ =========================${NC}"
+echo -e "正在初始化 Murmura 部署環境..."
 
 # 1. 檢測作業系統
 OS="$(uname -s)"
@@ -36,12 +36,12 @@ if ! docker info &> /dev/null; then
 fi
 
 # 3. 獲取代碼 (如果不存在)
-if [ ! -d "MurmuraScope" ]; then
+if [ ! -d "Murmura" ]; then
     echo -e "正在從 GitHub 克隆存儲庫..."
-    git clone https://github.com/destinyfrancis/MurmuraScope.git
-    cd MurmuraScope
+    git clone https://github.com/destinyfrancis/Murmura.git
+    cd Murmura
 else
-    echo -e "已在 MurmuraScope 目錄中。"
+    echo -e "已在 Murmura 目錄中。"
 fi
 
 # 4. 設置環境變量

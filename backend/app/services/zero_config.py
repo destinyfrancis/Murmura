@@ -1,4 +1,4 @@
-"""Zero-config quick-start service for MurmuraScope.
+"""Zero-config quick-start service for Murmura.
 
 Enables paste-text-and-run: accepts seed text, infers domain,
 and returns a ready-to-run simulation configuration.

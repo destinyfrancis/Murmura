@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# MurmuraScope — Quick Start Wizard
+# Murmura — Quick Start Wizard
 # Usage: bash scripts/quickstart.sh  OR  make quickstart
 # =============================================================================
 set -euo pipefail
@@ -21,7 +21,7 @@ cd "${PROJECT_ROOT}"
 
 echo -e "${BOLD}"
 echo "  ╔══════════════════════════════════════════╗"
-echo "  ║     MurmuraScope  —  Quick Start         ║"
+echo "  ║     Murmura  —  Quick Start         ║"
 echo "  ╚══════════════════════════════════════════╝"
 echo -e "${RESET}"
 
@@ -42,7 +42,7 @@ PY_MAJOR=$(echo "$PY_VER" | cut -d. -f1)
 PY_MINOR=$(echo "$PY_VER" | cut -d. -f2)
 
 if [ "$PY_MAJOR" -ne 3 ] || [ "$PY_MINOR" -lt 10 ] || [ "$PY_MINOR" -gt 11 ]; then
-    err "Python ${PY_VER} detected. MurmuraScope requires Python 3.10 or 3.11."
+    err "Python ${PY_VER} detected. Murmura requires Python 3.10 or 3.11."
     echo "    OASIS (the simulation engine) does not support Python 3.12+."
     echo "    → https://www.python.org/downloads/release/python-31115/"
     exit 1
@@ -103,7 +103,7 @@ fi
 CURRENT_KEY=$(grep "^OPENROUTER_API_KEY=" .env 2>/dev/null | cut -d= -f2- || echo "")
 if [ -z "$CURRENT_KEY" ] || [ "$CURRENT_KEY" = "sk-or-your-openrouter-key" ]; then
     echo ""
-    echo -e "  ${BOLD}MurmuraScope needs an OpenRouter API key to run simulations.${RESET}"
+    echo -e "  ${BOLD}Murmura needs an OpenRouter API key to run simulations.${RESET}"
     echo "  Get one free at: https://openrouter.ai/keys"
     echo ""
     read -r -p "  Paste your OPENROUTER_API_KEY (or press Enter to skip for now): " USER_KEY
@@ -162,7 +162,7 @@ ok "data/ and logs/ directories ready"
 # =============================================================================
 # STEP 4 — Launch
 # =============================================================================
-hdr "Step 4/4 — Starting MurmuraScope"
+hdr "Step 4/4 — Starting Murmura"
 
 UVICORN="${VENV_DIR}/bin/uvicorn"
 mkdir -p "${PROJECT_ROOT}/logs"
@@ -216,7 +216,7 @@ fi
 
 echo ""
 echo -e "  ${BOLD}╔══════════════════════════════════════════╗${RESET}"
-echo -e "  ${BOLD}║     MurmuraScope is running!             ║${RESET}"
+echo -e "  ${BOLD}║     Murmura is running!             ║${RESET}"
 echo -e "  ${BOLD}║                                          ║${RESET}"
 echo -e "  ${BOLD}║  Frontend : http://localhost:5173        ║${RESET}"
 echo -e "  ${BOLD}║  Backend  : http://localhost:5001        ║${RESET}"
@@ -230,7 +230,7 @@ echo ""
 # ── Graceful shutdown on Ctrl+C ───────────────────────────────────────────────
 cleanup() {
     echo ""
-    echo -e "${YELLOW}  Shutting down MurmuraScope...${RESET}"
+    echo -e "${YELLOW}  Shutting down Murmura...${RESET}"
     kill "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null || true
     pkill -f "run_(twitter|parallel|facebook|instagram|reddit)_simulation.py" 2>/dev/null || true
     pkill -f "uvicorn.*5001" 2>/dev/null || true
