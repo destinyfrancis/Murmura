@@ -1,10 +1,12 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { listSessions } from '../api/simulation.js'
 import ScaleBenchmarkPanel from '../components/ScaleBenchmarkPanel.vue'
 
 const router = useRouter()
+const { t } = useI18n()
 const sessions = ref([])
 const total = ref(0)
 const loading = ref(true)
@@ -15,26 +17,26 @@ const showAdmin = ref(false)
 
 const statusColors = {
   completed: 'var(--accent-green)',
-  running: 'var(--accent-blue)',
+  running: 'var(--accent)',
   failed: 'var(--accent-red)',
   pending: 'var(--accent-orange)',
   created: 'var(--text-muted)',
 }
 
 const statusLabels = {
-  completed: '已完成',
-  running: '運行中',
-  failed: '失敗',
-  pending: '等待中',
-  created: '已建立',
+  completed: t('workspace.status.completed'),
+  running: t('workspace.status.running'),
+  failed: t('workspace.status.failed'),
+  pending: t('workspace.status.pending'),
+  created: t('workspace.status.created'),
 }
 
-const scenarioIcons = {
-  property: '🏠',
-  emigration: '✈️',
-  economic: '📊',
-  political: '🏛️',
-  social: '👥',
+const scenarioCodes = {
+  property: 'PROP',
+  emigration: 'MIG',
+  economic: 'ECO',
+  political: 'POL',
+  social: 'SOC',
 }
 
 async function fetchSessions() {
@@ -88,8 +90,9 @@ onMounted(fetchSessions)
   <div class="workspace-page">
     <div class="workspace-header">
       <div>
-        <h1 class="workspace-title">工作區</h1>
-        <p class="workspace-subtitle">所有預測模擬 Session</p>
+        <span class="workbench-label">WORKSPACE</span>
+        <h1 class="workspace-title">{{ t('workspace.title') }}</h1>
+        <p class="workspace-subtitle">{{ t('workspace.subtitle') }}</p>
       </div>
       <div class="header-actions">
         <button
@@ -97,9 +100,9 @@ onMounted(fetchSessions)
           :class="{ active: showAdmin }"
           @click="showAdmin = !showAdmin"
         >
-          效能管理
+          {{ t('workspace.adminBtn') }}
         </button>
-        <button class="btn-new" @click="goNew">+ 新預測</button>
+        <button class="btn-new" @click="goNew">{{ t('workspace.newBtn') }}</button>
       </div>
     </div>
 
@@ -118,15 +121,15 @@ onMounted(fetchSessions)
     <!-- Error -->
     <div v-else-if="error" class="error-state">
       <p>{{ error }}</p>
-      <button class="btn-retry" @click="fetchSessions">重試</button>
+      <button class="btn-retry" @click="fetchSessions">{{ t('workspace.retry') }}</button>
     </div>
 
     <!-- Empty -->
     <div v-else-if="sessions.length === 0" class="empty-state">
       <div class="empty-icon">⬡</div>
-      <h2>尚未有預測</h2>
-      <p>建立你嘅第一個社會模擬預測</p>
-      <button class="btn-new" @click="goNew">+ 新預測</button>
+      <h2>{{ t('workspace.empty.title') }}</h2>
+      <p>{{ t('workspace.empty.description') }}</p>
+      <button class="btn-new" @click="goNew">{{ t('workspace.newBtn') }}</button>
     </div>
 
     <!-- Sessions grid -->
@@ -138,7 +141,7 @@ onMounted(fetchSessions)
         @click="goToSession(session)"
       >
         <div class="card-header">
-          <span class="scenario-icon">{{ scenarioIcons[session.scenario_type] || '📋' }}</span>
+          <span class="scenario-icon">{{ scenarioCodes[session.scenario_type] || 'SIM' }}</span>
           <span
             class="status-badge"
             :style="{ color: statusColors[session.status] || 'var(--text-muted)', borderColor: statusColors[session.status] || 'var(--border-color)' }"
@@ -148,22 +151,22 @@ onMounted(fetchSessions)
         </div>
         <h3 class="card-title">{{ session.name || session.scenario_type || 'Untitled' }}</h3>
         <div class="card-meta">
-          <span>{{ session.agent_count || 0 }} agents</span>
-          <span>{{ session.current_round || 0 }}/{{ session.round_count || 0 }} rounds</span>
+          <span>{{ session.agent_count || 0 }} {{ t('workspace.meta.agents') }}</span>
+          <span>{{ session.current_round || 0 }}/{{ session.round_count || 0 }} {{ t('workspace.meta.rounds') }}</span>
         </div>
         <div class="card-date">{{ formatDate(session.created_at) }}</div>
         <div class="card-actions" @click.stop>
           <router-link
             :to="`/app/evidence/${session.id}`"
             class="evidence-link"
-          >証據搜尋</router-link>
+          >{{ t('workspace.evidence') }}</router-link>
         </div>
       </div>
     </div>
 
     <!-- Load more -->
     <div v-if="sessions.length < total" class="load-more">
-      <button class="btn-load-more" @click="loadMore">載入更多</button>
+      <button class="btn-load-more" @click="loadMore">{{ t('workspace.loadMore') }}</button>
     </div>
   </div>
 </template>
@@ -172,7 +175,7 @@ onMounted(fetchSessions)
 .workspace-page {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 32px 24px;
+  padding: 28px 24px 72px;
 }
 
 .workspace-header {
@@ -183,9 +186,13 @@ onMounted(fetchSessions)
 }
 
 .workspace-title {
-  font-size: 24px;
-  font-weight: 700;
+  font-family: var(--font-mono);
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
   color: var(--text-primary);
+  margin-top: 4px;
 }
 
 .workspace-subtitle {
@@ -205,46 +212,52 @@ onMounted(fetchSessions)
   background: var(--bg-card);
   color: var(--text-secondary);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  font-size: 13px;
-  font-weight: 600;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   cursor: pointer;
   transition: var(--transition);
 }
 
 .btn-admin:hover {
-  border-color: var(--accent-blue);
-  color: var(--accent-blue);
+  border-color: var(--text-primary);
+  color: var(--text-primary);
 }
 
 .btn-admin.active {
-  background: rgba(0, 212, 255, 0.08);
-  border-color: var(--accent-blue);
-  color: var(--accent-blue);
+  background: var(--text-primary);
+  border-color: var(--text-primary);
+  color: #FFFFFF;
 }
 
 .btn-new {
   padding: 10px 20px;
-  background: var(--accent-blue);
-  color: #0d1117;
-  border: none;
-  border-radius: var(--radius-md);
-  font-size: 14px;
-  font-weight: 600;
+  background: var(--text-primary);
+  color: #FFFFFF;
+  border: 1px solid var(--text-primary);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   cursor: pointer;
   transition: var(--transition);
 }
 
 .btn-new:hover {
-  background: rgba(0, 212, 255, 0.8);
-  box-shadow: var(--shadow-glow-cyan);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .admin-section {
   margin-bottom: 24px;
   padding: 20px;
   background: var(--bg-card);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
 }
 
@@ -272,11 +285,12 @@ onMounted(fetchSessions)
   padding: 20px;
   cursor: pointer;
   transition: var(--transition);
+  border-radius: var(--radius-lg);
 }
 
 .session-card:hover {
-  box-shadow: var(--shadow-md);
-  border-color: var(--accent-blue);
+  box-shadow: var(--shadow-hover);
+  border-color: var(--accent);
 }
 
 .card-header {
@@ -287,15 +301,27 @@ onMounted(fetchSessions)
 }
 
 .scenario-icon {
-  font-size: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 28px;
+  border: 1px solid var(--border);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
 }
 
 .status-badge {
   font-size: 11px;
-  font-weight: 600;
+  font-family: var(--font-mono);
+  font-weight: 800;
   padding: 2px 8px;
   border: 1px solid;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
 }
 
 .card-title {
@@ -327,17 +353,17 @@ onMounted(fetchSessions)
 
 .evidence-link {
   font-size: 12px;
-  color: var(--accent-blue);
+  color: var(--accent);
   text-decoration: none;
   padding: 3px 8px;
-  border: 1px solid var(--accent-blue);
+  border: 1px solid var(--accent);
   border-radius: var(--radius-sm);
   transition: var(--transition);
 }
 
 .evidence-link:hover {
-  background: var(--accent-blue);
-  color: #0d1117;
+  background: var(--accent);
+  color: #FFFFFF;
 }
 
 .empty-state {
@@ -347,7 +373,7 @@ onMounted(fetchSessions)
 
 .empty-icon {
   font-size: 48px;
-  color: var(--accent-blue);
+  color: var(--accent);
   margin-bottom: 16px;
 }
 
@@ -373,7 +399,7 @@ onMounted(fetchSessions)
   padding: 8px 16px;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--text-primary);
 }
@@ -387,7 +413,7 @@ onMounted(fetchSessions)
   padding: 10px 24px;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   color: var(--text-secondary);
   font-size: 14px;
   cursor: pointer;
@@ -395,7 +421,7 @@ onMounted(fetchSessions)
 }
 
 .btn-load-more:hover {
-  border-color: var(--accent-blue);
-  color: var(--accent-blue);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 </style>

@@ -1,0 +1,55 @@
+{
+  "id": "society_housing_policy",
+  "mode": "society",
+  "seed_text": "A city announces a sudden housing subsidy reform. Renters, landlords, banks, young families, district councils, and media commentators react as trust in the policy changes over time.",
+  "expected": {
+    "node_lower_bound": 8,
+    "edge_lower_bound": 7,
+    "required_entities": ["housing subsidy reform", "renters", "landlords", "banks", "young families", "district councils"],
+    "required_relations": [
+      { "source": "housing subsidy reform", "target": "renters", "relation": "affects" },
+      { "source": "banks", "target": "landlords", "relation": "finances" },
+      { "source": "media commentators", "target": "trust", "relation": "influences" }
+    ],
+    "hidden_actor_expected_behavior": ["tenant unions", "mortgage brokers"],
+    "report_evidence_coverage_threshold": 0.75,
+    "overall_threshold": 0.78
+  },
+  "observed_baseline": {
+    "nodes": [
+      { "title": "housing subsidy reform" },
+      { "title": "renters" },
+      { "title": "landlords" },
+      { "title": "banks" },
+      { "title": "young families" },
+      { "title": "district councils" },
+      { "title": "media commentators" },
+      { "title": "public trust" },
+      { "title": "housing supply" }
+    ],
+    "edges": [
+      { "source": "housing subsidy reform", "target": "renters", "relation_type": "affects" },
+      { "source": "housing subsidy reform", "target": "young families", "relation_type": "affects" },
+      { "source": "banks", "target": "landlords", "relation_type": "finances" },
+      { "source": "media commentators", "target": "public trust", "relation_type": "influences" },
+      { "source": "district councils", "target": "housing subsidy reform", "relation_type": "responds_to" },
+      { "source": "landlords", "target": "housing supply", "relation_type": "controls" },
+      { "source": "renters", "target": "public trust", "relation_type": "updates" }
+    ],
+    "hidden_actors": [
+      { "name": "tenant unions", "role": "coordinate renter response" },
+      { "name": "mortgage brokers", "role": "translate bank policy into landlord incentives" }
+    ],
+    "report_claims": [
+      { "claim": "Renters react first to the subsidy terms.", "evidence_span": "renters react", "citation": "kg:renters" },
+      { "claim": "Banks mediate landlord incentives.", "evidence_span": "banks and landlords", "citation": "edge:banks-landlords" },
+      { "claim": "Media commentary changes trust.", "evidence_span": "media commentators react as trust changes", "citation": "edge:media-trust" },
+      { "claim": "District councils become local amplifiers.", "evidence_span": "district councils", "citation": "kg:district-councils" }
+    ],
+    "pipeline": {
+      "graph_build": true,
+      "simulation_create": true,
+      "report_generate": true
+    }
+  }
+}

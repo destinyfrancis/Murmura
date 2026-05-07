@@ -440,6 +440,7 @@ class TestGeneralizedEngine:
         assert req.llm_model is None
         assert req.llm_base_url is None
         assert req.preset is None
+        assert req.platforms == {"twitter": True, "reddit": True}
 
     def test_parse_age_bracket_ranges(self):
         """_parse_age_bracket_ranges should parse standard bracket labels."""

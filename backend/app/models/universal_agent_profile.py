@@ -63,6 +63,15 @@ class UniversalAgentProfile:
     kg_node_id: str
     """Back-reference to the originating KG node ID."""
 
+    constraints: tuple[str, ...] = ()
+    """Practical limits, obligations, or vulnerabilities that constrain action."""
+
+    beliefs: tuple[tuple[str, float], ...] = ()
+    """Named beliefs or priors as ``(belief_name, confidence)`` pairs in [0.0, 1.0]."""
+
+    memory_seed: str = ""
+    """Short prior-memory primer that grounds early simulation behaviour."""
+
     # ------------------------------------------------------------------
     # Voice / communication style fields (Task 2 — report quality upgrade)
     # All have defaults for backward compatibility with existing callers.

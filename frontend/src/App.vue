@@ -1,8 +1,10 @@
 <script setup>
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import DemoModeBanner from '@/components/DemoModeBanner.vue'
 
 const router = useRouter()
+const { t } = useI18n()
 
 function goHome() {
   router.push('/')
@@ -15,14 +17,14 @@ function goHome() {
     <header class="app-header">
       <div class="header-left" @click="goHome">
         <span class="logo">⬡</span>
-        <span class="brand">Morai</span>
+        <span class="brand">Murmura</span>
       </div>
       <nav class="header-nav">
-        <router-link to="/" class="nav-link">首頁</router-link>
-        <router-link to="/app" class="nav-link">工作區</router-link>
-        <router-link to="/learn" class="nav-link">教學</router-link>
-        <router-link to="/landing" class="nav-link">關於</router-link>
-        <router-link to="/settings" class="nav-link nav-icon" title="設定" aria-label="設定">⚙</router-link>
+        <router-link to="/" class="nav-link">{{ t('nav.home') }}</router-link>
+        <router-link to="/app" class="nav-link">{{ t('nav.workspace') }}</router-link>
+        <router-link to="/learn" class="nav-link">{{ t('nav.learn') }}</router-link>
+        <router-link to="/landing" class="nav-link">{{ t('nav.about') }}</router-link>
+        <router-link to="/settings" class="nav-link nav-icon" :title="t('nav.settings')" :aria-label="t('nav.settings')">⚙</router-link>
       </nav>
     </header>
     <main class="app-main">
@@ -41,26 +43,29 @@ function goHome() {
 }
 
 :root {
-  /* === Monochromatic + Orange Accent === */
-  --bg-app:     #FAFAFA;
-  --bg-graph:   #F5F5F5;
+  /* === Murmura Workbench: monochrome control room + orange signal === */
+  --bg-app:     #F7F7F5;
+  --bg-graph:   #F1F1EF;
   --bg-card:    #FFFFFF;
-  --bg-nav:     #FFFFFF;
-  --bg-input:   #F9F9F9;
+  --bg-nav:     #050505;
+  --bg-input:   #FAFAFA;
+  --bg-inverse: #050505;
 
-  --accent:        #FF6B35;
-  --accent-hover:  #FF4500;
-  --accent-subtle: rgba(255, 107, 53, 0.08);
-  --accent-warn:   #FF9800;
-  --accent-danger: #DC2626;
-  --accent-success:#10B981;
+  --accent:        #FF5A1F;
+  --accent-hover:  #E64500;
+  --accent-subtle: rgba(255, 90, 31, 0.10);
+  --accent-warn:   #B45309;
+  --accent-danger: #B91C1C;
+  --accent-success:#047857;
+  --accent-yellow: #B45309;
 
-  --text-primary:   #000000;
-  --text-secondary: #666666;
-  --text-muted:     #999999;
-  --text-quaternary:#9CA3AF;
-  --border:         #EAEAEA;
-  --border-hover:   #999999;
+  --text-primary:   #050505;
+  --text-secondary: #525252;
+  --text-muted:     #8A8A8A;
+  --text-quaternary:#A3A3A3;
+  --text-inverse:   #FFFFFF;
+  --border:         #DCDCDC;
+  --border-hover:   #050505;
 
   --font-mono: 'JetBrains Mono', monospace;
   --font-sans: 'Space Grotesk', 'Noto Sans HK', sans-serif;
@@ -89,9 +94,11 @@ function goHome() {
   --radius-md: 4px;
   --radius-lg: 6px;
   --radius-xl: 8px;
-  --shadow-card:    0 1px 2px rgba(0,0,0,0.05);
-  --shadow-hover:   0 4px 12px rgba(0,0,0,0.05);
-  --shadow-elevated:0 8px 32px rgba(0,0,0,0.1);
+  --radius-pill: 4px;
+  --shadow-card:    0 1px 0 rgba(0,0,0,0.04);
+  --shadow-hover:   0 8px 18px rgba(0,0,0,0.07);
+  --shadow-elevated:0 18px 50px rgba(0,0,0,0.12);
+  --shadow-md:      var(--shadow-hover);
 
   /* Motion */
   --transition: all 0.2s ease;
@@ -103,16 +110,17 @@ function goHome() {
   --duration-medium: 0.3s;
   --duration-layout: 0.35s;
 
-  /* Legacy glow + glass tokens */
-  --shadow-glow-cyan: 0 4px 20px rgba(255, 107, 53, 0.25);
-  --glass-bg: rgba(255, 255, 255, 0.85);
-  --glass-blur: 12px;
+  /* Legacy glow + glass tokens mapped to workbench surfaces */
+  --shadow-glow-cyan: none;
+  --glass-bg: #FFFFFF;
+  --glass-blur: 0;
 }
 
 body {
   font-family: var(--font-sans);
   background: var(--bg-app);
   color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
 }
 
 a {
@@ -133,7 +141,7 @@ textarea {
 
 .glass-panel {
   background: var(--glass-bg);
-  backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: none;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
@@ -240,6 +248,80 @@ a, button, input, select, textarea {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(0,0,0,0.3);
 }
+
+/* ── Shared Workbench primitives ───────────────────────────────────── */
+.workbench-page {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 28px 24px 72px;
+}
+
+.workbench-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+.workbench-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.workbench-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 9px 16px;
+  border: 1px solid var(--text-primary);
+  border-radius: var(--radius-sm);
+  background: var(--text-primary);
+  color: var(--text-inverse);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.workbench-button.secondary {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.workbench-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #FFFFFF;
+}
+
+.workbench-button:disabled {
+  border-color: var(--border);
+  background: #E9E9E6;
+  color: var(--text-muted);
+}
+
+.workbench-input,
+.workbench-textarea,
+.workbench-select {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
+}
+
+.workbench-input:focus,
+.workbench-textarea:focus,
+.workbench-select:focus {
+  border-color: var(--text-primary);
+  background: var(--bg-card);
+}
 </style>
 
 <style scoped>
@@ -253,10 +335,10 @@ a, button, input, select, textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 40px;
-  height: 60px;
-  background: var(--bg-card);
-  border-bottom: 1px solid var(--border);
+  padding: 0 32px;
+  height: 56px;
+  background: var(--bg-nav);
+  border-bottom: 1px solid #222;
   position: sticky;
   top: 0;
   z-index: 100;
@@ -271,17 +353,17 @@ a, button, input, select, textarea {
 }
 
 .logo {
-  font-size: 24px;
-  color: var(--text-primary);
+  font-size: 18px;
+  color: var(--accent);
 }
 
 .brand {
   font-size: 18px;
   font-weight: 800;
   font-family: var(--font-mono);
-  letter-spacing: 1px;
+  letter-spacing: 2px;
   text-transform: uppercase;
-  color: var(--text-primary);
+  color: var(--text-inverse);
 }
 
 .header-nav {
@@ -290,22 +372,25 @@ a, button, input, select, textarea {
 }
 
 .nav-link {
-  color: var(--text-secondary);
-  font-size: 14px;
-  font-weight: 600;
-  padding: 6px 12px;
-  border-radius: var(--radius-sm);
+  color: #BDBDBD;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 8px 10px;
+  border-radius: var(--radius-xs);
+  text-transform: uppercase;
 }
 
 .nav-link:hover {
-  opacity: 0.7;
-  color: var(--text-primary);
-  background: none;
+  opacity: 1;
+  color: var(--text-inverse);
+  background: rgba(255,255,255,0.08);
 }
 
 .nav-link.router-link-active {
-  color: var(--text-primary);
-  background: none;
+  color: var(--text-inverse);
+  background: rgba(255, 90, 31, 0.2);
 }
 
 .app-main {
@@ -316,17 +401,33 @@ a, button, input, select, textarea {
   font-size: 18px;
   padding: 6px 8px;
   line-height: 1;
-  color: var(--text-secondary);
+  color: #BDBDBD;
   border-radius: var(--radius-sm);
   transition: color 0.15s, background 0.15s;
 }
 
 .nav-icon:hover {
-  color: var(--text-primary);
+  color: var(--text-inverse);
 }
 
 .nav-icon.router-link-active {
-  color: var(--accent);
+  color: var(--text-inverse);
   background: var(--accent-subtle);
+}
+
+@media (max-width: 760px) {
+  .app-header {
+    padding: 0 16px;
+    height: auto;
+    min-height: 56px;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .header-nav {
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: 8px;
+  }
 }
 </style>

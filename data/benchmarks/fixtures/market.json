@@ -1,0 +1,56 @@
+{
+  "id": "market_product_launch",
+  "mode": "market",
+  "seed_text": "A fintech startup launches a cross-border payments product. Incumbent banks, migrant workers, SME exporters, regulators, app-store reviewers, and competitors react to pricing and trust signals.",
+  "expected": {
+    "node_lower_bound": 8,
+    "edge_lower_bound": 7,
+    "required_entities": ["fintech startup", "cross-border payments product", "incumbent banks", "migrant workers", "SME exporters", "regulators"],
+    "required_relations": [
+      { "source": "fintech startup", "target": "cross-border payments product", "relation": "launches" },
+      { "source": "regulators", "target": "trust signals", "relation": "influences" },
+      { "source": "competitors", "target": "pricing", "relation": "reacts_to" }
+    ],
+    "hidden_actor_expected_behavior": ["app-store reviewers", "remittance agents"],
+    "report_evidence_coverage_threshold": 0.75,
+    "overall_threshold": 0.78
+  },
+  "observed_baseline": {
+    "nodes": [
+      { "title": "fintech startup" },
+      { "title": "cross-border payments product" },
+      { "title": "incumbent banks" },
+      { "title": "migrant workers" },
+      { "title": "SME exporters" },
+      { "title": "regulators" },
+      { "title": "app-store reviewers" },
+      { "title": "competitors" },
+      { "title": "pricing" },
+      { "title": "trust signals" }
+    ],
+    "edges": [
+      { "source": "fintech startup", "target": "cross-border payments product", "relation_type": "launches" },
+      { "source": "incumbent banks", "target": "pricing", "relation_type": "pressures" },
+      { "source": "migrant workers", "target": "trust signals", "relation_type": "updates" },
+      { "source": "SME exporters", "target": "cross-border payments product", "relation_type": "adopts" },
+      { "source": "regulators", "target": "trust signals", "relation_type": "influences" },
+      { "source": "competitors", "target": "pricing", "relation_type": "reacts_to" },
+      { "source": "app-store reviewers", "target": "trust signals", "relation_type": "amplifies" }
+    ],
+    "hidden_actors": [
+      { "name": "app-store reviewers", "role": "convert early usage into public trust signals" },
+      { "name": "remittance agents", "role": "defend offline distribution and influence migrant workers" }
+    ],
+    "report_claims": [
+      { "claim": "Launch success depends on trust signals.", "evidence_span": "trust signals", "citation": "kg:trust-signals" },
+      { "claim": "Competitors respond through pricing.", "evidence_span": "competitors react to pricing", "citation": "edge:competitors-pricing" },
+      { "claim": "Regulators affect adoption confidence.", "evidence_span": "regulators", "citation": "kg:regulators" },
+      { "claim": "Migrant workers are a primary user group.", "evidence_span": "migrant workers", "citation": "kg:migrant-workers" }
+    ],
+    "pipeline": {
+      "graph_build": true,
+      "simulation_create": true,
+      "report_generate": true
+    }
+  }
+}

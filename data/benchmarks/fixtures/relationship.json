@@ -1,0 +1,55 @@
+{
+  "id": "relationship_family_inheritance",
+  "mode": "relationship",
+  "seed_text": "Three siblings dispute how to care for an ageing parent and divide a family apartment. Spouses, a long-time caregiver, a solicitor, and cousins shape private trust and public negotiation.",
+  "expected": {
+    "node_lower_bound": 8,
+    "edge_lower_bound": 7,
+    "required_entities": ["siblings", "ageing parent", "family apartment", "spouses", "caregiver", "solicitor"],
+    "required_relations": [
+      { "source": "siblings", "target": "family apartment", "relation": "disputes" },
+      { "source": "caregiver", "target": "ageing parent", "relation": "supports" },
+      { "source": "solicitor", "target": "negotiation", "relation": "mediates" }
+    ],
+    "hidden_actor_expected_behavior": ["cousins", "estate agent"],
+    "report_evidence_coverage_threshold": 0.75,
+    "overall_threshold": 0.78
+  },
+  "observed_baseline": {
+    "nodes": [
+      { "title": "siblings" },
+      { "title": "ageing parent" },
+      { "title": "family apartment" },
+      { "title": "spouses" },
+      { "title": "long-time caregiver" },
+      { "title": "solicitor" },
+      { "title": "cousins" },
+      { "title": "private trust" },
+      { "title": "public negotiation" }
+    ],
+    "edges": [
+      { "source": "siblings", "target": "family apartment", "relation_type": "disputes" },
+      { "source": "long-time caregiver", "target": "ageing parent", "relation_type": "supports" },
+      { "source": "solicitor", "target": "public negotiation", "relation_type": "mediates" },
+      { "source": "spouses", "target": "siblings", "relation_type": "influences" },
+      { "source": "cousins", "target": "private trust", "relation_type": "shapes" },
+      { "source": "ageing parent", "target": "private trust", "relation_type": "anchors" },
+      { "source": "family apartment", "target": "public negotiation", "relation_type": "drives" }
+    ],
+    "hidden_actors": [
+      { "name": "cousins", "role": "shape informal family pressure" },
+      { "name": "estate agent", "role": "prices the apartment and changes bargaining power" }
+    ],
+    "report_claims": [
+      { "claim": "The apartment is the conflict anchor.", "evidence_span": "divide a family apartment", "citation": "kg:family-apartment" },
+      { "claim": "Care work changes moral authority.", "evidence_span": "long-time caregiver", "citation": "kg:caregiver" },
+      { "claim": "The solicitor formalizes negotiation.", "evidence_span": "solicitor", "citation": "kg:solicitor" },
+      { "claim": "Cousins alter private trust.", "evidence_span": "cousins shape private trust", "citation": "kg:cousins" }
+    ],
+    "pipeline": {
+      "graph_build": true,
+      "simulation_create": true,
+      "report_generate": true
+    }
+  }
+}

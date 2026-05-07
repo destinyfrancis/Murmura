@@ -67,7 +67,7 @@ onMounted(async () => {
 .report-page {
   max-width: 900px;
   margin: 0 auto;
-  padding: 32px 24px;
+  padding: 28px 24px 72px;
 }
 
 .loading {
@@ -83,7 +83,7 @@ onMounted(async () => {
   width: 36px;
   height: 36px;
   border: 3px solid var(--border-color);
-  border-top-color: var(--accent-blue);
+  border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -105,8 +105,11 @@ onMounted(async () => {
 }
 
 .report-header h1 {
+  font-family: var(--font-mono);
   font-size: 28px;
-  font-weight: 700;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
   margin-bottom: 8px;
 }
 
@@ -117,7 +120,7 @@ onMounted(async () => {
 
 .markdown-body {
   background: var(--bg-card);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 32px;
   line-height: 1.8;
@@ -167,7 +170,7 @@ onMounted(async () => {
 }
 
 .markdown-body :deep(blockquote) {
-  border-left: 3px solid var(--accent-blue);
+  border-left: 3px solid var(--accent);
   padding-left: 16px;
   color: var(--text-secondary);
   margin-bottom: 12px;

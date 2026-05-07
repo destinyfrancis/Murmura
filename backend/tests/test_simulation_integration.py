@@ -165,7 +165,7 @@ class TestBuildFullConfig:
             "session_id": "sess-abc",
             "agent_csv_path": "/tmp/agents.csv",
             "round_count": 10,
-            "platforms": {"facebook": True},
+            "platforms": {"twitter": True, "reddit": True},
         }
         result = _build_full_config(config, "sess-abc")
 
@@ -286,6 +286,32 @@ class TestPlatformScriptSelection:
                     script = sl._SCRIPT_PATH
 
         assert "facebook" in str(script), f"Expected facebook script, got: {script}"
+
+    def test_reddit_only_uses_reddit_script(self) -> None:
+        """Single reddit platform should use the dedicated reddit script."""
+        from backend.app.services import simulation_lifecycle as sl
+
+        platforms = {"reddit": True}
+        enabled_count = sum(1 for v in platforms.values() if v)
+        facebook_on = platforms.get("facebook", False)
+        instagram_on = platforms.get("instagram", False)
+        twitter_on = platforms.get("twitter", False)
+        reddit_on = platforms.get("reddit", False)
+
+        if enabled_count > 1 and sl._PARALLEL_SCRIPT.exists():
+            script = sl._PARALLEL_SCRIPT
+        elif facebook_on:
+            script = sl._FACEBOOK_SCRIPT
+        elif instagram_on:
+            script = sl._INSTAGRAM_SCRIPT
+        elif twitter_on:
+            script = sl._SCRIPT_PATH
+        elif reddit_on:
+            script = sl._REDDIT_SCRIPT
+        else:
+            script = sl._SCRIPT_PATH
+
+        assert "reddit" in str(script)
 
     def test_instagram_only_uses_instagram_script(self) -> None:
         """Single instagram platform → run_instagram_simulation.py is selected."""
@@ -925,7 +951,7 @@ class TestSimulationRunnerDryRun:
 
         config: dict[str, Any] = {
             "agent_csv_path": str(agent_csv),
-            "platforms": {"facebook": True},
+            "platforms": {"twitter": True, "reddit": True},
             "round_count": 3,
         }
 
@@ -959,7 +985,7 @@ class TestSimulationRunnerDryRun:
 
         config: dict[str, Any] = {
             "agent_csv_path": str(agent_csv),
-            "platforms": {"facebook": True},
+            "platforms": {"twitter": True, "reddit": True},
             "round_count": 3,
         }
 
@@ -992,7 +1018,7 @@ class TestSimulationRunnerDryRun:
 
         config: dict[str, Any] = {
             "agent_csv_path": str(agent_csv),
-            "platforms": {"facebook": True},
+            "platforms": {"twitter": True, "reddit": True},
             "round_count": 3,
         }
 
@@ -1022,7 +1048,7 @@ class TestSimulationRunnerDryRun:
 
         config: dict[str, Any] = {
             "agent_csv_path": str(agent_csv),
-            "platforms": {"facebook": True},
+            "platforms": {"twitter": True, "reddit": True},
             "round_count": 3,
         }
 
@@ -1047,7 +1073,7 @@ class TestSimulationRunnerDryRun:
 
         config: dict[str, Any] = {
             "agent_csv_path": str(agent_csv),
-            "platforms": {"facebook": True},
+            "platforms": {"twitter": True, "reddit": True},
             "round_count": 3,
         }
 

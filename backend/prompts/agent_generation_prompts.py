@@ -149,7 +149,20 @@ in the KG
    - Concrete resources, tools, or powers available to this agent
    - Should reflect the agent's real-world influence mechanisms
 
-8. stance_axes
+8. constraints (1–4 items)
+   - Real practical limits, obligations, reputational risks, or vulnerabilities
+   - Examples: coalition politics, legal exposure, family loyalty, cash burn, sanctions pressure
+
+9. beliefs
+   - 2–5 named beliefs or priors with confidence floats in [0.0, 1.0]
+   - These should be scenario-relevant and stable enough to shape early actions
+   - Example: {"ceasefire_is_temporary": 0.8, "domestic_support_is_fragile": 0.65}
+
+10. memory_seed
+   - 1–3 sentences of prior memory/context this agent is carrying into the simulation
+   - Ground it in the seed text and KG only; do not invent future knowledge
+
+11. stance_axes
    - Infer 3–7 axes that are RELEVANT TO THIS SCENARIO (not generic axes)
    - Each axis is a named dimension with a float value in [0.0, 1.0]
    - Examples for a geopolitical scenario: militarism, diplomacy, nationalism, \
@@ -159,20 +172,20 @@ market_aggression, regulatory_compliance, stakeholder_focus
    - Use the SAME axis names across ALL agents so stances can be compared
    - Base axis values on the agent's known positions, not random assignment
 
-9. Big Five personality traits (openness, conscientiousness, extraversion,
+12. Big Five personality traits (openness, conscientiousness, extraversion,
    agreeableness, neuroticism)
    - Each is a float in [0.0, 1.0] where 0.5 is the neutral midpoint
    - Must be internally consistent with the persona and role
    - Examples: a cautious bureaucrat → high conscientiousness, low openness;
      a charismatic populist → high extraversion, low agreeableness
 
-10. relationships
+13. relationships
     - Derive from KG edges provided
     - Each entry: (other_agent_id, description)
     - Description should be a short phrase, e.g. "strategic rival", \
 "military ally", "media critic of"
 
-11. activity_level (float 0.0–1.0)
+14. activity_level (float 0.0–1.0)
     - How frequently this actor participates in public discourse each round
     - High (0.7–1.0): heads of state, active military commanders, \
 media outlets, social media-savvy activists
@@ -180,7 +193,7 @@ media outlets, social media-savvy activists
     - Low (0.1–0.3): secretive organisations, behind-the-scenes power brokers, \
 passive observers
 
-12. influence_weight (float 0.0–3.0)
+15. influence_weight (float 0.0–3.0)
     - How visible and impactful this actor's communications are when they do act
     - 2.0–3.0: superpower nations, global media outlets, dominant market leaders
     - 1.0–1.5: regional powers, mid-size companies, established NGOs
@@ -206,6 +219,9 @@ Return ONLY valid JSON with no markdown, no code fences, no extra text.
       "persona": "...",
       "goals": ["...", "..."],
       "capabilities": ["...", "..."],
+      "constraints": ["...", "..."],
+      "beliefs": {"belief_name": 0.0, "...": 0.0},
+      "memory_seed": "...",
       "stance_axes": {"axis_name": 0.0, ...},
       "relationships": {"other_agent_id": "description", ...},
       "openness": 0.5,

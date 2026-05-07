@@ -156,9 +156,9 @@ onMounted(fetchReport)
 
 .report-badge {
   padding: 2px 10px;
-  background: var(--accent-blue-light);
-  color: var(--accent-blue);
-  border-radius: var(--radius-pill);
+  background: var(--accent-subtle);
+  color: var(--accent);
+  border-radius: var(--radius-sm);
   font-size: 12px;
   font-weight: 600;
 }
@@ -179,7 +179,7 @@ onMounted(fetchReport)
   padding: 6px 14px;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   font-size: 13px;
   color: var(--text-secondary);
   cursor: pointer;
@@ -187,8 +187,8 @@ onMounted(fetchReport)
 }
 
 .btn-copy:hover {
-  border-color: var(--accent-blue);
-  color: var(--accent-blue);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .report-summary,
@@ -223,7 +223,7 @@ onMounted(fetchReport)
 
 .key-findings li::before {
   content: '▸ ';
-  color: var(--accent-blue);
+  color: var(--accent);
 }
 
 .report-body {

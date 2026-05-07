@@ -50,6 +50,10 @@ class ImplicitStakeholder:
     entity_type: str
     role: str
     relevance_reason: str
+    why_missing: str = ""
+    evidence_phrase: str = ""
+    inferred_role: str = ""
+    confidence: float = 0.45
 
 
 @dataclass(frozen=True)
@@ -120,7 +124,7 @@ class ImplicitStakeholderService:
                 (graph_id,),
             )
             edges = [dict(r) for r in await cursor.fetchall()]
-            
+
             cursor = await db.execute(
                 "SELECT id, title, description FROM kg_nodes WHERE session_id = ?",
                 (graph_id,),
@@ -130,8 +134,8 @@ class ImplicitStakeholderService:
         if not edges:
             return DiscoveryResult(stakeholders=(), nodes_added=0)
 
-        from backend.app.utils.graph_metrics import calculate_topological_metrics # noqa: PLC0415
-        
+        from backend.app.utils.graph_metrics import calculate_topological_metrics  # noqa: PLC0415
+
         metrics = calculate_topological_metrics(edges)
         if "error" in metrics:
             return DiscoveryResult(stakeholders=(), nodes_added=0)
@@ -147,7 +151,7 @@ class ImplicitStakeholderService:
         # Call LLM to see if these bridges imply a 'hidden' actor
         # e.g. if A and B are connected only via a bridge, maybe there's a third party mediating.
         bridge_nodes = [n for n in nodes if n["id"] in bridge_ids]
-        
+
         try:
             user_content = (
                 f"Graph Topology Analysis for session: {graph_id}\n\n"
@@ -157,17 +161,17 @@ class ImplicitStakeholderService:
                 "identify any 'Latent Actors' (e.g. regulators, competitors, or covert influencers) "
                 "that are likely operating in the background but are not yet in the graph."
             )
-            
+
             messages = [
                 {"role": "system", "content": IMPLICIT_STAKEHOLDER_SYSTEM + " (Focus on Topological Structural Holes)"},
                 {"role": "user", "content": user_content},
             ]
-            
+
             _s1_provider, _s1_model = get_step_provider_model(1)
             raw = await self._llm.chat_json(messages, max_tokens=2048, temperature=0.3,
                                             provider=_s1_provider, model=_s1_model)
             raw_actors = raw.get("implied_actors", [])
-            
+
             return await self._process_and_persist(graph_id, raw_actors, nodes)
         except Exception:
             logger.exception("Topo-Auditor discovery failed for graph %s", graph_id)
@@ -197,13 +201,35 @@ class ImplicitStakeholderService:
                 continue
 
             actor_id = _to_slug(actor.get("id") or name)
+            relevance_reason = (actor.get("relevance_reason") or actor.get("reason") or "").strip()
+            evidence_phrase = (
+                actor.get("evidence_phrase")
+                or actor.get("evidence")
+                or relevance_reason
+                or ""
+            ).strip()
+            inferred_role = (actor.get("inferred_role") or actor.get("role") or "").strip()
+            why_missing = (actor.get("why_missing") or "").strip()
+            confidence = _clamp_confidence(actor.get("confidence", 0.45))
+
+            if not evidence_phrase or not relevance_reason:
+                logger.debug(
+                    "ImplicitStakeholderService: skipping '%s' (missing evidence/rationale)",
+                    name,
+                )
+                continue
+
             new_stakeholders.append(
                 ImplicitStakeholder(
                     id=actor_id,
                     name=name,
                     entity_type=actor.get("entity_type", "Organization"),
-                    role=(actor.get("role") or "").strip(),
-                    relevance_reason=(actor.get("relevance_reason") or "").strip(),
+                    role=inferred_role,
+                    relevance_reason=relevance_reason,
+                    why_missing=why_missing,
+                    evidence_phrase=evidence_phrase,
+                    inferred_role=inferred_role,
+                    confidence=confidence,
                 )
             )
             existing_titles_norm.add(_normalize(name))  # prevent self-dups
@@ -278,27 +304,90 @@ class ImplicitStakeholderService:
     ) -> int:
         """Insert implicit actor nodes into kg_nodes. Returns count inserted."""
         prefix = graph_id.replace("-", "")[:8]
-        node_rows = [
-            (
-                f"{prefix}_imp_{s.id}",
-                graph_id,
-                s.entity_type,
-                s.name,
-                s.role,
-                json.dumps(
-                    {"relevance_reason": s.relevance_reason, "source": "implicit_discovery"},
-                    ensure_ascii=False,
-                ),
+        node_rows = []
+        evidence_rows = []
+        edge_rows = []
+        for s in stakeholders:
+            actor_node_id = f"{prefix}_imp_{s.id}"
+            evidence_node_id = f"{prefix}_evidence_{s.id}"
+            node_rows.append(
+                (
+                    actor_node_id,
+                    graph_id,
+                    s.entity_type,
+                    s.name,
+                    s.role,
+                    json.dumps(
+                        {
+                            "source": "implicit_discovery",
+                            "actor_visibility": "inferred",
+                            "include_in_simulation": True,
+                            "review_status": "pending",
+                            "relevance_reason": s.relevance_reason,
+                            "why_missing": s.why_missing,
+                            "evidence_phrase": s.evidence_phrase,
+                            "inferred_role": s.inferred_role,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    s.confidence,
+                )
             )
-            for s in stakeholders
-        ]
+            evidence_rows.append(
+                (
+                    evidence_node_id,
+                    graph_id,
+                    "Evidence",
+                    s.evidence_phrase[:120],
+                    f"Evidence phrase for inferred actor: {s.name}",
+                    json.dumps(
+                        {
+                            "source": "implicit_discovery",
+                            "actor_node_id": actor_node_id,
+                            "evidence_phrase": s.evidence_phrase,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    s.confidence,
+                )
+            )
+            edge_rows.append(
+                (
+                    graph_id,
+                    actor_node_id,
+                    evidence_node_id,
+                    "IMPLIED_BY",
+                    s.relevance_reason,
+                    s.evidence_phrase,
+                    json.dumps({"evidence_phrase": s.evidence_phrase}, ensure_ascii=False),
+                    s.confidence,
+                    "truth",
+                    s.confidence,
+                )
+            )
         try:
             async with get_db() as db:
                 await db.executemany(
                     """INSERT OR IGNORE INTO kg_nodes
-                       (id, session_id, entity_type, title, description, properties)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
+                       (id, session_id, entity_type, title, description,
+                        properties, confidence_score)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
                     node_rows,
+                )
+                await db.executemany(
+                    """INSERT OR IGNORE INTO kg_nodes
+                       (id, session_id, entity_type, title, description,
+                        properties, confidence_score)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    evidence_rows,
+                )
+                await db.executemany(
+                    """INSERT INTO kg_edges
+                       (session_id, source_id, target_id, relation_type,
+                        description, source_text, evidence_span, weight,
+                        layer_type, confidence_score)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    edge_rows,
                 )
                 await db.commit()
             return len(node_rows)
@@ -316,6 +405,13 @@ def _normalize(text: str) -> str:
     """Lowercase + strip accents for fuzzy deduplication."""
     nfkd = unicodedata.normalize("NFKD", text.lower().strip())
     return "".join(c for c in nfkd if not unicodedata.combining(c))
+
+
+def _clamp_confidence(value: Any) -> float:
+    try:
+        return max(0.0, min(1.0, float(value)))
+    except (TypeError, ValueError):
+        return 0.45
 
 
 def _to_slug(raw: str) -> str:

@@ -39,7 +39,7 @@ async def test_run_quick_start_kg_driven_mode():
     )
 
     mock_graph = MagicMock()
-    mock_graph.build_graph = AsyncMock(return_value={"graph_id": "graph_test_123"})
+    mock_graph.build_graph_from_seed = AsyncMock(return_value={"graph_id": "graph_test_123"})
 
     mock_manager = MagicMock()
     mock_manager.create_session = AsyncMock(return_value={"session_id": "sess-123"})
@@ -83,7 +83,7 @@ async def test_run_quick_start_hk_mode_unchanged():
     )
 
     mock_graph = MagicMock()
-    mock_graph.build_graph = AsyncMock(return_value={"graph_id": "graph_hk_123"})
+    mock_graph.build_graph_from_seed = AsyncMock(return_value={"graph_id": "graph_hk_123"})
 
     mock_manager = MagicMock()
     mock_manager.create_session = AsyncMock(return_value={"session_id": "sess-hk"})

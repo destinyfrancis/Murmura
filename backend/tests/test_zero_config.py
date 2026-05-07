@@ -238,9 +238,12 @@ class TestQuickStartEndpoint:
 
         mock_zc = MagicMock()
         mock_zc.prepare = AsyncMock(return_value=mock_zc_result)
+        mock_zc.infer_time_config = AsyncMock(
+            return_value=MagicMock(to_dict=lambda: {"minutes_per_round": 1440, "round_label_unit": "day"})
+        )
 
         mock_graph_builder = MagicMock()
-        mock_graph_builder.build_graph = AsyncMock(return_value={"graph_id": "g_123"})
+        mock_graph_builder.build_graph_from_seed = AsyncMock(return_value={"graph_id": "g_123"})
 
         mock_manager = MagicMock()
         mock_manager.create_session = AsyncMock(return_value={"session_id": "sess_1"})
@@ -256,8 +259,8 @@ class TestQuickStartEndpoint:
         mock_profile_gen.to_oasis_csv = MagicMock(return_value="header\n")
 
         with (
-            patch("backend.app.api.simulation.ZeroConfigService", return_value=mock_zc, create=True),
-            patch("backend.app.api.simulation.GraphBuilderService", return_value=mock_graph_builder, create=True),
+            patch("backend.app.services.zero_config.ZeroConfigService", return_value=mock_zc),
+            patch("backend.app.services.graph_builder.GraphBuilderService", return_value=mock_graph_builder),
             patch("backend.app.api.simulation.get_simulation_manager", return_value=mock_manager),
             patch("backend.app.api.simulation.AgentFactory", return_value=mock_factory),
             patch("backend.app.api.simulation.MacroController", return_value=mock_macro),

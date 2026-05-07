@@ -7,6 +7,11 @@ from pathlib import Path
 from pydantic_settings import BaseSettings
 
 
+def _default_database_path() -> str:
+    """Prefer the new Murmura DB path while allowing legacy discovery later."""
+    return "data/murmura.db"
+
+
 class Settings(BaseSettings):
     """Immutable application settings loaded from .env file.
 
@@ -22,7 +27,7 @@ class Settings(BaseSettings):
     }
 
     # Database
-    DATABASE_PATH: str = "data/murmuroscope.db"
+    DATABASE_PATH: str = _default_database_path()
 
     # LLM API keys
     OPENROUTER_API_KEY: str = ""

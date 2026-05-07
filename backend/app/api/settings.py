@@ -4,6 +4,7 @@ Architecture:
   GET  /api/settings         — 返回所有設定（API keys masked）
   PUT  /api/settings         — 更新設定，寫 DB + 更新 RuntimeSettingsStore
   POST /api/settings/test-key — 測試 API key 有效性
+  POST /api/settings/models   — 讀取供應商目前可用模型清單
 
 API keys 的優先級：
   RuntimeSettingsStore (DB) > .env
@@ -18,7 +19,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from backend.app.services.runtime_settings import get_all, get_override, set_override
+from backend.app.services.runtime_settings import get_override, set_override
 from backend.app.utils.db import get_db
 from backend.app.utils.logger import get_logger
 
@@ -228,6 +229,12 @@ class TestKeyRequest(BaseModel):
     model: str | None = None    # When set, send a 1-token request to verify model availability
 
 
+class ProviderModelsRequest(BaseModel):
+    provider: str
+    api_key: str | None = None  # None = use stored key
+    account_id: str | None = None  # Fireworks only; defaults to public "fireworks" account
+
+
 # ---------------------------------------------------------------------------
 # DB helpers
 # ---------------------------------------------------------------------------
@@ -311,6 +318,43 @@ async def test_api_key(req: TestKeyRequest) -> dict[str, Any]:
         return {"success": False, "provider": provider, "message": str(exc)}
 
 
+@router.post("/models")
+async def list_provider_models(req: ProviderModelsRequest) -> dict[str, Any]:
+    """Return a normalized model list for providers that expose catalog APIs."""
+    provider = req.provider.lower()
+    api_key = (req.api_key or "").strip() or _get_env_key(provider)
+
+    if provider not in {"openrouter", "fireworks"}:
+        return {
+            "success": False,
+            "provider": provider,
+            "models": [],
+            "message": f"Provider '{provider}' does not support model discovery yet",
+        }
+    if not api_key:
+        raise HTTPException(status_code=400, detail="api_key is required and no stored key found")
+
+    try:
+        if provider == "openrouter":
+            models = await _fetch_openrouter_models(api_key)
+        else:
+            models = await _fetch_fireworks_models(api_key, req.account_id or "fireworks")
+        return {
+            "success": True,
+            "provider": provider,
+            "models": models,
+            "message": f"Loaded {len(models)} models from {provider}",
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("model discovery failed for %s: %s", provider, exc)
+        return {
+            "success": False,
+            "provider": provider,
+            "models": [],
+            "message": f"Unable to load model list from {provider}",
+        }
+
+
 async def _test_provider_model(provider: str, api_key: str, model: str) -> dict[str, Any]:
     """Send a minimal 1-token LLM request to verify a specific model is accessible."""
     try:
@@ -390,6 +434,16 @@ async def _test_provider_key(provider: str, api_key: str) -> dict[str, Any]:
                 return {"ok": True, "message": "DeepSeek key valid ✓"}
             return {"ok": False, "message": f"DeepSeek returned HTTP {resp.status_code}"}
 
+        elif provider == "fireworks":
+            resp = await client.get(
+                "https://api.fireworks.ai/v1/accounts/fireworks/models",
+                params={"filter": "supports_serverless=true", "pageSize": 1},
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            if resp.status_code == 200:
+                return {"ok": True, "message": "Fireworks key valid ✓"}
+            return {"ok": False, "message": f"Fireworks returned HTTP {resp.status_code}"}
+
         elif provider in ("fred", "data"):
             resp = await client.get(
                 f"https://api.stlouisfed.org/fred/series?series_id=GNPCA&api_key={api_key}&file_type=json"
@@ -400,3 +454,78 @@ async def _test_provider_key(provider: str, api_key: str) -> dict[str, Any]:
 
         else:
             return {"ok": False, "message": f"Unknown provider '{provider}' — cannot test"}
+
+
+async def _fetch_openrouter_models(api_key: str) -> list[dict[str, Any]]:
+    """Fetch and normalize OpenRouter model catalog entries."""
+    async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+        resp = await client.get(
+            "https://openrouter.ai/api/v1/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        resp.raise_for_status()
+        raw_models = resp.json().get("data", [])
+
+    models: list[dict[str, Any]] = []
+    for item in raw_models:
+        architecture = item.get("architecture") or {}
+        top_provider = item.get("top_provider") or {}
+        pricing = item.get("pricing") or {}
+        model_id = item.get("id", "")
+        if not model_id:
+            continue
+        models.append(
+            {
+                "id": model_id,
+                "name": item.get("name") or model_id,
+                "description": item.get("description") or "",
+                "context_length": item.get("context_length") or top_provider.get("context_length"),
+                "pricing": {
+                    "prompt": pricing.get("prompt"),
+                    "completion": pricing.get("completion"),
+                },
+                "supports_tools": "tools" in (item.get("supported_parameters") or []),
+                "supports_image": "image" in (architecture.get("input_modalities") or []),
+            }
+        )
+    return sorted(models, key=lambda m: m["id"])
+
+
+async def _fetch_fireworks_models(api_key: str, account_id: str) -> list[dict[str, Any]]:
+    """Fetch and normalize Fireworks serverless text model catalog entries."""
+    models: list[dict[str, Any]] = []
+    page_token = ""
+    async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+        for _ in range(5):
+            params = {
+                "filter": "supports_serverless=true",
+                "pageSize": 200,
+            }
+            if page_token:
+                params["pageToken"] = page_token
+            resp = await client.get(
+                f"https://api.fireworks.ai/v1/accounts/{account_id}/models",
+                params=params,
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            for item in data.get("models", []):
+                model_id = item.get("name", "")
+                if not model_id:
+                    continue
+                models.append(
+                    {
+                        "id": model_id,
+                        "name": item.get("displayName") or model_id.rsplit("/", 1)[-1],
+                        "description": item.get("description") or "",
+                        "context_length": item.get("contextLength") or item.get("trainingContextLength"),
+                        "pricing": {},
+                        "supports_tools": bool(item.get("supportsTools")),
+                        "supports_image": bool(item.get("supportsImageInput")),
+                    }
+                )
+            page_token = data.get("nextPageToken") or ""
+            if not page_token:
+                break
+    return sorted(models, key=lambda m: m["id"])

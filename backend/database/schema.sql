@@ -1,4 +1,4 @@
--- MurmuraScope Database Schema
+-- Murmura Database Schema
 -- SQLite with WAL mode for concurrent reads
 
 -- NOTE: FK constraints only apply to newly created databases. Existing databases
@@ -70,6 +70,8 @@ CREATE TABLE IF NOT EXISTS kg_edges (
     target_id TEXT NOT NULL REFERENCES kg_nodes(id),
     relation_type TEXT NOT NULL,
     description TEXT,
+    source_text TEXT,
+    evidence_span TEXT,
     weight REAL DEFAULT 1.0,
     round_number INTEGER NOT NULL DEFAULT 0,
     -- Dual-layer graph support (Phase 2)

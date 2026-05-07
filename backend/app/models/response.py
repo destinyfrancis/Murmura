@@ -14,6 +14,7 @@ class GraphBuildResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     graph_id: str
+    session_id: str | None = None
     node_count: int
     edge_count: int
     entity_types: list[str]

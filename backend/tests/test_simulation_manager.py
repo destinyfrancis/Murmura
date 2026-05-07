@@ -34,7 +34,9 @@ from backend.app.services.simulation_manager import (
     _load_session,
     _session_to_dict,
     _validate_transition,
+    generate_agents,
     store_agent_profiles,
+    store_universal_agent_relationships,
 )
 
 # ---------------------------------------------------------------------------
@@ -117,7 +119,7 @@ def valid_request():
         "scenario_type": "property",
         "agent_count": 10,
         "round_count": 5,
-        "platforms": {"facebook": True, "instagram": True},
+        "platforms": {"twitter": True, "reddit": True},
         "llm_provider": "openrouter",
     }
 
@@ -142,6 +144,9 @@ class TestInferSimMode:
 
     def test_unknown_defaults_to_life_decision(self):
         assert _infer_sim_mode("xyz_unknown") == SimMode.LIFE_DECISION
+
+    def test_kg_driven_maps_to_kg_driven(self):
+        assert _infer_sim_mode("kg_driven") == SimMode.KG_DRIVEN
 
 
 # ---------------------------------------------------------------------------
@@ -273,6 +278,21 @@ class TestCreateSession:
         with pytest.raises(ValueError, match="round_count must be at least 1"):
             await mgr.create_session({"graph_id": "g1", "round_count": -1})
 
+    @pytest.mark.asyncio
+    async def test_honours_explicit_sim_mode_override(self, sim_db, mock_runner, valid_request, tmp_path):
+        mgr = SimulationManager(runner=mock_runner)
+        request = {**valid_request, "sim_mode": "kg_driven"}
+        with patch("backend.app.services.simulation_manager._PROJECT_ROOT", tmp_path):
+            result = await mgr.create_session(request)
+
+        cursor = await sim_db.execute(
+            "SELECT sim_mode, scenario_type FROM simulation_sessions WHERE id = ?",
+            (result["session_id"],),
+        )
+        row = await cursor.fetchone()
+        assert row["sim_mode"] == "kg_driven"
+        assert row["scenario_type"] == "property"
+
 
 # ---------------------------------------------------------------------------
 # get_session
@@ -298,6 +318,102 @@ class TestGetSession:
         mgr = SimulationManager(runner=mock_runner)
         with pytest.raises(ValueError, match="Session not found"):
             await mgr.get_session("nonexistent-id")
+
+
+class TestGenerateAgents:
+    @pytest.mark.asyncio
+    async def test_kg_driven_passes_target_count(self, tmp_path):
+        mock_factory = AsyncMock()
+        mock_factory.generate_from_kg = AsyncMock(return_value=[MagicMock(id="a1", platform_identities=())] * 2)
+        mock_factory.generate_agents_csv = MagicMock(return_value=str(tmp_path / "agents.csv"))
+        mock_factory.save_platform_identities_to_db = AsyncMock()
+
+        with (
+            patch("backend.app.services.simulation_manager._PROJECT_ROOT", tmp_path),
+            patch("backend.app.services.kg_agent_factory.KGAgentFactory.create", new=AsyncMock(return_value=mock_factory)),
+            patch("backend.app.services.graph_builder._session_id_from_graph_id", return_value="graph-session-1"),
+            patch("backend.app.utils.db.get_db") as mock_get_db,
+            patch("backend.app.utils.llm_client.LLMClient"),
+            patch("backend.app.services.memory_initialization.MemoryInitializationService"),
+        ):
+            db = AsyncMock()
+            db.execute = AsyncMock(side_effect=[AsyncMock(fetchall=AsyncMock(return_value=[])), AsyncMock(fetchall=AsyncMock(return_value=[]))])
+            mock_get_db.return_value.__aenter__ = AsyncMock(return_value=db)
+            mock_get_db.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            profiles, _csv_path = await generate_agents(
+                session_id="sess-1",
+                request={"graph_id": "graph-1", "seed_text": "test seed", "agent_count": 2},
+                mode="kg_driven",
+            )
+
+        assert len(profiles) == 2
+        assert mock_factory.generate_from_kg.await_args.kwargs["target_count"] == 2
+
+    @pytest.mark.asyncio
+    async def test_kg_driven_raises_when_target_count_not_met(self, tmp_path):
+        mock_factory = AsyncMock()
+        mock_factory.generate_from_kg = AsyncMock(return_value=[MagicMock(id="a1", platform_identities=())])
+        mock_factory.generate_agents_csv = MagicMock(return_value=str(tmp_path / "agents.csv"))
+        mock_factory.save_platform_identities_to_db = AsyncMock()
+
+        with (
+            patch("backend.app.services.simulation_manager._PROJECT_ROOT", tmp_path),
+            patch("backend.app.services.kg_agent_factory.KGAgentFactory.create", new=AsyncMock(return_value=mock_factory)),
+            patch("backend.app.services.graph_builder._session_id_from_graph_id", return_value="graph-session-1"),
+            patch("backend.app.utils.db.get_db") as mock_get_db,
+            patch("backend.app.utils.llm_client.LLMClient"),
+            patch("backend.app.services.memory_initialization.MemoryInitializationService"),
+        ):
+            db = AsyncMock()
+            db.execute = AsyncMock(side_effect=[AsyncMock(fetchall=AsyncMock(return_value=[])), AsyncMock(fetchall=AsyncMock(return_value=[]))])
+            mock_get_db.return_value.__aenter__ = AsyncMock(return_value=db)
+            mock_get_db.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            with pytest.raises(RuntimeError, match="produced 1 agents but 2 were requested"):
+                await generate_agents(
+                    session_id="sess-1",
+                    request={"graph_id": "graph-1", "seed_text": "test seed", "agent_count": 2},
+                    mode="kg_driven",
+                )
+
+
+class TestStoreUniversalAgentRelationships:
+    @pytest.mark.asyncio
+    async def test_persists_relationship_rows(self, sim_db):
+        profile_a = MagicMock()
+        profile_a.id = "agent_a"
+        profile_a.relationships = (("agent_b", "ally"),)
+        profile_a.influence_weight = 1.2
+        profile_a.to_oasis_row.return_value = {"username": "agent_a_u"}
+
+        profile_b = MagicMock()
+        profile_b.id = "agent_b"
+        profile_b.relationships = ()
+        profile_b.influence_weight = 0.9
+        profile_b.to_oasis_row.return_value = {"username": "agent_b_u"}
+
+        await sim_db.execute(
+            "INSERT INTO simulation_sessions (id, name, sim_mode, seed_text, scenario_type, graph_id, agent_count, round_count, llm_provider, llm_model, oasis_db_path, status, estimated_cost_usd, config_json, created_at, domain_pack_id) VALUES ('sess-rel', 't', 'kg_driven', 'seed', 'kg_driven', 'g1', 2, 2, 'openrouter', 'm', '', 'created', 0.0, '{}', '2026-01-01', 'hk_city')"
+        )
+        await sim_db.execute(
+            "INSERT INTO agent_profiles (id, session_id, agent_type, age, sex, district, occupation, income_bracket, education_level, marital_status, housing_type, openness, conscientiousness, extraversion, agreeableness, neuroticism, monthly_income, savings, oasis_persona, oasis_username, created_at) VALUES (1, 'sess-rel', 'Person', 0, 'N/A', 'Person', 'role', 'N/A', 'N/A', 'N/A', 'N/A', 0.5, 0.5, 0.5, 0.5, 0.5, 0, 0, 'p', 'agent_a_u', '2026-01-01')"
+        )
+        await sim_db.execute(
+            "INSERT INTO agent_profiles (id, session_id, agent_type, age, sex, district, occupation, income_bracket, education_level, marital_status, housing_type, openness, conscientiousness, extraversion, agreeableness, neuroticism, monthly_income, savings, oasis_persona, oasis_username, created_at) VALUES (2, 'sess-rel', 'Person', 0, 'N/A', 'Person', 'role', 'N/A', 'N/A', 'N/A', 'N/A', 0.5, 0.5, 0.5, 0.5, 0.5, 0, 0, 'p', 'agent_b_u', '2026-01-01')"
+        )
+        await sim_db.commit()
+
+        inserted = await store_universal_agent_relationships("sess-rel", [profile_a, profile_b])
+        assert inserted == 1
+
+        row = await (await sim_db.execute(
+            "SELECT agent_a_id, agent_b_id, relationship_type, trust_score FROM agent_relationships WHERE session_id = 'sess-rel'"
+        )).fetchone()
+        assert row["agent_a_id"] == 1
+        assert row["agent_b_id"] == 2
+        assert row["relationship_type"] == "ally"
+        assert row["trust_score"] > 0
 
 
 # ---------------------------------------------------------------------------

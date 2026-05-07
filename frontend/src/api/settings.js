@@ -33,3 +33,16 @@ export function testApiKey(provider, apiKey = null, model = null) {
     ...(model  ? { model }          : {}),
   })
 }
+
+/**
+ * Fetch a provider's currently available model catalog.
+ * @param {string} provider - currently supports 'openrouter' and 'fireworks'
+ * @param {string|null} apiKey - Plain text key to test; null = use stored key
+ * @returns {Promise<{success, provider, models, message}>}
+ */
+export function listProviderModels(provider, apiKey = null) {
+  return api.post('/settings/models', {
+    provider,
+    ...(apiKey ? { api_key: apiKey } : {}),
+  })
+}

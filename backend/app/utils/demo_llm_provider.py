@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-logger = logging.getLogger("murmuroscope.demo")
+logger = logging.getLogger("murmura.demo")
 
 class DemoLLMClient:
     """A deterministic stub client for Demo Mode.

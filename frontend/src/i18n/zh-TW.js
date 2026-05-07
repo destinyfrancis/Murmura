@@ -254,11 +254,256 @@ export default {
     }
   },
   learn: {
-    subtitle: '了解 Murmura 背後的原理'
+    eyebrow: 'Operator Manual',
+    title: '由種子文本到可追溯預測',
+    subtitle: '這裡不是產品廣告，而是操作手冊：你會學識 Murmura 如何讀入情景、建構知識圖譜、生成代理人、運行 OASIS 模擬、解讀概率報告，以及如何質疑模型輸出。',
+    metricsLabel: '教學摘要',
+    indexLabel: '教學目錄',
+    glossaryLabel: 'Quick Reference',
+    glossaryTitle: '讀結果前先掌握的詞彙',
+    metrics: [
+      { value: '10', label: '教學章節' },
+      { value: '05', label: '工作流步驟' },
+      { value: '18', label: 'XAI 工具' },
+      { value: 'p10-p90', label: '不確定區間' }
+    ],
+    workflow: [
+      { label: 'Graph', desc: '把原始文本拆成實體、關係、隱含持份者與初始指標。' },
+      { label: 'Env', desc: '把圖譜轉成代理人、平台身份、決策空間與場景配置。' },
+      { label: 'Sim', desc: '逐輪運行代理人決策、信念更新、派系形成與宏觀回饋。' },
+      { label: 'Report', desc: '用可解釋工具抽查證據、生成報告、輸出 PDF 或分享連結。' },
+      { label: 'Interact', desc: '訪談代理人、追問假設、注入 shock、比較分支時間線。' }
+    ],
+    blocks: {
+      whatHappens: '系統實際做什麼',
+      howToRead: '你應該怎樣判讀',
+      operatorRule: '操作守則'
+    },
+    modules: {
+      overview: {
+        code: 'START',
+        title: 'Murmura 預測的是集體反應，不是單一答案',
+        summary: '輸入一段 seed text 後，Murmura 會把它轉成一個可運行的社會、公司、市場或敘事世界。核心不是問 LLM「答案係咩」，而是讓不同代理人在同一個世界入面互相影響。',
+        steps: [
+          '讀取文本，保留你提供的時間線與語境。',
+          '抽取明示角色、事件、地點、組織、資源與衝突。',
+          '推斷未被明說但會受影響的持份者。',
+          '讓代理人逐輪行動，觀察群體趨勢如何湧現。'
+        ],
+        checks: [
+          '把輸出當成「多個可能未來的地圖」，不是預言。',
+          '先看代理人、指標與 shock 是否符合原始文本。',
+          '用報告證據與反事實分支檢查結果是否穩健。',
+          '如果 seed text 偏窄，模擬世界亦會偏窄。'
+        ],
+        outcome: '好的使用方法是先定義問題，再讓系統構建世界；不要只貼一個標題就期待完整因果宇宙。'
+      },
+      workflow: {
+        code: 'FLOW',
+        title: '五步工作流如何連成一條預測流水線',
+        summary: '每一步都會留下狀態：你可以停在圖譜檢查、重新生成環境、改 preset、重跑報告，或者在互動階段追問代理人。',
+        steps: [
+          'Step 1 建構 KG：抽取實體與關係，加入隱含持份者。',
+          'Step 2 建立環境：生成代理人格、平台身份、初始記憶與決策空間。',
+          'Step 3 運行模擬：OASIS 子程序按輪次輸出行動、信念與事件。',
+          'Step 4 生成報告：ReACT 報告使用 XAI 工具引用數據與時間線。',
+          'Step 5 深度互動：訪談代理人、追問證據、注入 what-if shock。'
+        ],
+        checks: [
+          'Graph 錯，後面每一步都會被帶歪。',
+          'Env 是代理人世界觀的入口，最值得抽樣檢查。',
+          'Sim 要看趨勢、分歧與臨界點，不只看最後一輪。',
+          'Report 是決策輔助，不是把判斷外判出去。'
+        ],
+        outcome: '當你覺得結果奇怪，先回到最早出錯的步驟，而不是直接改報告文字。'
+      },
+      graph: {
+        code: 'GRAPH',
+        title: '知識圖譜把自然語言變成可檢查結構',
+        summary: 'Murmura 會將 seed text 轉成節點與邊：誰影響誰、哪個資源被爭奪、哪條因果鏈正在形成。這是後續 agent factory 與 GraphRAG 的地基。',
+        steps: [
+          'EntityExtractor 找出明示節點與關係。',
+          'Alias map 合併同一實體的不同叫法。',
+          'ImplicitStakeholderService 補上間接受影響的人與組織。',
+          '圖譜快照會在模擬期間跟隨行動更新。'
+        ],
+        checks: [
+          '節點應該有足夠多樣性，不應只剩主角。',
+          '邊的方向要符合因果或互動方向。',
+          '隱含角色應該能從 seed text 推出，而不是靠外部常識亂補。',
+          '如果要預測某指標，圖上應該有能影響該指標的節點。'
+        ],
+        outcome: '圖譜是你最早、成本最低的品質控制點；看不懂圖，就不要急著按開始模擬。'
+      },
+      actors: {
+        code: 'AGENTS',
+        title: '代理人不是群眾貼紙，而是有記憶與偏好的決策者',
+        summary: '每個代理人會有身份、人格、認知指紋、記憶、平台身份與信任關係。重點是多樣性：不同層級、利益、資訊來源會產生不同反應。',
+        steps: [
+          'KGAgentFactory 從圖譜節點挑選可行角色。',
+          '當 target count 大於明示角色，系統會生成背景代理人。',
+          '代理人會得到 Big Five、依附風格、政治或價值傾向。',
+          '記憶會寫入 LanceDB，供後續訪談與決策檢索。'
+        ],
+        checks: [
+          '不要只看代理人數量，要看角色分佈是否合理。',
+          '關鍵持份者應該被標記為 stakeholder，而不是背景噪音。',
+          '平台身份要反映語境：同一代理人在不同平台可以有不同行為。',
+          '如果代理人過於同質，湧現結果會變得假穩定。'
+        ],
+        outcome: '大型模擬不一定更準；有代表性、有衝突、有資訊差的代理人組合才重要。'
+      },
+      simulation: {
+        code: 'SIM',
+        title: '模擬觀察的是互動後的形狀',
+        summary: 'Step 3 會按輪次運行代理人：發言、決策、信念更新、情緒變化、派系形成、回音室、宏觀回饋與 moderation event。這些不是靜態摘要，而是互動後的路徑。',
+        steps: [
+          '每輪先整理 feed ranking 與世界事件。',
+          '代理人根據記憶、關係、信念與平台身份行動。',
+          '信念以 Bayesian update 與 embedding propagation 更新。',
+          '每隔幾輪計算派系、極化、病毒式傳播、宏觀狀態與 tipping point。'
+        ],
+        checks: [
+          '留意趨勢轉折點，而不是只看平均值。',
+          '比較派系之間的行動差異。',
+          '看 shock 之後是否出現合理的延遲與連鎖反應。',
+          '如果 Python 版本不兼容，UI 會降級並停在環境設定後。'
+        ],
+        outcome: '一次模擬是一條路徑；要講穩健性，就要看 ensemble、fork 或反事實分支。'
+      },
+      probability: {
+        code: 'DIST',
+        title: '讀概率分佈，不要只讀單點預測',
+        summary: 'Murmura 的輸出應該用分佈來讀：p50 是中位數，p10-p90 是寬範圍不確定區間，分支之間的差距代表模型認為未來可能分叉。',
+        steps: [
+          '先看 p50，理解系統最中間的路徑。',
+          '再看 p10-p90，判斷尾部風險有幾闊。',
+          '比較不同 preset、shock、fork 的分佈是否一致。',
+          '用 Monte Carlo 與 Swarm Ensemble 檢查敏感度。'
+        ],
+        checks: [
+          '70% 不是必然，只是長期頻率語言。',
+          '窄區間不一定代表真準，可能代表假設過窄。',
+          '分佈偏斜時，平均值可能誤導。',
+          '決策要看損失函數，不只看最大概率事件。'
+        ],
+        outcome: '真正有用的問題不是「會不會發生」，而是「在什麼條件下、以什麼代價、以多大不確定性發生」。'
+      },
+      uncertainty: {
+        code: 'RISK',
+        title: '信心來自可追溯性，不來自語氣肯定',
+        summary: '模型可以講得很肯定，但你要看的是真正支撐：輸入質量、圖譜覆蓋、代理人多樣性、樣本路徑數、工具證據與歷史校準。',
+        steps: [
+          '辨認不確定性來源：文本缺口、模型假設、LLM 隨機性、外部 shock。',
+          '看報告引用的工具與數據是否能支撐結論。',
+          '查看不同分支是否收斂或分裂。',
+          '把高風險結論轉成需要驗證的假設。'
+        ],
+        checks: [
+          '高信心但低證據密度，是危險訊號。',
+          '結果若只由少數代理人推動，要查是否代表性不足。',
+          '對突發事件的預測應該保持保守。',
+          '透明寫出限制，比輸出漂亮答案更重要。'
+        ],
+        outcome: '可信預測不是沒有不確定性，而是知道不確定性在哪裡。'
+      },
+      report: {
+        code: 'REPORT',
+        title: '報告是可檢查的推理產物',
+        summary: '報告階段會以 ReACT 流程組裝：先列大綱，再用 XAI 工具查時間線、派系、指標、信念、證據，最後生成可分享或輸出的分析。',
+        steps: [
+          'Report Orchestrator 先建立章節計劃。',
+          '每個章節調用對應工具查詢 DB 與時間線。',
+          'LLM 整合證據、圖表與限制。',
+          '報告可輸出 PDF，並用 share token 分享。'
+        ],
+        checks: [
+          '結論要能追到模擬事件或圖譜證據。',
+          '不要接受沒有對照分支的強因果說法。',
+          '看報告是否清楚區分觀察、推斷與建議。',
+          '重新生成報告前，先確認模擬 session 未被清理。'
+        ],
+        outcome: '好報告應該幫你追問，而不是終止思考。'
+      },
+      interaction: {
+        code: 'ASK',
+        title: '互動階段用來審訊模型，不是聊天消遣',
+        summary: 'Step 5 可以訪談代理人、問 Narrative Analyst、追查某次行動背後的記憶，也可以提出 what-if 假設，比較代理人是否改變立場。',
+        steps: [
+          '選擇報告分析師或指定代理人。',
+          '針對某輪事件、某個派系或某條因果鏈提問。',
+          '要求代理人引用自己的記憶與信念變化。',
+          '注入假設衝擊，觀察答案是否一致。'
+        ],
+        checks: [
+          '問題要具體：問輪次、指標、角色、行動。',
+          '代理人的回答是角色內推理，不等於事實。',
+          '如果回答與報告矛盾，要回查 timeline 與 DB 證據。',
+          '用互動找風險，不要只找支持自己立場的句子。'
+        ],
+        outcome: '把互動當成審計工具：問「你點知？」通常比問「你覺得點？」更有價值。'
+      },
+      limits: {
+        code: 'LIMITS',
+        title: '模型邊界要寫在決策前面',
+        summary: 'Murmura 受 seed text、LLM provider、資料延遲、模擬 preset、OASIS runtime 與成本上限影響。知道邊界，才知道結果可以用到哪裡。',
+        steps: [
+          '檢查 seed text 是否包含足夠背景與時間範圍。',
+          '確認 Settings 的 step-specific 模型與 API key 可用。',
+          '查看成本、並行、agent count 與 rounds 是否符合用途。',
+          '清楚標示哪些資料是實時、延遲、模擬生成或 LLM 推斷。'
+        ],
+        checks: [
+          '不要用 demo mode 結果做高風險決策。',
+          '法律、醫療、投資與安全用途需要外部專家驗證。',
+          '輸入資料含 prompt injection 時，必須先經安全清洗。',
+          '舊 session 的結果可能不反映最新資料或模型設定。'
+        ],
+        outcome: '最專業的用法，是把 Murmura 放在決策流程入面做壓力測試，而不是把它當成決策者。'
+      }
+    },
+    glossary: [
+      { term: 'Seed Text', desc: '你投放入系統的原始場景、文件或問題背景。' },
+      { term: 'Knowledge Firewall', desc: '提示詞限制 LLM 只根據 seed text 推理，避免偷用未來知識。' },
+      { term: 'Tipping Point', desc: '系統分佈突然轉向或分叉的臨界點。' },
+      { term: 'p10-p90', desc: '80% 模擬結果落入的區間，用來看尾部風險與不確定性。' },
+      { term: 'Stakeholder', desc: '對結果有實質影響或會被結果影響的角色。' },
+      { term: 'What-If Fork', desc: '在某輪注入 shock 後建立的新時間線，用來比較反事實結果。' }
+    ]
   },
   home: {
+    eyebrow: '通用預測工作台',
     subtitle: '通用預測引擎',
     description: '投放任何種子文字——新聞、劇本、地緣政治事件——AI 自動構建世界、生成代理人並開始模擬。結合多智能體系統、知識圖譜與宏觀預測，預見集體行為。',
+    consoleTitle: 'Prediction Console',
+    consoleStatus: '系統狀態',
+    consoleStatusLive: '可用',
+    consoleSignal: 'Clean-room UI · 5-step workflow',
+    pipelineTitle: '五步控制流',
+    examplesTitle: '示例場景',
+    sampleWar: '地緣衝突升級後的能源市場反應',
+    sampleFiction: '小說世界中主要陣營的集體選擇',
+    sampleCompany: '新競爭者進入後的 B2B 供應鏈反應',
+    inputLabel: 'INPUT',
+    fileLabel: 'SEED FILE',
+    seedLabel: 'SEED TEXT',
+    questionLabel: 'QUESTION',
+    presetLabel: 'RUN PRESET',
+    toolsTitle: '工程工具',
+    domainPacks: '領域包',
+    metrics: {
+      zeroConfig: '零配置',
+      kg: 'GraphRAG',
+      oasis: 'OASIS',
+      react: 'ReACT'
+    },
+    workflow: {
+      graph: '抽取實體、關係與隱含持份者',
+      env: '生成代理人、平台身份與場景配置',
+      sim: '運行多智能體模擬與湧現 hooks',
+      report: '以 XAI 工具生成可追溯報告',
+      interact: '訪談代理人並探索 What-If 分支'
+    },
     startTitle: '立即開始預測',
     startSubtitle: '上傳文件或輸入種子文字，AI 自動構建世界並開始模擬',
     dropLabel: '拖放文件至此，或點擊選擇',
@@ -370,12 +615,34 @@ export default {
       },
       expressBadge: '⚡ 快速模式 · 已自動配置'
     },
+    workbench: {
+      subtitle: '從種子文本到可追溯報告的五步預測流水線',
+      session: 'SESSION',
+      graph: 'GRAPH',
+      preset: 'PRESET',
+      engine: 'ENGINE',
+      unavailable: 'LIMITED',
+      ready: 'READY',
+      locked: 'LOCKED',
+      done: 'DONE',
+      active: 'ACTIVE'
+    },
     errors: {
       graphFirst: '請先完成圖譜構建',
       envFirst: '請先完成環境設置並啟動模擬',
       simFirst: '模擬完成後才可生成報告',
       reportFirst: '請先生成報告',
-      engineUnavailable: '模擬引擎不可用 — 請使用 Docker 以獲得完整功能'
+      engineUnavailable: '模擬引擎不可用 — 請使用 Docker 以獲得完整功能',
+      engineUnavailableDetail: '模擬引擎不可用 — 請使用 Docker 以獲得完整功能。流程將在環境設定後停止。'
+    }
+  },
+  step2: {
+    badges: {
+      experimental: '實驗'
+    },
+    actions: {
+      creating: '建立中...',
+      start: '開始模擬'
     }
   },
   settings: {
@@ -399,6 +666,15 @@ export default {
         desc: '為每個工作流步驟獨立設定 LLM 模型。儲存後即時生效，無需重啟伺服器。',
         quickApply: '快速套用：',
         globalFallback: '全域預設（各步驟未設定時使用）',
+        models: {
+          sync: '同步模型',
+          syncing: '同步中…',
+          chooseProvider: '先選擇 Provider',
+          unsupported: '此 Provider 暫未支援自動模型清單，可手動輸入 model id',
+          notLoaded: '尚未同步模型清單；可先儲存/測試 API key，或按同步模型',
+          loading: '正在讀取模型清單…',
+          loaded: '已載入 {count} 個模型；亦可手動輸入未列出的 model id'
+        },
         steps: {
           useGlobal: '使用全域預設',
           fillBoth: '請填寫 Provider 和 Model',

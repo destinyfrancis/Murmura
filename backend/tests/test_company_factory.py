@@ -542,7 +542,7 @@ class TestCreateSimulationB2BIntegration:
             "scenario_type": "property",
             "agent_count": 5,
             "round_count": 3,
-            "platforms": {"facebook": True, "instagram": False},
+            "platforms": {"twitter": True, "reddit": True},
             "llm_provider": "openrouter",
             "company_count": 0,
         }
@@ -736,6 +736,41 @@ class TestCreateSimulationB2BIntegration:
         assert result.meta.get("company_count") == 5
         assert result.meta.get("supply_chain_edges") == 7
 
+    @pytest.mark.asyncio
+    async def test_kg_driven_create_uses_graph_agent_path(self):
+        """Universal graph sessions should bypass demographic population creation."""
+        from backend.app.api.simulation import create_simulation
+        from backend.app.models.request import SimulationCreateRequest
+
+        req = SimulationCreateRequest(**self._base_request(agent_count=3))
+        mock_profiles = [
+            MagicMock(role="official", entity_type="PoliticalFigure", relationships=(("ally_1", "coordinates"),)),
+            MagicMock(role="journalist", entity_type="MediaOutlet", relationships=()),
+            MagicMock(role="citizen", entity_type="Person", relationships=(("official_1", "criticises"),)),
+        ]
+
+        with (
+            patch("backend.app.api.simulation.generate_agents", new=AsyncMock(return_value=(mock_profiles, "/tmp/kg.csv"))) as mock_gen,
+            patch("backend.app.api.simulation.store_universal_agent_profiles", new=AsyncMock()) as mock_store_universal,
+            patch("backend.app.api.simulation.store_universal_agent_relationships", new=AsyncMock()) as mock_store_relationships,
+            patch("backend.app.api.simulation.get_simulation_manager") as mock_sm,
+            patch("backend.app.services.zero_config.ZeroConfigService") as mock_zc,
+            patch("backend.app.utils.db.get_db") as mock_get_db,
+        ):
+            mock_zc.return_value.detect_mode_async = AsyncMock(return_value="kg_driven")
+            _wire_kg_mocks(mock_sm, mock_get_db)
+            mock_request = Request(scope={"type": "http", "path": "/api/simulation"})
+            result = await create_simulation(mock_request, req)
+
+        mock_gen.assert_awaited_once()
+        assert mock_gen.await_args.kwargs["mode"] == "kg_driven"
+        assert mock_gen.await_args.kwargs["request"]["seed_text"] == "USA and Iran enter full military conflict"
+        mock_store_universal.assert_awaited_once()
+        mock_store_relationships.assert_awaited_once()
+        assert result.meta is not None
+        assert result.meta["agent_role_coverage"]["roles"]["official"] == 1
+        assert result.meta["agent_role_coverage"]["relationship_edges"] == 2
+
 
 # ---------------------------------------------------------------------------
 # Private test helpers
@@ -801,3 +836,34 @@ def _wire_b2b_mocks(mock_cf, mock_scb, mock_companies, edge_count: int = 3):
         ),
     )
     mock_scb.return_value.build_supply_chain = AsyncMock(return_value=mock_graph)
+
+
+def _wire_kg_mocks(mock_sm, mock_get_db):
+    """Configure simulation manager + DB mocks for kg-driven create tests."""
+    import json as _json
+
+    session_id = str(uuid.uuid4())
+    mock_sm.return_value.create_session = AsyncMock(
+        return_value={
+            "session_id": session_id,
+            "agent_count": 3,
+            "round_count": 3,
+            "status": "created",
+            "estimated_cost_usd": 0.0,
+        }
+    )
+
+    execute_calls = [
+        AsyncMock(fetchone=AsyncMock(return_value={"seed_text": "USA and Iran enter full military conflict"})),
+        AsyncMock(fetchone=AsyncMock(return_value={"config_json": _json.dumps({"graph_holder": True})})),
+        AsyncMock(),
+    ]
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(side_effect=execute_calls)
+    mock_db.commit = AsyncMock()
+
+    mock_cm = AsyncMock()
+    mock_cm.__aenter__ = AsyncMock(return_value=mock_db)
+    mock_cm.__aexit__ = AsyncMock(return_value=None)
+    mock_get_db.return_value = mock_cm

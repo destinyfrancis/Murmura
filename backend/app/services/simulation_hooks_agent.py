@@ -157,6 +157,18 @@ class AgentHooksMixin:
         """Summarise buffered posts into agent memories for a completed round."""
         posts_by_agent = dict(self._posts_buffer.get(session_id, {}).get(round_number, {}))
         if not posts_by_agent:
+            try:
+                from backend.app.services.simulation_memory_graph_loop import (  # noqa: PLC0415
+                    SimulationMemoryGraphLoop,
+                )
+
+                await SimulationMemoryGraphLoop().process_round(session_id, round_number)
+            except Exception:
+                logger.exception(
+                    "deterministic memory graph loop failed session=%s round=%d",
+                    session_id,
+                    round_number,
+                )
             return
 
         if username_to_agent_id is None:
@@ -199,6 +211,28 @@ class AgentHooksMixin:
             )
             await self._memory_service.decay_memories(session_id, round_number)
             logger.debug("round %d memories stored=%d session=%s", round_number, stored, session_id)
+
+            try:
+                from backend.app.services.simulation_memory_graph_loop import (  # noqa: PLC0415
+                    SimulationMemoryGraphLoop,
+                )
+
+                loop = SimulationMemoryGraphLoop()
+                stats = await loop.process_round(session_id, round_number)
+                logger.debug(
+                    "deterministic memory graph loop round=%d memories=%d triples=%d kg_edges=%d session=%s",
+                    round_number,
+                    stats.memories_added,
+                    stats.triples_added,
+                    stats.kg_edges_added,
+                    session_id,
+                )
+            except Exception:
+                logger.exception(
+                    "deterministic memory graph loop failed session=%s round=%d",
+                    session_id,
+                    round_number,
+                )
 
             # Memory summarization: every summarize_interval rounds (config-driven)
             if round_number > 0 and round_number % self._preset.hook_config.summarize_interval == 0:

@@ -118,3 +118,32 @@ async def test_store_universal_agent_profiles_oasis_username():
 
     row = mock_db.executemany.call_args[0][1][0]
     assert row[18] == expected_username  # oasis_username
+
+
+@pytest.mark.asyncio
+async def test_store_universal_agent_relationships_persists_graph_links():
+    from backend.app.services.simulation_manager import store_universal_agent_relationships
+
+    profiles = [
+        _make_profile("iran_leader", "Khamenei", "state_leader"),
+        _make_profile("israel", "Israel", "country"),
+    ]
+
+    mock_db = AsyncMock()
+    mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+    mock_db.__aexit__ = AsyncMock(return_value=False)
+    mock_db.execute = AsyncMock(return_value=AsyncMock(fetchall=AsyncMock(return_value=[
+        {"id": 11, "oasis_username": profiles[0].to_oasis_row()["username"]},
+        {"id": 12, "oasis_username": profiles[1].to_oasis_row()["username"]},
+    ])))
+
+    with patch("backend.app.services.simulation_manager.get_db", return_value=mock_db):
+        inserted = await store_universal_agent_relationships("sess-rel", profiles)
+
+    assert inserted >= 1
+    mock_db.executemany.assert_called_once()
+    sql, rows = mock_db.executemany.call_args[0]
+    assert "INSERT OR IGNORE INTO agent_relationships" in sql
+    assert rows[0][0] == "sess-rel"
+    assert rows[0][1] == 11
+    assert rows[0][2] == 12

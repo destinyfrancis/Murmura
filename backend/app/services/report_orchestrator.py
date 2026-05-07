@@ -13,7 +13,7 @@ from typing import Any
 
 from backend.app.services.report_section_generator import generate_section
 from backend.app.utils.db import get_db
-from backend.app.utils.llm_client import LLMClient, get_step_provider_model
+from backend.app.utils.llm_client import LLMClient, get_report_provider_model, get_step_provider_model
 from backend.app.utils.logger import get_logger
 from backend.prompts.report_prompts import (
     HK_DEMOGRAPHIC_SECTION_SYSTEM_PROMPT,

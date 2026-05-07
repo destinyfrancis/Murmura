@@ -305,8 +305,8 @@ watch(() => props.session.targetHighlight, (newVal) => {
           style="display: none"
           @change="onSeedFileInput"
         />
-        <span v-if="seedUploadFile" class="seed-file-icon">📄</span>
-        <span v-else class="seed-file-icon">📂</span>
+        <span v-if="seedUploadFile" class="seed-file-icon">DOC</span>
+        <span v-else class="seed-file-icon">FILE</span>
         <div class="seed-drop-text">
           <p v-if="seedUploadFile">{{ seedUploadFile.name }}</p>
           <p v-else>拖放或點擊上傳種子文本</p>
@@ -469,14 +469,14 @@ watch(() => props.session.targetHighlight, (newVal) => {
 <style scoped>
 .step1 {
   display: grid;
-  grid-template-columns: 1fr 380px;
-  gap: 24px;
+  grid-template-columns: minmax(0, 1fr) 400px;
+  gap: 16px;
   min-height: 680px;
 }
 
 .graph-area {
   background: var(--bg-card);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   min-height: 600px;
   position: relative;
@@ -507,8 +507,8 @@ watch(() => props.session.targetHighlight, (newVal) => {
 .stat-item {
   flex: 1;
   background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   padding: 16px;
   text-align: center;
 }
@@ -517,7 +517,8 @@ watch(() => props.session.targetHighlight, (newVal) => {
   display: block;
   font-size: 28px;
   font-weight: 700;
-  color: var(--accent-blue);
+  color: var(--accent);
+  font-family: var(--font-mono);
 }
 
 .stat-label {
@@ -526,15 +527,19 @@ watch(() => props.session.targetHighlight, (newVal) => {
 }
 
 .step1-right {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 24px;
+  padding: 20px;
+  box-shadow: var(--shadow-card);
 }
 
 .panel-title {
-  font-size: 20px;
-  font-weight: 700;
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   margin-bottom: 4px;
 }
 
@@ -547,7 +552,8 @@ watch(() => props.session.targetHighlight, (newVal) => {
 .input-mode-tabs {
   display: flex;
   gap: 4px;
-  background: var(--bg-primary);
+  background: var(--bg-graph);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 3px;
   margin-bottom: 20px;
@@ -558,9 +564,12 @@ watch(() => props.session.targetHighlight, (newVal) => {
   padding: 8px;
   background: transparent;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   color: var(--text-muted);
-  font-size: 13px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
   transition: var(--transition);
 }
 
@@ -581,7 +590,11 @@ watch(() => props.session.targetHighlight, (newVal) => {
 
 .field-label {
   display: block;
-  font-size: 13px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   color: var(--text-secondary);
   margin-bottom: 8px;
 }
@@ -590,8 +603,8 @@ watch(() => props.session.targetHighlight, (newVal) => {
   width: 100%;
   padding: 12px;
   background: var(--bg-input);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   color: var(--text-primary);
   font-size: 14px;
   resize: vertical;
@@ -600,12 +613,12 @@ watch(() => props.session.targetHighlight, (newVal) => {
 }
 
 .text-area:focus {
-  border-color: var(--accent-blue);
+  border-color: var(--text-primary);
 }
 
 .upload-area {
-  border: 2px dashed var(--border-color);
-  border-radius: var(--radius-md);
+  border: 1px dashed var(--border-hover);
+  border-radius: var(--radius-sm);
   padding: 32px;
   text-align: center;
   cursor: pointer;
@@ -613,7 +626,7 @@ watch(() => props.session.targetHighlight, (newVal) => {
 }
 
 .upload-area:hover {
-  border-color: var(--accent-blue);
+  border-color: var(--accent);
 }
 
 .upload-hint {
@@ -626,7 +639,7 @@ watch(() => props.session.targetHighlight, (newVal) => {
 }
 
 .upload-name {
-  color: var(--accent-blue);
+  color: var(--accent);
   font-size: 14px;
   font-weight: 500;
 }
@@ -638,15 +651,15 @@ watch(() => props.session.targetHighlight, (newVal) => {
 .progress-bar {
   height: 6px;
   background: var(--bg-primary);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   overflow: hidden;
   margin-bottom: 8px;
 }
 
 .progress-fill {
   height: 100%;
-  background: var(--accent-blue);
-  border-radius: 3px;
+  background: var(--accent);
+  border-radius: var(--radius-xs);
   transition: width 0.3s ease;
 }
 
@@ -720,18 +733,22 @@ watch(() => props.session.targetHighlight, (newVal) => {
 
 .build-btn {
   width: 100%;
-  padding: 12px;
-  background: var(--accent-blue);
-  color: #0d1117;
-  border: none;
-  border-radius: var(--radius-md);
-  font-size: 15px;
-  font-weight: 600;
+  padding: 13px;
+  background: var(--text-primary);
+  color: #FFFFFF;
+  border: 1px solid var(--text-primary);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   transition: var(--transition);
 }
 
 .build-btn:hover:not(:disabled) {
-  background: #3d8be0;
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .build-btn:disabled {
@@ -743,18 +760,20 @@ watch(() => props.session.targetHighlight, (newVal) => {
   margin-top: 10px;
   width: 100%;
   padding: 9px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--accent-blue);
-  border-radius: var(--radius-md);
-  color: var(--accent-blue);
-  font-size: 14px;
-  font-weight: 500;
+  background: var(--bg-card);
+  border: 1px solid var(--text-primary);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
   transition: var(--transition);
 }
 
 .analyze-btn:hover:not(:disabled) {
-  background: var(--accent-blue);
-  color: #0d1117;
+  background: var(--text-primary);
+  color: #FFFFFF;
 }
 
 .analyze-btn:disabled {
@@ -766,8 +785,8 @@ watch(() => props.session.targetHighlight, (newVal) => {
   margin-top: 12px;
   padding: 14px;
   background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   font-size: 13px;
 }
 
@@ -781,10 +800,10 @@ watch(() => props.session.targetHighlight, (newVal) => {
 .analysis-badge {
   font-size: 12px;
   font-weight: 600;
-  color: var(--accent-blue);
-  background: rgba(79, 156, 232, 0.15);
+  color: var(--accent);
+  background: var(--accent-subtle);
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
 }
 
 .analysis-confidence {
@@ -813,10 +832,10 @@ watch(() => props.session.targetHighlight, (newVal) => {
 }
 
 .scenario-tag {
-  background: rgba(79, 156, 232, 0.2);
-  color: var(--accent-blue);
+  background: var(--accent-subtle);
+  color: var(--accent);
   padding: 1px 8px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   font-size: 12px;
 }
 
@@ -841,18 +860,18 @@ watch(() => props.session.targetHighlight, (newVal) => {
 .entity-tag {
   font-size: 11px;
   background: var(--bg-card);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border);
   padding: 1px 7px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   color: var(--text-secondary);
 }
 
 .district-tag {
   font-size: 11px;
-  background: rgba(76, 175, 125, 0.15);
-  color: var(--accent-green, #4caf7d);
+  background: rgba(4, 120, 87, 0.1);
+  color: var(--accent-success);
   padding: 1px 7px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
 }
 
 /* Seed text file upload drop zone */
@@ -861,8 +880,8 @@ watch(() => props.session.targetHighlight, (newVal) => {
   align-items: center;
   gap: 10px;
   padding: 12px 14px;
-  border: 2px dashed var(--border-color);
-  border-radius: var(--radius-md);
+  border: 1px dashed var(--border-hover);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: var(--transition);
   margin-bottom: 12px;
@@ -870,8 +889,8 @@ watch(() => props.session.targetHighlight, (newVal) => {
 
 .seed-drop-zone:hover,
 .seed-drop-zone.dragging {
-  border-color: var(--accent-blue);
-  background: rgba(74, 158, 255, 0.05);
+  border-color: var(--accent);
+  background: var(--accent-subtle);
 }
 
 .seed-drop-zone.has-file {
@@ -880,7 +899,13 @@ watch(() => props.session.targetHighlight, (newVal) => {
 }
 
 .seed-file-icon {
-  font-size: 22px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  padding: 2px 6px;
   flex-shrink: 0;
 }
 
@@ -906,17 +931,19 @@ watch(() => props.session.targetHighlight, (newVal) => {
 .seed-upload-btn {
   flex-shrink: 0;
   padding: 5px 12px;
-  background: var(--accent-blue);
-  color: #0d1117;
-  border: none;
+  background: var(--text-primary);
+  color: #FFFFFF;
+  border: 1px solid var(--text-primary);
   border-radius: var(--radius-sm);
-  font-size: 12px;
-  font-weight: 600;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
   transition: var(--transition);
 }
 
 .seed-upload-btn:hover:not(:disabled) {
-  background: #3d8be0;
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .seed-upload-btn:disabled {
@@ -938,7 +965,13 @@ watch(() => props.session.targetHighlight, (newVal) => {
 
 .persona-status {
   font-size: 12px;
-  color: var(--accent-blue);
+  color: var(--accent);
   margin: 4px 0 10px;
+}
+
+@media (max-width: 980px) {
+  .step1 {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

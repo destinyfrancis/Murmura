@@ -1,4 +1,4 @@
-"""OpenTelemetry bootstrap for Morai.
+"""OpenTelemetry bootstrap for Murmura.
 
 Opt-in observability — set OTEL_ENABLED=true to activate tracing.
 When disabled (default), all calls return no-op tracers with zero overhead.
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 _initialized = False
 
 
-def init_telemetry(service_name: str = "murmuroscope") -> None:
+def init_telemetry(service_name: str = "murmura") -> None:
     """Initialise OTEL SDK if OTEL_ENABLED=true.
 
     Safe to call multiple times — subsequent calls are no-ops.

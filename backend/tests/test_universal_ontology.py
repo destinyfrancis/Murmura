@@ -223,6 +223,38 @@ class TestOntologyGeneratorDomainHint:
 
         assert entities == DEFAULT_GENERIC_ENTITY_TYPES
 
+    @pytest.mark.asyncio
+    async def test_market_scenario_uses_market_defaults_on_llm_failure(self) -> None:
+        """Market/product scenarios should use the controlled market ontology."""
+        from backend.app.services.ontology_generator import OntologyGenerator
+        from backend.prompts.ontology_prompts import (
+            DEFAULT_MARKET_ENTITY_TYPES,
+            DEFAULT_MARKET_RELATION_TYPES,
+        )
+
+        mock_llm = MagicMock()
+        mock_llm.chat_json = AsyncMock(side_effect=RuntimeError("forced failure"))
+
+        gen = OntologyGenerator(llm_client=mock_llm)
+        entities, relations = await gen.generate("product_launch", "A startup launches a new AI device")
+
+        assert entities == DEFAULT_MARKET_ENTITY_TYPES
+        assert relations == DEFAULT_MARKET_RELATION_TYPES
+
+    @pytest.mark.asyncio
+    async def test_relationship_hint_uses_relationship_defaults_on_llm_failure(self) -> None:
+        """Explicit relationship mode should use the controlled relationship ontology."""
+        from backend.app.services.ontology_generator import OntologyGenerator
+        from backend.prompts.ontology_prompts import DEFAULT_RELATIONSHIP_ENTITY_TYPES
+
+        mock_llm = MagicMock()
+        mock_llm.chat_json = AsyncMock(side_effect=RuntimeError("forced failure"))
+
+        gen = OntologyGenerator(llm_client=mock_llm)
+        entities, _ = await gen.generate("custom", "A couple argues about trust", domain_hint="relationship")
+
+        assert entities == DEFAULT_RELATIONSHIP_ENTITY_TYPES
+
 
 # ---------------------------------------------------------------------------
 # 3. ZeroConfigService.detect_mode()
