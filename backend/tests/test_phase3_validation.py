@@ -386,7 +386,7 @@ class TestValidationReporterWeights:
     """Verify that _score_metric uses the correct 4-component weighting:
     30% directional + 30% |Pearson r| + 20% (1-MAPE) + 20% Brier skill.
 
-    These tests document the actual weights so CLAUDE.md / API docs stay in sync.
+    These tests document the actual weights so code and public API docs stay in sync.
     """
 
     def _make_result(self, **kwargs) -> ValidationResult:
