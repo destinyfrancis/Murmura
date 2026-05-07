@@ -1,10 +1,10 @@
 [project]
 name = "murmura"
 version = "0.1.0"
-description = "Hong Kong Society Simulation Engine — multi-agent social simulation powered by OASIS"
+description = "Universal prediction engine for multi-agent scenario simulation"
 readme = "README.md"
 requires-python = ">=3.10,<3.12"
-license = { text = "Proprietary" }
+license = { file = "LICENSE" }
 
 dependencies = [
     "fastapi>=0.115.0",
