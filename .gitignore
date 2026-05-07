@@ -47,16 +47,28 @@ frontend/tsconfig.tsbuildinfo
 # OASIS
 oasis_output/
 
-# Internal docs — track UPGRADE_PLAN only
+# Internal docs
 docs/superpowers/
+CLAUDE.md
+AGENTS.md
+*PLAN*.md
+*plan*.md
+*ROADMAP*.md
+*roadmap*.md
+*UPGRADE*.md
+*upgrade*.md
+*AUDIT*.md
+*audit*.md
+*PROMPT*.md
+*prompt*.md
+*NOTES*.md
+*notes*.md
 
 # Audit / debug artifacts
 backend/scripts/audit_report_raw.json
 
 # Claude / Personal (never commit these)
 .claude/
-CLAUDE.md
-AGENTS.md
 NEXT_PHASES.md
 SYSTEM_ASSESSMENT.md
 academic_evaluation_report.md
