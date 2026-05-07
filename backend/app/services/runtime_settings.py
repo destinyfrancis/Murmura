@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 
-logger = logging.getLogger("murmuroscope.runtime_settings")
+logger = logging.getLogger("murmura.runtime_settings")
 
 # ---------------------------------------------------------------------------
 # Private state

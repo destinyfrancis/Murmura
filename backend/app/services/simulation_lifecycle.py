@@ -47,6 +47,7 @@ def _find_compatible_python() -> Path:
 
 _PYTHON_BIN = _find_compatible_python()
 _SCRIPT_PATH = _PROJECT_ROOT / "backend" / "scripts" / "run_twitter_simulation.py"
+_REDDIT_SCRIPT = _PROJECT_ROOT / "backend" / "scripts" / "run_reddit_simulation.py"
 _PARALLEL_SCRIPT = _PROJECT_ROOT / "backend" / "scripts" / "run_parallel_simulation.py"
 _FACEBOOK_SCRIPT = _PROJECT_ROOT / "backend" / "scripts" / "run_facebook_simulation.py"
 _INSTAGRAM_SCRIPT = _PROJECT_ROOT / "backend" / "scripts" / "run_instagram_simulation.py"
@@ -148,7 +149,7 @@ class SimulationLifecycleMixin:
             )
 
         # Select simulation script based on enabled platforms.
-        platforms = config.get("platforms", {"facebook": True, "instagram": True})
+        platforms = config.get("platforms", {"twitter": True, "reddit": True})
         facebook_on = platforms.get("facebook", False)
         instagram_on = platforms.get("instagram", False)
         twitter_on = platforms.get("twitter", False)
@@ -164,6 +165,8 @@ class SimulationLifecycleMixin:
             script_to_run = _INSTAGRAM_SCRIPT
         elif twitter_on:
             script_to_run = _SCRIPT_PATH
+        elif reddit_on:
+            script_to_run = _REDDIT_SCRIPT
         else:
             script_to_run = _SCRIPT_PATH  # fallback
         if not script_to_run.exists():
@@ -509,7 +512,7 @@ class SimulationLifecycleMixin:
                 post_update: dict[str, Any] = {
                     "type": "post",
                     "data": {
-                        "platform": "facebook",
+                        "platform": "twitter",
                         "username": f"dry_user_{i}",
                         "content": f"[dry-run] Round {rnd} mock post #{i}",
                         "round": rnd,

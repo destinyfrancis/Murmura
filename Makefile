@@ -1,4 +1,4 @@
-.PHONY: quickstart start stop test test-unit test-int test-all test-changed test-file test-cov test-cov-full dev backend frontend clean docker-up docker-down docker-dev docker-logs docker-clean
+.PHONY: quickstart start stop test test-unit test-int test-all test-changed test-file test-cov test-cov-full benchmark-upgrade dev backend frontend clean docker-up docker-down docker-dev docker-logs docker-clean
 
 VENV   = .venv311
 PYTEST = $(VENV)/bin/python -m pytest
@@ -63,9 +63,12 @@ test-cov-full:
 		--cov-report=term-missing \
 		-q --tb=short
 
+benchmark-upgrade:
+	$(VENV)/bin/python -m backend.scripts.run_upgrade_benchmarks --output-dir data/benchmarks
+
 # ── Server commands ────────────────────────────────────────────────
 stop:
-	@echo "=== Stopping all MurmuraScope Python processes ==="
+	@echo "=== Stopping all Murmura Python processes ==="
 	pkill -f "run_(twitter|parallel|facebook|instagram)_simulation.py" || true
 	pkill -f "uvicorn.*run:app" || true
 	pkill -f "uvicorn.*5001" || true

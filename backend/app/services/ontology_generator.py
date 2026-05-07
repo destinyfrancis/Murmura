@@ -14,6 +14,12 @@ from backend.prompts.ontology_prompts import (
     DEFAULT_GENERIC_RELATION_TYPES,
     DEFAULT_HK_ENTITY_TYPES,
     DEFAULT_HK_RELATION_TYPES,
+    DEFAULT_MARKET_ENTITY_TYPES,
+    DEFAULT_MARKET_RELATION_TYPES,
+    DEFAULT_RELATIONSHIP_ENTITY_TYPES,
+    DEFAULT_RELATIONSHIP_RELATION_TYPES,
+    DEFAULT_SOCIETY_ENTITY_TYPES,
+    DEFAULT_SOCIETY_RELATION_TYPES,
     ONTOLOGY_GENERATION_SYSTEM,
     ONTOLOGY_GENERATION_USER,
 )
@@ -59,9 +65,20 @@ class OntologyGenerator:
         Returns:
             A tuple of (entity_types, relation_types) lists.
         """
-        if domain_hint == "hk":
+        mode_hint = _normalise_mode_hint(scenario_type, domain_hint)
+
+        if mode_hint == "hk":
             default_entities: list[str] = DEFAULT_HK_ENTITY_TYPES
             default_relations: list[str] = DEFAULT_HK_RELATION_TYPES
+        elif mode_hint == "society":
+            default_entities = DEFAULT_SOCIETY_ENTITY_TYPES
+            default_relations = DEFAULT_SOCIETY_RELATION_TYPES
+        elif mode_hint == "relationship":
+            default_entities = DEFAULT_RELATIONSHIP_ENTITY_TYPES
+            default_relations = DEFAULT_RELATIONSHIP_RELATION_TYPES
+        elif mode_hint == "market":
+            default_entities = DEFAULT_MARKET_ENTITY_TYPES
+            default_relations = DEFAULT_MARKET_RELATION_TYPES
         else:
             default_entities = DEFAULT_GENERIC_ENTITY_TYPES
             default_relations = DEFAULT_GENERIC_RELATION_TYPES
@@ -96,7 +113,7 @@ class OntologyGenerator:
             )
             logger.info(
                 "Generated ontology (domain_hint=%s): %d entity types, %d relation types",
-                domain_hint,
+                mode_hint,
                 len(entity_types),
                 len(relation_types),
             )
@@ -105,9 +122,25 @@ class OntologyGenerator:
         except Exception:
             logger.exception(
                 "Ontology generation failed, falling back to defaults (domain_hint=%s)",
-                domain_hint,
+                mode_hint,
             )
             return list(default_entities), list(default_relations)
+
+
+def _normalise_mode_hint(scenario_type: str, domain_hint: str) -> str:
+    """Map product modes and common scenario labels to controlled ontologies."""
+    raw_hint = (domain_hint or "auto").strip().lower()
+    raw_scenario = (scenario_type or "").strip().lower()
+    if raw_hint in {"hk", "society", "relationship", "market"}:
+        return raw_hint
+
+    if any(token in raw_scenario for token in ("relationship", "couple", "family", "friend", "workplace")):
+        return "relationship"
+    if any(token in raw_scenario for token in ("market", "product", "launch", "competitor", "b2b", "trade")):
+        return "market"
+    if any(token in raw_scenario for token in ("society", "policy", "public", "crisis", "movement", "news")):
+        return "society"
+    return "auto"
 
 
 def _validate_types(raw: list[str], defaults: list[str]) -> list[str]:

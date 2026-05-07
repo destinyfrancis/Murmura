@@ -43,7 +43,11 @@ RULES:
 - Do NOT include abstract concepts (e.g. "inflation"), metrics, locations \
   (unless a location embodies a governing body), or events.
 - Do NOT repeat actors already in the existing node list.
-- For each implied actor, provide a concrete reason WHY they are relevant.
+- For each implied actor, provide a concrete reason WHY they are relevant,
+  why they may be missing from explicit mentions, and a short evidence phrase
+  copied or tightly paraphrased from the seed text.
+- Do NOT include an actor unless there is a seed-text evidence phrase and a
+  concrete rationale. Unsupported speculation must be omitted.
 - Consider: who profits, who suffers, who mediates, who retaliates, who \
   supplies, who finances, who condemns, who observes, who is indirectly \
   affected, who could intervene unexpectedly.
@@ -69,7 +73,11 @@ OUTPUT SCHEMA:
 NGO | MediaOutlet | PoliticalFigure | Company | Institution | Faction | \
 Family | SecretSociety | Creature | Supernatural>",
       "role": "<one sentence: their role in this scenario>",
-      "relevance_reason": "<one sentence: why critically affected/relevant>"
+      "relevance_reason": "<one sentence: why critically affected/relevant>",
+      "why_missing": "<one sentence: why this actor is implied rather than explicit>",
+      "evidence_phrase": "<short phrase from seed text grounding this inference>",
+      "inferred_role": "<one sentence: expected role/action in the simulation>",
+      "confidence": 0.0
     }
   ]
 }
@@ -101,6 +109,9 @@ Read the seed text carefully. Based on the scenario domain and dynamics describe
    NOT in the existing node list above.
 3. Return only actors that would plausibly make different DECISIONS or take \
    different ACTIONS from one another — this is a multi-agent simulation.
+4. For every actor, include `evidence_phrase`, `why_missing`,
+   `inferred_role`, and `confidence` (0.0-1.0). If you cannot provide an
+   evidence phrase, exclude that actor.
 
 Return ONLY valid JSON matching the schema above.
 """

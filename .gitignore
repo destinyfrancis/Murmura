@@ -22,6 +22,8 @@ data/cleaned/
 data/sessions/
 data/test_sessions/
 data/vector_store/
+data/benchmarks/*_latest.json
+data/benchmarks/*_[0-9]*T*.json
 
 # Logs
 log/
@@ -72,6 +74,8 @@ tests_list.txt
 
 # Playwright MCP
 .playwright-mcp/
+frontend/test-results/
+frontend/playwright-report/
 .worktrees/
 .venv311
 *.mov

@@ -16,6 +16,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+from dataclasses import replace as dc_replace
 from typing import Any
 
 from backend.app.models.platform_identity import (
@@ -34,6 +35,12 @@ from backend.prompts.agent_generation_prompts import (
 )
 
 logger = get_logger(__name__)
+
+_SCENARIO_ROLE_TEMPLATES: dict[str, tuple[str, ...]] = {
+    "society": ("citizen", "official", "journalist", "activist", "institution", "rumor spreader"),
+    "relationship": ("partner", "friend", "ex", "family member", "observer", "advisor"),
+    "market": ("customer segment", "competitor", "regulator", "influencer", "sales team", "product team"),
+}
 
 # ---------------------------------------------------------------------------
 # Entity types that qualify a KG node as a simulation agent
@@ -137,6 +144,99 @@ def _assign_platform_identities(
     return tuple(identities)
 
 
+def _scenario_family_from_seed(seed_text: str) -> str:
+    text = seed_text.lower()
+
+    relationship_keywords = (
+        "relationship", "couple", "dating", "marriage", "divorce", "friend", "family", "workplace tension",
+        "romance", "partner", "breakup", "ex ", "mother", "father", "sibling",
+    )
+    market_keywords = (
+        "company", "market", "competitor", "product", "customer", "startup", "brand", "sales",
+        "enterprise", "regulator", "pricing", "launch", "market share", "supply chain",
+    )
+
+    if any(keyword in text for keyword in relationship_keywords):
+        return "relationship"
+    if any(keyword in text for keyword in market_keywords):
+        return "market"
+    return "society"
+
+
+def _build_role_template_instruction(seed_text: str) -> str:
+    family = _scenario_family_from_seed(seed_text)
+    roles = ", ".join(_SCENARIO_ROLE_TEMPLATES[family])
+    return (
+        f"\n\nSCENARIO FAMILY: {family.upper()}\n"
+        f"Prefer role coverage from this palette when it fits the evidence: {roles}.\n"
+        "Do not force every role to appear, but make sure the final cast spans "
+        "the key role types implied by the scenario."
+    )
+
+
+def _node_included_for_simulation(node: dict[str, Any]) -> bool:
+    raw_props = node.get("properties", {})
+    if isinstance(raw_props, str):
+        try:
+            props = json.loads(raw_props or "{}")
+        except json.JSONDecodeError:
+            props = {}
+    elif isinstance(raw_props, dict):
+        props = raw_props
+    else:
+        props = {}
+    return props.get("include_in_simulation", True) is not False
+
+
+def _normalise_edge_reference(edge: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = edge.get(key)
+        if value:
+            return str(value)
+    return ""
+
+
+def _graph_relationship_description(edge: dict[str, Any]) -> str:
+    return (
+        _normalise_edge_reference(edge, "description", "relation_type", "relation", "label")
+        or "connected_to"
+    )
+
+
+def _merge_graph_relationships(
+    profiles: list[UniversalAgentProfile],
+    edges: list[dict[str, Any]],
+) -> list[UniversalAgentProfile]:
+    """Backfill inter-agent relationships directly from KG edges when possible."""
+    if not profiles or not edges:
+        return profiles
+
+    by_node_id = {profile.kg_node_id: profile for profile in profiles}
+    by_agent_id = {profile.id: profile for profile in profiles}
+    merged: dict[str, list[tuple[str, str]]] = {
+        profile.id: list(profile.relationships)
+        for profile in profiles
+    }
+
+    for edge in edges:
+        source_node_id = _normalise_edge_reference(edge, "source_id", "source")
+        target_node_id = _normalise_edge_reference(edge, "target_id", "target")
+        source_profile = by_node_id.get(source_node_id)
+        target_profile = by_node_id.get(target_node_id)
+        if not source_profile or not target_profile or source_profile.id == target_profile.id:
+            continue
+
+        relation = _graph_relationship_description(edge)
+        pair = (target_profile.id, relation)
+        if pair not in merged[source_profile.id]:
+            merged[source_profile.id].append(pair)
+
+    return [
+        dc_replace(by_agent_id[agent_id], relationships=tuple(relationships))
+        for agent_id, relationships in merged.items()
+    ]
+
+
 async def _load_persona_keys(graph_id: str) -> list[str]:
     """Load agent_type_key values from seed_persona_templates for graph_id."""
     from backend.app.utils.db import get_db  # noqa: PLC0415
@@ -227,7 +327,10 @@ class KGAgentFactory:
         if not nodes:
             raise ValueError("nodes must not be empty")
 
+        nodes = [node for node in nodes if _node_included_for_simulation(node)]
         total_nodes = len(nodes)
+        if not nodes:
+            raise ValueError("nodes must not be empty after applying simulation filters")
         is_cold_start = total_nodes < 50
 
         logger.info(
@@ -249,7 +352,7 @@ class KGAgentFactory:
             eligible_nodes = nodes
 
         resolved_target = target_count if target_count is not None else len(eligible_nodes)
-        
+
         # Stage 2 — profile generation
         profiles = await self._generate_profiles(
             eligible_nodes=eligible_nodes,
@@ -396,8 +499,10 @@ class KGAgentFactory:
                 temperature=0.2,
                 max_tokens=4096,
             )
-            eligible_ids: set[str] = {str(entry["node_id"]) for entry in result.get("eligible", []) if "node_id" in entry}
-            eligible = [n for n in nodes if str(n.get("id", "")) in eligible_ids]
+            eligible_ids: set[str] = {
+                str(entry["node_id"]) for entry in result.get("eligible", []) if "node_id" in entry
+            }
+            eligible = [n for n in nodes if str(n.get("id", "")) in eligible_ids and _node_included_for_simulation(n)]
 
             if not eligible:
                 logger.warning("LLM filter returned 0 eligible nodes; using heuristic fallback")
@@ -425,7 +530,7 @@ class KGAgentFactory:
         Returns:
             Subset likely to be concrete actors.
         """
-        _ACTOR_KEYWORDS = frozenset(
+        actor_keywords = frozenset(
             {
                 "person",
                 "people",
@@ -455,11 +560,12 @@ class KGAgentFactory:
             label = str(node.get("label", "")).lower()
             node_type = str(node.get("type", "")).lower()
             combined = f"{entity_type} {label} {node_type}"
-            return any(kw in combined for kw in _ACTOR_KEYWORDS)
+            return any(kw in combined for kw in actor_keywords)
 
-        filtered = [n for n in nodes if _is_actor(n)]
+        filtered = [n for n in nodes if _node_included_for_simulation(n) and _is_actor(n)]
         # If heuristic also returns nothing, accept all nodes as a last resort
-        return filtered if filtered else nodes
+        included_nodes = [n for n in nodes if _node_included_for_simulation(n)]
+        return filtered if filtered else included_nodes
 
     # ------------------------------------------------------------------
     # Stage 2: profile generation
@@ -474,7 +580,7 @@ class KGAgentFactory:
         is_cold_start: bool = False,
     ) -> list[UniversalAgentProfile]:
         """Call LLM to generate full agent profiles for eligible nodes.
-        
+
         Includes Cold Start intervention:
         - If is_cold_start=True: LLM is permitted to invent plausible agents (conf=0.1).
         - If is_cold_start=False: LLM MUST strictly use evidence from KG.
@@ -501,7 +607,7 @@ class KGAgentFactory:
             eligible_nodes_json=eligible_json,
             edges_json=edges_json,
             target_count=target_count,
-        ) + cold_start_instruction
+        ) + cold_start_instruction + _build_role_template_instruction(seed_text)
 
         # If persona keys are available, constrain agent type assignment
         if self._persona_keys:
@@ -543,7 +649,7 @@ class KGAgentFactory:
         if not profiles:
             raise RuntimeError("No valid agent profiles could be parsed from LLM response")
 
-        return profiles
+        return _merge_graph_relationships(profiles, edges)
 
 
     # ------------------------------------------------------------------
@@ -648,7 +754,7 @@ class KGAgentFactory:
         """
         from dataclasses import replace as dc_replace  # noqa: PLC0415
 
-        _VALID_STYLES = frozenset(
+        valid_styles = frozenset(
             {
                 "formal_academic",
                 "casual_gen_z",
@@ -706,7 +812,7 @@ class KGAgentFactory:
             vd = voice_by_id.get(profile.id, {})
             try:
                 raw_style = str(vd.get("communication_style", ""))
-                comm_style = raw_style if raw_style in _VALID_STYLES else ""
+                comm_style = raw_style if raw_style in valid_styles else ""
                 vocab_hints = tuple(str(h) for h in vd.get("vocabulary_hints", []) if h)[:5]
                 plat_persona = str(vd.get("platform_persona", ""))
                 enriched.append(
@@ -765,6 +871,16 @@ class KGAgentFactory:
 
             goals = tuple(str(g) for g in raw.get("goals", []))
             capabilities = tuple(str(c) for c in raw.get("capabilities", []))
+            constraints = tuple(str(c) for c in raw.get("constraints", []))
+            raw_beliefs = raw.get("beliefs", {})
+            if isinstance(raw_beliefs, dict):
+                beliefs: tuple[tuple[str, float], ...] = tuple(
+                    (str(k), _clamp(float(v))) for k, v in raw_beliefs.items()
+                )
+            elif isinstance(raw_beliefs, list):
+                beliefs = tuple((str(item), 0.5) for item in raw_beliefs if item)
+            else:
+                beliefs = tuple()
 
             agent_id = str(raw["id"])
             entity_type = str(raw["entity_type"])
@@ -779,6 +895,9 @@ class KGAgentFactory:
                 persona=str(raw["persona"]),
                 goals=goals,
                 capabilities=capabilities,
+                constraints=constraints,
+                beliefs=beliefs,
+                memory_seed=str(raw.get("memory_seed", "")),
                 stance_axes=stance_axes,
                 relationships=relationships,
                 kg_node_id=str(raw.get("kg_node_id", raw["id"])),

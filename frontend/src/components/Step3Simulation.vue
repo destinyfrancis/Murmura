@@ -545,7 +545,7 @@ const factionAgentColourMap = computed(() => {
         target="_blank"
         title="在新分頁開啟知識圖譜"
       >
-        🗺 知識圖譜
+        KG GRAPH
       </router-link>
     </div>
 
@@ -693,10 +693,13 @@ const factionAgentColourMap = computed(() => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 12px;
+  padding: 5px 12px;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 12px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
   color: var(--text-secondary);
   text-decoration: none;
   background: var(--bg-card);
@@ -743,7 +746,7 @@ const factionAgentColourMap = computed(() => {
   left: 0;
   right: 0;
   padding: 8px 14px;
-  background: rgba(239, 68, 68, 0.9);
+  background: rgba(185, 28, 28, 0.92);
   color: var(--bg-app);
   font-size: 13px;
   font-weight: 600;
@@ -818,7 +821,7 @@ const factionAgentColourMap = computed(() => {
   inset: 0;
   z-index: 9999;
   pointer-events: none;
-  background: linear-gradient(transparent 0%, rgba(34, 211, 238, 0.03) 50%, transparent 100%);
+  background: rgba(255, 90, 31, 0.06);
   animation: glitch-flash 0.3s ease-out forwards;
 }
 

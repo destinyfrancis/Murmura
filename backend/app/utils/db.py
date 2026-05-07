@@ -15,6 +15,31 @@ from backend.app.utils.logger import get_logger
 logger = get_logger("db")
 
 
+def _resolve_db_path(configured_path: str) -> Path:
+    """Resolve the active DB path, migrating the legacy filename when present."""
+    db_path = Path(configured_path)
+    if db_path.name != "murmura.db":
+        return db_path
+
+    legacy_path = db_path.with_name("murmuroscope.db")
+    if db_path.exists() or not legacy_path.exists():
+        return db_path
+
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        legacy_path.replace(db_path)
+        logger.info("Migrated legacy database path from %s to %s", legacy_path, db_path)
+    except OSError:
+        logger.warning(
+            "Could not migrate legacy database path from %s to %s; continuing with legacy file",
+            legacy_path,
+            db_path,
+        )
+        return legacy_path
+
+    return db_path
+
+
 @asynccontextmanager
 async def get_db() -> AsyncIterator[aiosqlite.Connection]:
     """Yield an async SQLite connection with WAL mode and foreign keys enabled.
@@ -25,7 +50,7 @@ async def get_db() -> AsyncIterator[aiosqlite.Connection]:
             await db.execute("SELECT 1")
     """
     settings = get_settings()
-    db_path = Path(settings.DATABASE_PATH)
+    db_path = _resolve_db_path(settings.DATABASE_PATH)
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     db = await aiosqlite.connect(str(db_path))
@@ -64,7 +89,8 @@ async def init_db() -> None:
         raise FileNotFoundError(f"schema.sql not found at {schema_file}")
 
     schema_sql = schema_file.read_text(encoding="utf-8")
-    logger.info("Initialising database at %s", settings.DATABASE_PATH)
+    resolved_path = _resolve_db_path(settings.DATABASE_PATH)
+    logger.info("Initialising database at %s", resolved_path)
 
     async with get_db() as db:
         await db.executescript(schema_sql)
@@ -108,6 +134,8 @@ async def apply_migrations() -> None:
         "ALTER TABLE kg_edges ADD COLUMN layer_type TEXT NOT NULL DEFAULT 'truth'",
         "ALTER TABLE kg_edges ADD COLUMN confidence_score REAL NOT NULL DEFAULT 1.0",
         "ALTER TABLE kg_edges ADD COLUMN source_agent_id TEXT DEFAULT NULL",
+        "ALTER TABLE kg_edges ADD COLUMN source_text TEXT",
+        "ALTER TABLE kg_edges ADD COLUMN evidence_span TEXT",
     ]
     # Idempotent index creation — CREATE INDEX IF NOT EXISTS is always safe
     index_migrations = [
@@ -142,7 +170,7 @@ async def get_workspace_db(workspace_id: str | None) -> AsyncIterator[aiosqlite.
     """Get a database connection for a workspace-scoped database.
 
     Each workspace has its own SQLite file at:
-        data/workspaces/{workspace_id}/murmuroscope.db
+        data/workspaces/{workspace_id}/murmura.db
 
     This gives true write isolation between workspaces — no concurrent write
     contention between tenants.  Falls back to the global database when
@@ -160,13 +188,29 @@ async def get_workspace_db(workspace_id: str | None) -> AsyncIterator[aiosqlite.
 
     settings = get_settings()
     # Derive the workspace DB directory from the global DB's parent.
-    # Global DB lives at <data_dir>/murmuroscope.db; workspace DBs live at
-    # <data_dir>/workspaces/<workspace_id>/murmuroscope.db
+    # Global DB lives at <data_dir>/murmura.db; workspace DBs live at
+    # <data_dir>/workspaces/<workspace_id>/murmura.db
     global_db_parent = Path(settings.DATABASE_PATH).parent
     workspace_dir = global_db_parent / "workspaces" / workspace_id
     os.makedirs(workspace_dir, exist_ok=True)
 
-    db_path = workspace_dir / "murmuroscope.db"
+    db_path = workspace_dir / "murmura.db"
+    legacy_db_path = workspace_dir / "murmuroscope.db"
+    if not db_path.exists() and legacy_db_path.exists():
+        try:
+            legacy_db_path.replace(db_path)
+            logger.info(
+                "Migrated legacy workspace database path for workspace %s from %s to %s",
+                workspace_id,
+                legacy_db_path,
+                db_path,
+            )
+        except OSError:
+            logger.warning(
+                "Could not migrate legacy workspace database path for workspace %s; using legacy file",
+                workspace_id,
+            )
+            db_path = legacy_db_path
     is_new_db = not db_path.exists()
 
     db = await aiosqlite.connect(str(db_path))

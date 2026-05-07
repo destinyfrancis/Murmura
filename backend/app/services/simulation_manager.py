@@ -104,7 +104,7 @@ class SimulationManager:
         if round_count < 1:
             raise ValueError("round_count must be at least 1")
 
-        sim_mode = _infer_sim_mode(scenario_type)
+        sim_mode = _infer_sim_mode(request.get("sim_mode") or scenario_type)
 
         session = SessionState.create(
             name=f"{scenario_type}_{agent_count}agents",
@@ -486,7 +486,17 @@ async def generate_agents(
             )
 
         factory = await KGAgentFactory.create(graph_id=graph_id, llm_client=llm)
-        profiles = await factory.generate_from_kg(kg_nodes, kg_edges, seed_text)
+        requested_target = int(request.get("agent_count", 0) or 0)
+        profiles = await factory.generate_from_kg(
+            kg_nodes,
+            kg_edges,
+            seed_text,
+            target_count=requested_target or None,
+        )
+        if requested_target > 0 and len(profiles) != requested_target:
+            raise RuntimeError(
+                f"KGAgentFactory produced {len(profiles)} agents but {requested_target} were requested"
+            )
         written_path = factory.generate_agents_csv(profiles, csv_path)
         # Persist platform identities to DB for simulation runtime lookup.
         all_platform_ids = [
@@ -725,6 +735,90 @@ async def store_universal_agent_profiles(
     logger.info("Stored %d universal agent profiles for session %s", len(rows), session_id)
 
 
+def _estimate_relationship_influence(source_profile: Any, relation_type: str) -> float:
+    base = float(getattr(source_profile, "influence_weight", 1.0) or 1.0)
+    relation_lower = relation_type.lower()
+    if any(token in relation_lower for token in ("commands", "controls", "regulates", "manages")):
+        return min(3.0, base + 0.4)
+    if any(token in relation_lower for token in ("ally", "partner", "advisor", "family", "friend")):
+        return min(3.0, base + 0.15)
+    if any(token in relation_lower for token in ("rival", "enemy", "critic", "opposes", "ex")):
+        return min(3.0, base + 0.2)
+    return min(3.0, max(0.2, base))
+
+
+def _estimate_relationship_trust(relation_type: str) -> float:
+    relation_lower = relation_type.lower()
+    if any(token in relation_lower for token in ("ally", "partner", "advisor", "family", "friend", "supports")):
+        return 0.25
+    if any(token in relation_lower for token in ("rival", "enemy", "critic", "opposes", "ex", "adversary")):
+        return -0.3
+    return 0.05
+
+
+async def store_universal_agent_relationships(
+    session_id: str,
+    profiles: list[Any],
+) -> int:
+    """Persist graph-derived universal relationships into ``agent_relationships``."""
+    if not profiles:
+        return 0
+
+    username_to_db_id: dict[str, int] = {}
+    profile_to_db_id: dict[str, int] = {}
+
+    async with get_db() as db:
+        rows = await (
+            await db.execute(
+                "SELECT id, oasis_username FROM agent_profiles WHERE session_id = ?",
+                (session_id,),
+            )
+        ).fetchall()
+
+        for row in rows:
+            username_to_db_id[str(row["oasis_username"])] = int(row["id"])
+
+        for profile in profiles:
+            username = profile.to_oasis_row()["username"]
+            db_id = username_to_db_id.get(username)
+            if db_id is not None:
+                profile_to_db_id[str(profile.id)] = db_id
+
+        relationship_rows: list[tuple[str, int, int, str, float, float]] = []
+        for profile in profiles:
+            source_db_id = profile_to_db_id.get(str(profile.id))
+            if source_db_id is None:
+                continue
+            for related_agent_id, relation_type in getattr(profile, "relationships", ()) or ():
+                target_db_id = profile_to_db_id.get(str(related_agent_id))
+                if target_db_id is None or target_db_id == source_db_id:
+                    continue
+                relationship_rows.append(
+                    (
+                        session_id,
+                        source_db_id,
+                        target_db_id,
+                        str(relation_type),
+                        _estimate_relationship_influence(profile, str(relation_type)),
+                        _estimate_relationship_trust(str(relation_type)),
+                    )
+                )
+
+        if not relationship_rows:
+            return 0
+
+        await db.executemany(
+            """INSERT OR IGNORE INTO agent_relationships
+               (session_id, agent_a_id, agent_b_id, relationship_type, influence_weight, trust_score)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            relationship_rows,
+        )
+        await db.commit()
+
+    logger.info("Stored %d universal agent relationships for session %s", len(relationship_rows), session_id)
+    return len(relationship_rows)
+
+
 async def store_activity_profiles(
     session_id: str,
     profiles: list[Any],
@@ -931,7 +1025,7 @@ async def _load_session(session_id: str) -> SessionState:
         )
 
     platforms_raw = row["platforms"] if "platforms" in row_keys else None
-    platforms: dict[str, bool] = json.loads(platforms_raw) if platforms_raw else {"twitter": True, "reddit": False}
+    platforms: dict[str, bool] = json.loads(platforms_raw) if platforms_raw else {"twitter": True, "reddit": True}
 
     created_at = row["created_at"] if "created_at" in row_keys else datetime.utcnow().isoformat()
 

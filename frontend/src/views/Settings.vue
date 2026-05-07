@@ -1,24 +1,21 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useSettings } from '../composables/useSettings.js'
-import { testApiKey } from '../api/settings.js'
+import { testApiKey, listProviderModels, updateSettings } from '../api/settings.js'
 
 const { settings, saveStatus, loadSettings, saveApiKey } = useSettings()
+const { t } = useI18n()
 
 // ── Tab state ──────────────────────────────────────────────────────────────────
 const activeTab = ref('api')
 
-import { computed } from 'vue'
-import { useI18n } from 'vue-i18n'
-
-const { t } = useI18n()
-
 const tabs = computed(() => [
-  { id: 'api',        label: t('settings.tabs.api.title'),   icon: '🔑' },
-  { id: 'model',      label: t('settings.tabs.model.title'), icon: '🧠' },
-  { id: 'simulation', label: t('settings.tabs.sim.title'),   icon: '⚙️' },
-  { id: 'ui',         label: t('settings.tabs.ui.title'),    icon: '🎨' },
-  { id: 'data',       label: t('settings.tabs.data.title'),  icon: '📊' },
+  { id: 'api',        label: t('settings.tabs.api.title'),   icon: 'API' },
+  { id: 'model',      label: t('settings.tabs.model.title'), icon: 'LLM' },
+  { id: 'simulation', label: t('settings.tabs.sim.title'),   icon: 'SIM' },
+  { id: 'ui',         label: t('settings.tabs.ui.title'),    icon: 'UI' },
+  { id: 'data',       label: t('settings.tabs.data.title'),  icon: 'DATA' },
 ])
 
 // ── API key editing state ──────────────────────────────────────────────────────
@@ -49,6 +46,7 @@ const keyTestStatus = ref({
   anthropic: null,
   deepseek: null,
   fireworks: null,
+  fred: null,
 })
 
 const keyTestMessage = ref({})
@@ -64,18 +62,71 @@ const providers = [
 ]
 
 const providerOptions = providers.map(p => ({ value: p.id, label: p.name }))
+const discoverableProviders = new Set(['openrouter', 'fireworks'])
+const providerModels = ref({})
+const modelListStatus = ref({})
+const modelListMessage = ref({})
+
+function providerSupportsModels(provider) {
+  return discoverableProviders.has(provider)
+}
+
+function modelOptionsFor(provider) {
+  return providerModels.value[provider] || []
+}
+
+function modelListSummary(provider) {
+  if (!provider) return t('settings.tabs.model.models.chooseProvider')
+  if (!providerSupportsModels(provider)) return t('settings.tabs.model.models.unsupported')
+  if (modelListStatus.value[provider] === 'loading') return t('settings.tabs.model.models.loading')
+  const models = modelOptionsFor(provider)
+  if (models.length) return t('settings.tabs.model.models.loaded', { count: models.length })
+  return t('settings.tabs.model.models.notLoaded')
+}
+
+async function fetchProviderModels(provider, apiKey = null) {
+  if (!provider) return
+  if (!providerSupportsModels(provider)) {
+    modelListStatus.value[provider] = 'error'
+    modelListMessage.value[provider] = t('settings.tabs.model.models.unsupported')
+    return
+  }
+  modelListStatus.value[provider] = 'loading'
+  modelListMessage.value[provider] = ''
+  try {
+    const res = await listProviderModels(provider, apiKey)
+    if (res.data.success) {
+      providerModels.value[provider] = res.data.models || []
+      modelListStatus.value[provider] = 'ok'
+      modelListMessage.value[provider] = res.data.message
+    } else {
+      providerModels.value[provider] = []
+      modelListStatus.value[provider] = 'error'
+      modelListMessage.value[provider] = res.data.message
+    }
+  } catch (err) {
+    providerModels.value[provider] = []
+    modelListStatus.value[provider] = 'error'
+    modelListMessage.value[provider] = err.response?.data?.detail || t('settings.tabs.api.connFailed')
+  }
+}
 
 // ── Key actions ───────────────────────────────────────────────────────────────
 async function handleSaveKey(provider) {
   const key = keyDraft.value[provider].trim()
   if (!key) return
   await saveApiKey(provider, key)
+  if (providerSupportsModels(provider)) {
+    await fetchProviderModels(provider, key)
+  }
   keyDraft.value[provider] = ''
 }
 
 async function handleTestKey(provider) {
-  const key = keyDraft.value[provider].trim() || settings.apiKeys[provider]
-  if (!key || key.includes('***')) {
+  const draftKey = keyDraft.value[provider].trim()
+  const storedKey = settings.apiKeys[provider]
+  const key = draftKey || (storedKey && !storedKey.includes('***') ? storedKey : null)
+  if (!key && !storedKey) {
     keyTestMessage.value[provider] = t('settings.tabs.api.verifying')
     keyTestStatus.value[provider] = 'error'
     return
@@ -88,6 +139,9 @@ async function handleTestKey(provider) {
     if (res.data.success) {
       keyTestStatus.value[provider] = 'ok'
       keyTestMessage.value[provider] = res.data.message
+      if (providerSupportsModels(provider)) {
+        await fetchProviderModels(provider, draftKey || null)
+      }
     } else {
       keyTestStatus.value[provider] = 'error'
       keyTestMessage.value[provider] = res.data.message
@@ -104,9 +158,9 @@ function toggleKeyVisibility(provider) {
 
 // ── Preset options ─────────────────────────────────────────────────────────
 const presetOptions = computed(() => [
-  { value: 'fast',     label: `⚡ ${t('home.presets.fast')} (10 rounds, 30 agents)` },
-  { value: 'standard', label: `⚖️ ${t('home.presets.standard')} (20 rounds, 50 agents)` },
-  { value: 'deep',     label: `🔬 ${t('home.presets.deep')} (50 rounds, 200 agents)` },
+  { value: 'fast',     label: `FAST · ${t('home.presets.fast')} (10 rounds, 30 agents)` },
+  { value: 'standard', label: `STD · ${t('home.presets.standard')} (20 rounds, 50 agents)` },
+  { value: 'deep',     label: `DEEP · ${t('home.presets.deep')} (50 rounds, 200 agents)` },
 ])
 
 const languageOptions = [
@@ -153,14 +207,20 @@ async function saveStepModel(step) {
     [`step${step}_provider`]: d.provider,
     [`step${step}_model`]:    d.model,
   }
-  if (step === 3 && d.model_lite) {
+  if (step === 3) {
     payload['step3_model_lite'] = d.model_lite
   }
   try {
-    const { updateSettings } = await import('../api/settings.js')
     await updateSettings(payload)
   } catch (err) {
     console.error('[Settings] saveStepModel failed:', err)
+  }
+}
+
+async function handleStepProviderChange(step) {
+  const provider = stepDraft.value[step].provider
+  if (providerSupportsModels(provider) && !modelOptionsFor(provider).length) {
+    await fetchProviderModels(provider)
   }
 }
 
@@ -187,7 +247,7 @@ async function testStepModel(step) {
 onMounted(async () => {
   await loadSettings()
   // Populate step drafts from loaded settings
-  const steps = settings.value?.llm?.steps || {}
+  const steps = settings.llm?.steps || {}
   for (const s of [1, 2, 3, 4, 5]) {
     const st = steps[String(s)] || {}
     if (st.provider) stepDraft.value[s].provider = st.provider
@@ -292,7 +352,7 @@ const saveStatusClass = {
                     :title="keyVisibility[p.id] ? '隱藏金鑰' : '顯示金鑰'"
                     :aria-label="keyVisibility[p.id] ? '隱藏金鑰' : '顯示金鑰'"
                   >
-                    {{ keyVisibility[p.id] ? '🙈' : '👁️' }}
+                    {{ keyVisibility[p.id] ? 'HIDE' : 'SHOW' }}
                   </button>
                 </div>
                 <button
@@ -312,6 +372,16 @@ const saveStatusClass = {
                 >
                   {{ $t('settings.tabs.api.save') }}
                 </button>
+                <button
+                  v-if="providerSupportsModels(p.id)"
+                  class="btn-secondary"
+                  @click="fetchProviderModels(p.id, keyDraft[p.id].trim() || null)"
+                  :disabled="modelListStatus[p.id] === 'loading'"
+                  :aria-label="`${$t('settings.tabs.model.models.sync')} ${p.name}`"
+                >
+                  <span v-if="modelListStatus[p.id] === 'loading'">{{ $t('settings.tabs.model.models.syncing') }}</span>
+                  <span v-else>{{ $t('settings.tabs.model.models.sync') }}</span>
+                </button>
               </div>
 
               <!-- Test result badge -->
@@ -319,6 +389,13 @@ const saveStatusClass = {
                 <span v-if="keyTestStatus[p.id] === 'ok'">✓ {{ keyTestMessage[p.id] }}</span>
                 <span v-else-if="keyTestStatus[p.id] === 'error'">✗ {{ keyTestMessage[p.id] }}</span>
                 <span v-else>{{ $t('settings.tabs.api.verifying') }}</span>
+              </div>
+              <div
+                v-if="providerSupportsModels(p.id) && modelListStatus[p.id]"
+                class="test-result"
+                :class="`test-${modelListStatus[p.id]}`"
+              >
+                {{ modelListMessage[p.id] || modelListSummary(p.id) }}
               </div>
             </div>
           </div>
@@ -351,25 +428,51 @@ const saveStatusClass = {
               <div class="step-model-fields">
                 <div class="form-field">
                   <label class="field-label">Provider</label>
-                  <select v-model="stepDraft[def.step].provider" class="field-select">
+                  <select
+                    v-model="stepDraft[def.step].provider"
+                    class="field-select"
+                    @change="handleStepProviderChange(def.step)"
+                  >
                     <option value="">— {{ $t('settings.tabs.model.steps.useGlobal') }} —</option>
                     <option v-for="opt in providerOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
                   </select>
                 </div>
                 <div class="form-field">
                   <label class="field-label">Model</label>
-                  <input
-                    v-model="stepDraft[def.step].model"
-                    class="field-input"
-                    placeholder="e.g. deepseek/deepseek-v3.2"
-                    spellcheck="false"
-                  />
+                  <div class="model-input-row">
+                    <input
+                      v-model="stepDraft[def.step].model"
+                      class="field-input"
+                      :list="`models-step-${def.step}`"
+                      placeholder="e.g. deepseek/deepseek-v3.2"
+                      spellcheck="false"
+                    />
+                    <button
+                      class="btn-secondary"
+                      @click="fetchProviderModels(stepDraft[def.step].provider)"
+                      :disabled="!providerSupportsModels(stepDraft[def.step].provider) || modelListStatus[stepDraft[def.step].provider] === 'loading'"
+                    >
+                      <span v-if="modelListStatus[stepDraft[def.step].provider] === 'loading'">{{ $t('settings.tabs.model.models.syncing') }}</span>
+                      <span v-else>{{ $t('settings.tabs.model.models.sync') }}</span>
+                    </button>
+                  </div>
+                  <datalist :id="`models-step-${def.step}`">
+                    <option
+                      v-for="model in modelOptionsFor(stepDraft[def.step].provider)"
+                      :key="model.id"
+                      :value="model.id"
+                    >
+                      {{ model.name }}
+                    </option>
+                  </datalist>
+                  <p class="field-hint">{{ modelListSummary(stepDraft[def.step].provider) }}</p>
                 </div>
                 <div v-if="def.hasLite" class="form-field">
                   <label class="field-label">{{ $t('settings.tabs.model.agent.lite') }}</label>
                   <input
                     v-model="stepDraft[def.step].model_lite"
                     class="field-input"
+                    :list="`models-step-${def.step}`"
                     :placeholder="$t('settings.tabs.model.agent.liteHint')"
                     spellcheck="false"
                   />
@@ -617,8 +720,8 @@ const saveStatusClass = {
                       @keyup.enter="handleSaveKey('fred')"
                       aria-label="FRED API Key"
                     />
-                    <button class="btn-eye" @click="toggleKeyVisibility('fred')" :title="keyVisibility.fred ? '隱藏' : '顯示'">
-                      {{ keyVisibility.fred ? '🙈' : '👁️' }}
+                  <button class="btn-eye" @click="toggleKeyVisibility('fred')" :title="keyVisibility.fred ? '隱藏' : '顯示'">
+                      {{ keyVisibility.fred ? 'HIDE' : 'SHOW' }}
                     </button>
                   </div>
                   <button class="btn-secondary" @click="handleTestKey('fred')" :disabled="keyTestStatus.fred === 'testing'">
@@ -691,7 +794,7 @@ const saveStatusClass = {
 .settings-page {
   max-width: 1100px;
   margin: 0 auto;
-  padding: 40px 32px;
+  padding: 28px 24px 72px;
 }
 
 .page-header {
@@ -705,7 +808,8 @@ const saveStatusClass = {
   font-family: var(--font-mono);
   font-size: 28px;
   font-weight: 800;
-  letter-spacing: -0.5px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
   color: var(--text-primary);
   margin: 0 0 4px;
 }
@@ -722,7 +826,7 @@ const saveStatusClass = {
   font-size: 13px;
   font-weight: 600;
   padding: 4px 12px;
-  border-radius: 20px;
+  border-radius: var(--radius-sm);
   transition: all 0.25s ease;
   min-width: 90px;
   text-align: right;
@@ -777,8 +881,11 @@ const saveStatusClass = {
   text-align: left;
   cursor: pointer;
   color: var(--text-secondary);
-  font-size: 14px;
-  font-weight: 500;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   transition: all 0.15s ease;
 }
 
@@ -789,13 +896,20 @@ const saveStatusClass = {
 
 .sidebar-tab.active {
   border-left-color: var(--accent);
-  background: var(--accent-subtle);
-  color: var(--accent);
+  background: var(--text-primary);
+  color: #FFFFFF;
   font-weight: 700;
 }
 
 .tab-icon {
-  font-size: 16px;
+  display: inline-flex;
+  min-width: 34px;
+  justify-content: center;
+  border: 1px solid currentColor;
+  padding: 2px 5px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 800;
   flex-shrink: 0;
 }
 
@@ -824,8 +938,11 @@ const saveStatusClass = {
 }
 
 .tab-title {
-  font-size: 18px;
-  font-weight: 700;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--text-primary);
   margin: 0 0 6px;
 }
@@ -900,7 +1017,7 @@ const saveStatusClass = {
   padding: 9px 12px;
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   font-size: 14px;
   color: var(--text-primary);
   outline: none;
@@ -973,7 +1090,7 @@ const saveStatusClass = {
 
 .provider-badge {
   padding: 3px 10px;
-  border-radius: 20px;
+  border-radius: var(--radius-sm);
   border: 1px solid;
   font-size: 12px;
   font-weight: 700;
@@ -1012,7 +1129,7 @@ const saveStatusClass = {
   padding: 8px 36px 8px 12px;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   font-size: 13px;
   font-family: var(--font-mono);
   color: var(--text-primary);
@@ -1029,11 +1146,14 @@ const saveStatusClass = {
   right: 8px;
   top: 50%;
   transform: translateY(-50%);
-  background: none;
-  border: none;
-  font-size: 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 800;
   cursor: pointer;
-  padding: 2px;
+  padding: 2px 4px;
   opacity: 0.6;
   transition: opacity 0.15s;
 }
@@ -1044,12 +1164,15 @@ const saveStatusClass = {
 
 .btn-primary {
   padding: 8px 16px;
-  background: var(--accent);
+  background: var(--text-primary);
   color: #fff;
-  border: none;
-  border-radius: var(--radius-md);
-  font-size: 13px;
-  font-weight: 600;
+  border: 1px solid var(--text-primary);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   cursor: pointer;
   transition: background 0.15s, opacity 0.15s;
   flex-shrink: 0;
@@ -1063,9 +1186,12 @@ const saveStatusClass = {
   background: none;
   color: var(--text-secondary);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  font-size: 13px;
-  font-weight: 600;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   cursor: pointer;
   transition: all 0.15s;
   flex-shrink: 0;
@@ -1091,6 +1217,7 @@ const saveStatusClass = {
 .test-ok    { background: rgba(16,185,129,0.1); color: var(--accent-success); }
 .test-error { background: rgba(220,38,38,0.1);  color: var(--accent-danger); }
 .test-testing { background: rgba(255,152,0,0.1); color: var(--accent-warn); }
+.test-loading { background: rgba(255,152,0,0.1); color: var(--accent-warn); }
 
 /* ── Preset selector ─────────────────────────────────────────────────────── */
 
@@ -1107,7 +1234,7 @@ const saveStatusClass = {
   padding: 10px 14px;
   background: var(--bg-graph);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 14px;
   color: var(--text-primary);
@@ -1137,7 +1264,7 @@ const saveStatusClass = {
   gap: 4px;
   background: var(--bg-graph);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   padding: 4px;
   width: fit-content;
 }
@@ -1201,7 +1328,7 @@ const saveStatusClass = {
   width: 44px;
   height: 24px;
   background: var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   padding: 2px;
   transition: background 0.2s ease;
 }
@@ -1214,7 +1341,7 @@ const saveStatusClass = {
   width: 20px;
   height: 20px;
   background: #fff;
-  border-radius: 50%;
+  border-radius: var(--radius-xs);
   box-shadow: 0 1px 3px rgba(0,0,0,0.2);
   transition: transform 0.2s ease;
 }
@@ -1278,7 +1405,7 @@ const saveStatusClass = {
   padding: 10px 14px;
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
 }
 
 .qa-label {
@@ -1326,8 +1453,8 @@ const saveStatusClass = {
   justify-content: center;
   width: 24px;
   height: 24px;
-  border-radius: 50%;
-  background: var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--text-primary);
   color: #fff;
   font-size: 12px;
   font-weight: 700;
@@ -1351,6 +1478,16 @@ const saveStatusClass = {
   grid-template-columns: 1fr 2fr;
   gap: 10px;
   margin-bottom: 12px;
+}
+
+.model-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.model-input-row .field-input {
+  min-width: 0;
 }
 
 .step-card-actions {
@@ -1383,5 +1520,22 @@ const saveStatusClass = {
 
 details[open] .global-fallback-toggle::before {
   content: '▾ ';
+}
+
+@media (max-width: 768px) {
+  .quick-apply-bar,
+  .key-input-row,
+  .model-input-row,
+  .step-card-actions {
+    flex-wrap: wrap;
+  }
+
+  .step-model-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .model-input-row .btn-secondary {
+    width: 100%;
+  }
 }
 </style>

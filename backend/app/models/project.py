@@ -131,7 +131,7 @@ class SessionState:
     ) -> SessionState:
         """Create a new session state with generated ID and timestamps."""
         now = datetime.utcnow().isoformat()
-        default_platforms = {"facebook": True, "instagram": True}
+        default_platforms = {"twitter": True, "reddit": True}
         cost = CostEstimate.calculate(agent_count, round_count)
         return SessionState(
             id=str(uuid4()),

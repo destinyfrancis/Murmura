@@ -182,7 +182,7 @@ onMounted(() => {
 <style scoped>
 .step5 {
   display: grid;
-  grid-template-columns: 300px 1fr;
+  grid-template-columns: 320px minmax(0, 1fr);
   gap: 16px;
   min-height: 600px;
 }
@@ -193,5 +193,28 @@ onMounted(() => {
   gap: 12px;
   overflow-y: auto;
   max-height: calc(100vh - 160px);
+  padding: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+.step5 :deep(.chat-interface),
+.step5 :deep(.chat-panel),
+.step5 :deep(.agent-search-panel),
+.step5 :deep(.agent-detail-panel),
+.step5 :deep(.interview-mode) {
+  border-radius: var(--radius-lg);
+}
+
+@media (max-width: 980px) {
+  .step5 {
+    grid-template-columns: 1fr;
+  }
+
+  .step5-sidebar {
+    max-height: none;
+  }
 }
 </style>

@@ -184,9 +184,9 @@ class PoliticalModel:
 
         # Personality effect (reduced: belief_system already uses openness
         # for confirmation bias, so we avoid double-counting here)
-        base += (openness - 0.5) * 0.05
+        base += (openness - 0.5) * 0.035
         # Positive: anxiety → conformity (not anti-democracy)
-        base += (neuroticism - 0.5) * 0.02
+        base += (neuroticism - 0.5) * 0.01
 
         # Individual variation
         noise = random.gauss(0, 0.05)

@@ -16,7 +16,7 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from backend.app.api.auth import _limiter
 from backend.app.models.request import GraphBuildRequest
 from backend.app.models.response import APIResponse, GraphBuildResponse
-from backend.app.services.implicit_stakeholder_service import ImplicitStakeholderService
+from backend.app.services.graph_builder import GraphBuilderService
 from backend.app.utils.db import get_db
 from backend.app.utils.logger import get_logger
 from backend.app.utils.prompt_security import sanitize_seed_text
@@ -42,12 +42,17 @@ def _row_to_node(row: Any) -> dict[str, Any]:
 
 
 def _row_to_edge(row: Any) -> dict[str, Any]:
-    return {
+    edge = {
         "source": row["source_id"],
         "target": row["target_id"],
         "label": row["relation_type"],
         "weight": row["weight"] or 1.0,
     }
+    if "source_text" in row.keys():
+        edge["source_text"] = row["source_text"]
+    if "evidence_span" in row.keys():
+        edge["evidence_span"] = row["evidence_span"]
+    return edge
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +70,7 @@ async def build_graph(request: Request, req: GraphBuildRequest) -> APIResponse:
     and memory initialization.  All DB writes go through the aiosqlite
     graph store — no hard-coded node/edge data.
     """
-    graph_id = str(uuid.uuid4())
+    graph_id = req.session_id or str(uuid.uuid4())
 
     # Detect mode (hk_demographic vs kg_driven) — still used by simulation routing.
     safe_seed = sanitize_seed_text(req.seed_text) if req.seed_text else ""
@@ -78,108 +83,25 @@ async def build_graph(request: Request, req: GraphBuildRequest) -> APIResponse:
         _HK_SCENARIO_TYPES = {"property", "emigration", "fertility", "career", "education", "macro"}
         _is_hk = req.scenario_type in _HK_SCENARIO_TYPES
 
-    seed_nodes = 0
-    seed_edges = 0
-    implicit_nodes = 0
-    mem_result = None
-
-    # --- Unified seed injection: single write path for all modes ---
-    if safe_seed.strip():
-        try:
-            from backend.app.services.seed_graph_injector import SeedGraphInjector  # noqa: PLC0415
-            from backend.app.services.text_processor import TextProcessor  # noqa: PLC0415
-
-            processor = TextProcessor()
-            processed = await processor.process(safe_seed)
-
-            injector = SeedGraphInjector()
-            inject_result = await injector.inject(graph_id, processed)
-            seed_nodes = inject_result.get("seed_nodes", 0)
-            seed_edges = inject_result.get("seed_edges", 0)
-            logger.info(
-                "Seed injection for graph %s: +%d nodes, +%d edges",
-                graph_id,
-                seed_nodes,
-                seed_edges,
-            )
-        except Exception:
-            logger.exception(
-                "Seed injection failed for graph %s — continuing",
-                graph_id,
-            )
-
-        # --- Implicit stakeholder discovery (best-effort) ---
-        try:
-            implicit_svc = ImplicitStakeholderService()
-            existing_for_dedup: list[dict[str, str]] = []
-            try:
-                async with get_db() as db:
-                    cursor = await db.execute(
-                        "SELECT id, title, entity_type FROM kg_nodes WHERE session_id = ?",
-                        (graph_id,),
-                    )
-                    existing_for_dedup = [
-                        {"id": str(r[0]), "label": str(r[1] or ""), "entity_type": str(r[2] or "")}
-                        for r in await cursor.fetchall()
-                    ]
-            except Exception:
-                logger.warning("Failed to load existing nodes for dedup graph=%s", graph_id)
-
-            discovery = await implicit_svc.discover(graph_id, safe_seed, existing_for_dedup)
-            implicit_nodes = discovery.nodes_added
-            logger.info(
-                "Implicit stakeholder discovery for graph %s: +%d nodes",
-                graph_id,
-                implicit_nodes,
-            )
-        except Exception:
-            logger.exception(
-                "Implicit stakeholder discovery failed for graph %s — continuing",
-                graph_id,
-            )
-
-        # --- Memory initialization (best-effort) ---
-        try:
-            from backend.app.services.memory_initialization import MemoryInitializationService  # noqa: PLC0415
-
-            mem_svc = MemoryInitializationService()
-            mem_result = await mem_svc.build_from_graph(graph_id, safe_seed)
-            logger.info(
-                "Memory init for graph %s: %d world ctx, %d persona templates, %d edges",
-                graph_id,
-                mem_result.world_context_count,
-                mem_result.persona_template_count,
-                mem_result.enhanced_edge_count,
-            )
-        except Exception:
-            logger.exception(
-                "Memory initialization failed for graph %s — continuing without seed memories",
-                graph_id,
-            )
-
-    # --- Build entity/relation type lists from DB (uniform for all modes) ---
     try:
-        async with get_db() as db:
-            et_cursor = await db.execute(
-                "SELECT DISTINCT entity_type FROM kg_nodes WHERE session_id = ? AND entity_type IS NOT NULL",
-                (graph_id,),
-            )
-            _entity_types = [r[0] for r in await et_cursor.fetchall()]
-            rt_cursor = await db.execute(
-                "SELECT DISTINCT relation_type FROM kg_edges WHERE session_id = ? AND relation_type IS NOT NULL",
-                (graph_id,),
-            )
-            _relation_types = [r[0] for r in await rt_cursor.fetchall()]
-    except Exception:
-        _entity_types = []
-        _relation_types = []
+        result_data = await GraphBuilderService().build_graph_from_seed(
+            graph_id=graph_id,
+            scenario_type=req.scenario_type,
+            seed_text=safe_seed,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Graph build failed for %s", graph_id)
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
 
     result = GraphBuildResponse(
-        graph_id=graph_id,
-        node_count=seed_nodes + implicit_nodes,
-        edge_count=seed_edges,
-        entity_types=_entity_types,
-        relation_types=_relation_types,
+        graph_id=result_data["graph_id"],
+        session_id=result_data["session_id"],
+        node_count=result_data["node_count"],
+        edge_count=result_data["edge_count"],
+        entity_types=result_data["entity_types"],
+        relation_types=result_data["relation_types"],
     )
     return APIResponse(
         success=True,
@@ -189,11 +111,12 @@ async def build_graph(request: Request, req: GraphBuildRequest) -> APIResponse:
             "detected_mode": "hk_demographic" if _is_hk else "kg_driven",
             "base_nodes": 0,
             "base_edges": 0,
-            "seed_nodes": seed_nodes,
-            "seed_edges": seed_edges,
-            "implicit_nodes": implicit_nodes,
-            "world_context_count": mem_result.world_context_count if mem_result else 0,
-            "persona_template_count": mem_result.persona_template_count if mem_result else 0,
+            "seed_nodes": result_data["seed_nodes"],
+            "seed_edges": result_data["seed_edges"],
+            "implicit_nodes": result_data["implicit_nodes"],
+            "world_context_count": result_data["world_context_count"],
+            "persona_template_count": result_data["persona_template_count"],
+            "chunk_count": result_data.get("chunk_count", 1),
         },
     )
 
@@ -236,7 +159,7 @@ async def get_graph(graph_id: str) -> APIResponse:
 
             edge_rows = await (
                 await db.execute(
-                    "SELECT source_id, target_id, relation_type, weight FROM kg_edges WHERE session_id = ?",
+                    "SELECT source_id, target_id, relation_type, weight, source_text, evidence_span FROM kg_edges WHERE session_id = ?",
                     (effective_graph_id,),
                 )
             ).fetchall()
@@ -278,7 +201,7 @@ async def list_edges(graph_id: str) -> APIResponse:
     async with get_db() as db:
         rows = await (
             await db.execute(
-                "SELECT source_id, target_id, relation_type, weight FROM kg_edges WHERE session_id = ?",
+                "SELECT source_id, target_id, relation_type, weight, source_text, evidence_span FROM kg_edges WHERE session_id = ?",
                 (graph_id,),
             )
         ).fetchall()
@@ -308,46 +231,37 @@ async def upload_seed_file(file: UploadFile = File(...)) -> APIResponse:
     - Accepted types: PDF, Markdown (.md), plain text (.txt)
     """
 
-    # Validate extension
-    filename = file.filename or ""
-    ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    if ext not in _ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"不支援的檔案類型 '{ext}'。請上傳 PDF、TXT 或 Markdown 檔案。",
-        )
-
-    # Read with size guard
-    raw = await file.read()
-    if len(raw) > _MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"檔案超過 10 MB 上限（目前 {len(raw) / 1024 / 1024:.1f} MB）",
-        )
-
-    extracted = ""
     try:
-        if ext == ".pdf":
-            extracted = _extract_pdf_text(raw)
-        else:
-            # TXT / MD: try UTF-8 first, fall back to latin-1
-            try:
-                extracted = raw.decode("utf-8")
-            except UnicodeDecodeError:
-                extracted = raw.decode("latin-1", errors="replace")
-    except Exception as exc:
-        logger.exception("upload_seed_file extraction failed for %s", filename)
-        raise HTTPException(status_code=422, detail=f"無法提取文字內容：{exc}") from exc
+        from backend.app.services.scenario_intake import ScenarioIntakeService  # noqa: PLC0415
 
-    if not extracted.strip():
-        raise HTTPException(status_code=422, detail="檔案內容為空，無法提取文字。")
+        raw = await file.read()
+        intake = ScenarioIntakeService(max_bytes=_MAX_UPLOAD_BYTES).from_bytes(
+            raw,
+            filename=file.filename,
+            content_type=file.content_type,
+        )
+    except ValueError as exc:
+        logger.exception("upload_seed_file extraction failed for %s", file.filename)
+        message = str(exc)
+        status_code = 413 if "10 MB" in message else 400 if "Unsupported" in message else 422
+        raise HTTPException(status_code=status_code, detail=message) from exc
 
     return APIResponse(
         success=True,
         data={
-            "text": extracted,
-            "filename": filename,
-            "size": len(raw),
+            "text": intake.text,
+            "filename": intake.filename,
+            "size": intake.size_bytes,
+            "chunk_count": intake.chunk_count,
+            "chunks": [
+                {
+                    "index": c.index,
+                    "start_char": c.start_char,
+                    "end_char": c.end_char,
+                    "source_ref": c.source_ref,
+                }
+                for c in intake.chunks
+            ],
         },
     )
 
@@ -614,6 +528,47 @@ async def get_node_neighborhood(graph_id: str, node_id: str, hops: int = 2) -> A
     )
 
 
+@router.get("/{graph_id}/query")
+async def query_graph_rag(
+    graph_id: str,
+    q: str,
+    hops: int = 2,
+    limit: int = 10,
+    strict: bool = True,
+) -> APIResponse:
+    """Structured GraphRAG retrieval with explicit degraded fallback."""
+    if not q.strip():
+        raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
+
+    try:
+        from backend.app.services.graph_rag_query import GraphRAGQueryService  # noqa: PLC0415
+
+        result = await GraphRAGQueryService().query(
+            session_id=graph_id,
+            query=q,
+            hops=hops,
+            limit=limit,
+            strict=strict,
+        )
+        data = result.to_dict()
+        return APIResponse(
+            success=True,
+            data=data,
+            meta={
+                "graph_id": graph_id,
+                "mode": result.mode,
+                "node_count": len(result.nodes),
+                "edge_count": len(result.edges),
+                "evidence_count": len(result.evidence),
+            },
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Bad request") from exc
+    except Exception as exc:
+        logger.exception("query_graph_rag failed for graph %s", graph_id)
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+
 @router.get("/{graph_id}/diff")
 async def get_graph_diff(graph_id: str, from_round: int, to_round: int) -> APIResponse:
     """Return added/removed/changed nodes and edges between two KG snapshots."""
@@ -804,6 +759,109 @@ async def get_node_evidence(graph_id: str, node_id: str) -> APIResponse:
     except Exception as exc:
         logger.exception("get_node_evidence failed for graph %s node %s", graph_id, node_id)
         raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+
+@router.get("/{graph_id}/hidden-actors")
+async def list_hidden_actors(graph_id: str) -> APIResponse:
+    """List inferred hidden actors for review/filtering."""
+    try:
+        async with get_db() as db:
+            rows = await (
+                await db.execute(
+                    """
+                    SELECT id, entity_type, title, description, properties,
+                           confidence_score, created_at
+                    FROM kg_nodes
+                    WHERE session_id = ? AND properties LIKE '%implicit_discovery%'
+                    ORDER BY confidence_score DESC, created_at DESC
+                    """,
+                    (graph_id,),
+                )
+            ).fetchall()
+    except Exception as exc:
+        logger.exception("list_hidden_actors failed graph=%s", graph_id)
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+    actors = []
+    for row in rows:
+        props = json.loads(row["properties"] or "{}")
+        if props.get("actor_node_id"):
+            continue
+        actors.append(
+            {
+                "id": row["id"],
+                "name": row["title"],
+                "entity_type": row["entity_type"],
+                "role": row["description"] or props.get("inferred_role", ""),
+                "review_status": props.get("review_status", "pending"),
+                "actor_visibility": props.get("actor_visibility", "inferred"),
+                "include_in_simulation": props.get("include_in_simulation", True),
+                "confidence": row["confidence_score"],
+                "why_missing": props.get("why_missing", ""),
+                "evidence_phrase": props.get("evidence_phrase", ""),
+                "relevance_reason": props.get("relevance_reason", ""),
+            }
+        )
+
+    return APIResponse(
+        success=True,
+        data={"hidden_actors": actors},
+        meta={"graph_id": graph_id, "count": len(actors)},
+    )
+
+
+@router.put("/{graph_id}/hidden-actors/{node_id}")
+async def update_hidden_actor_review(
+    graph_id: str,
+    node_id: str,
+    include_in_simulation: bool | None = None,
+    review_status: str | None = None,
+) -> APIResponse:
+    """Update hidden actor review status or simulation inclusion flag."""
+    allowed_statuses = {"pending", "accepted", "rejected", "speculative"}
+    if review_status is not None and review_status not in allowed_statuses:
+        raise HTTPException(status_code=400, detail="Invalid review_status")
+
+    try:
+        async with get_db() as db:
+            row = await (
+                await db.execute(
+                    "SELECT properties FROM kg_nodes WHERE session_id = ? AND id = ?",
+                    (graph_id, node_id),
+                )
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Hidden actor not found")
+
+            props = json.loads(row["properties"] or "{}")
+            if props.get("source") != "implicit_discovery":
+                raise HTTPException(status_code=400, detail="Node is not a hidden actor")
+
+            if include_in_simulation is not None:
+                props["include_in_simulation"] = include_in_simulation
+            if review_status is not None:
+                props["review_status"] = review_status
+
+            await db.execute(
+                "UPDATE kg_nodes SET properties = ? WHERE session_id = ? AND id = ?",
+                (json.dumps(props, ensure_ascii=False), graph_id, node_id),
+            )
+            await db.commit()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("update_hidden_actor_review failed graph=%s node=%s", graph_id, node_id)
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+    return APIResponse(
+        success=True,
+        data={
+            "id": node_id,
+            "include_in_simulation": props.get("include_in_simulation", True),
+            "review_status": props.get("review_status", "pending"),
+        },
+        meta={"graph_id": graph_id},
+    )
 
 
 @router.get("/{graph_id}/temporal")

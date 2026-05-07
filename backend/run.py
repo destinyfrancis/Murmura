@@ -1,4 +1,4 @@
-"""Uvicorn entry point for Morai backend."""
+"""Uvicorn entry point for Murmura backend."""
 
 from __future__ import annotations
 

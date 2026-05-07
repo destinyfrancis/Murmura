@@ -59,7 +59,7 @@ async function exportPDF() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `murmuroscope-report-${reportId}.pdf`
+    a.download = `murmura-report-${reportId}.pdf`
     a.click()
     URL.revokeObjectURL(url)
   } catch (e) {
@@ -167,9 +167,9 @@ watch(reportContent, (newContent) => {
 })
 
 const stepIcon = (stepType) => {
-  if (stepType === 'Thought') return '🧠'
-  if (stepType === 'Action') return '⚡'
-  if (stepType === 'Observation') return '👁'
+  if (stepType === 'Thought') return 'TH'
+  if (stepType === 'Action') return 'AC'
+  if (stepType === 'Observation') return 'OB'
   return '•'
 }
 
@@ -558,7 +558,7 @@ async function runXaiTool(toolName) {
 
     <!-- XAI sidebar — visible only after report is complete -->
     <div v-if="completed" class="xai-sidebar">
-      <h3 class="xai-title">🔬 深度分析工具</h3>
+      <h3 class="xai-title">XAI TOOLS</h3>
       <button
         v-for="tool in XAI_TOOLS"
         :key="tool.name"
@@ -584,8 +584,8 @@ async function runXaiTool(toolName) {
 <style scoped>
 .step4 {
   display: grid;
-  grid-template-columns: 1fr 1fr 220px;
-  gap: 20px;
+  grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.1fr) 230px;
+  gap: 16px;
   min-height: 500px;
   align-items: start;
 }
@@ -593,11 +593,12 @@ async function runXaiTool(toolName) {
 .react-panel,
 .report-panel {
   background: var(--bg-card);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 20px;
+  padding: 18px;
   display: flex;
   flex-direction: column;
+  box-shadow: var(--shadow-card);
 }
 
 .react-panel-header {
@@ -612,8 +613,11 @@ async function runXaiTool(toolName) {
 }
 
 .panel-heading {
-  font-size: 16px;
-  font-weight: 600;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   margin: 0;
 }
 
@@ -628,10 +632,10 @@ async function runXaiTool(toolName) {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: var(--accent-blue);
-  background: var(--accent-blue-light);
+  color: var(--accent);
+  background: var(--accent-subtle);
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
 }
 
 .step-count {
@@ -656,7 +660,7 @@ async function runXaiTool(toolName) {
 .gen-progress-fill {
   height: 100%;
   width: 40%;
-  background: linear-gradient(90deg, var(--accent-cyan), var(--accent-blue));
+  background: var(--accent);
   border-radius: 2px;
   animation: progress-slide 1.8s ease-in-out infinite;
 }
@@ -683,7 +687,7 @@ async function runXaiTool(toolName) {
   color: var(--text-muted);
   background: #F5F5F5;
   padding: 4px 12px;
-  border-radius: 20px;
+  border-radius: var(--radius-sm);
 }
 .stat-value {
   font-weight: 700;
@@ -747,7 +751,7 @@ async function runXaiTool(toolName) {
 .timeline-content {
   padding: 4px 12px 16px;
   cursor: pointer;
-  border-radius: var(--radius-md, 4px);
+  border-radius: var(--radius-sm);
   transition: background var(--duration-fast, 0.15s);
 }
 .timeline-content:hover {
@@ -820,18 +824,22 @@ async function runXaiTool(toolName) {
 .pdf-btn {
   padding: 6px 14px;
   background: var(--bg-input);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   cursor: pointer;
   transition: var(--transition);
   white-space: nowrap;
 }
 
 .pdf-btn:hover:not(:disabled) {
-  border-color: var(--accent-blue);
-  color: var(--accent-blue);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .pdf-btn:disabled {
@@ -870,7 +878,7 @@ async function runXaiTool(toolName) {
   width: 32px;
   height: 32px;
   border: 3px solid var(--border-color);
-  border-top-color: var(--accent-blue);
+  border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -892,7 +900,7 @@ async function runXaiTool(toolName) {
 .retry-btn {
   padding: 8px 20px;
   background: var(--bg-input);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-primary);
   font-size: 13px;
@@ -900,7 +908,7 @@ async function runXaiTool(toolName) {
 }
 
 .retry-btn:hover {
-  border-color: var(--accent-blue);
+  border-color: var(--accent);
 }
 
 .report-body {
@@ -945,7 +953,7 @@ async function runXaiTool(toolName) {
 }
 
 .report-body :deep(blockquote) {
-  border-left: 3px solid var(--accent-blue);
+  border-left: 3px solid var(--accent);
   padding-left: 14px;
   color: var(--text-secondary);
   margin-bottom: 10px;
@@ -971,7 +979,7 @@ async function runXaiTool(toolName) {
 /* Typewriter cursor */
 .typing-cursor {
   display: inline;
-  color: var(--accent-cyan);
+  color: var(--accent);
   font-family: var(--font-mono, monospace);
   font-weight: 700;
   animation: cursor-blink 0.8s step-end infinite;
@@ -996,8 +1004,8 @@ async function runXaiTool(toolName) {
 .report-question-input {
   width: 100%;
   background: var(--bg-input, var(--bg-secondary));
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   color: var(--text-primary);
   padding: 0.5rem 0.75rem;
   font-size: 0.9rem;
@@ -1009,29 +1017,31 @@ async function runXaiTool(toolName) {
 .report-regen-btn {
   white-space: nowrap;
   padding: 0.5rem 1rem;
-  border-radius: 8px;
-  background: var(--accent-blue);
+  border-radius: var(--radius-sm);
+  background: var(--text-primary);
   color: #fff;
-  border: none;
+  border: 1px solid var(--text-primary);
   cursor: pointer;
   font-size: 0.9rem;
 }
 
 /* XAI sidebar */
 .xai-sidebar {
-  width: 220px;
+  width: 230px;
   flex-shrink: 0;
   padding: 12px;
   background: var(--bg-card);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   overflow-y: auto;
   max-height: 80vh;
 }
 .xai-title {
   margin: 0 0 10px;
-  font-size: 13px;
-  font-weight: 600;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
   color: var(--text-muted, #aaa);
 }
 .xai-btn {
@@ -1041,7 +1051,7 @@ async function runXaiTool(toolName) {
   padding: 7px 10px;
   background: var(--bg-input, #1e1e1e);
   border: 1px solid var(--border-color, #333);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   color: var(--text-primary, #e0e0e0);
   cursor: pointer;
   text-align: left;
@@ -1049,8 +1059,8 @@ async function runXaiTool(toolName) {
   transition: var(--transition);
 }
 .xai-btn:hover:not(:disabled) {
-  border-color: var(--accent-orange, #FF6B35);
-  color: var(--accent-orange, #FF6B35);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 .xai-btn.active,
 .xai-btn:disabled {
@@ -1066,7 +1076,7 @@ async function runXaiTool(toolName) {
   margin: 0 0 4px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--accent-orange, #FF6B35);
+  color: var(--accent);
 }
 .xai-result-body {
   white-space: pre-wrap;
@@ -1077,5 +1087,23 @@ async function runXaiTool(toolName) {
   overflow-y: auto;
   margin: 0;
   color: var(--text-secondary, #888);
+}
+
+@media (max-width: 1180px) {
+  .step4 {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .xai-sidebar {
+    grid-column: 1 / -1;
+    width: 100%;
+    max-height: 320px;
+  }
+}
+
+@media (max-width: 820px) {
+  .step4 {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

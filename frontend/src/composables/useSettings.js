@@ -21,6 +21,13 @@ const settings = reactive({
     agent_model_lite: '',
     report_provider: 'openrouter',
     report_model: '',
+    steps: {
+      1: { provider: '', model: '' },
+      2: { provider: '', model: '' },
+      3: { provider: '', model: '', model_lite: '' },
+      4: { provider: '', model: '' },
+      5: { provider: '', model: '' },
+    },
   },
   apiKeys: {
     openrouter: '',
@@ -173,7 +180,10 @@ export function useSettings() {
     if (!field) return
     saveStatus.value = 'saving'
     try {
-      await updateSettings({ [field]: key })
+      const res = await updateSettings({ [field]: key })
+      const data = res.data?.settings || res.data
+      if (data?.api_keys) Object.assign(settings.apiKeys, data.api_keys)
+      if (data?.data) Object.assign(settings.data, data.data)
       saveStatus.value = 'saved'
       setTimeout(() => {
         if (saveStatus.value === 'saved') saveStatus.value = 'idle'

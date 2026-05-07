@@ -254,7 +254,222 @@ export default {
     }
   },
   learn: {
-    subtitle: 'Learn the principles behind Murmura'
+    eyebrow: 'Operator Manual',
+    title: 'From seed text to traceable forecasts',
+    subtitle: 'This is not a product brochure. It is an operator manual for understanding how Murmura reads a scenario, builds a knowledge graph, generates agents, runs OASIS simulations, interprets probability reports, and challenges model output.',
+    metricsLabel: 'Learning summary',
+    indexLabel: 'Lesson index',
+    glossaryLabel: 'Quick Reference',
+    glossaryTitle: 'Terms to know before reading results',
+    metrics: [
+      { value: '10', label: 'Lessons' },
+      { value: '05', label: 'Workflow steps' },
+      { value: '18', label: 'XAI tools' },
+      { value: 'p10-p90', label: 'Uncertainty band' }
+    ],
+    workflow: [
+      { label: 'Graph', desc: 'Break raw text into entities, relations, hidden stakeholders, and initial metrics.' },
+      { label: 'Env', desc: 'Convert the graph into agents, platform identities, decision spaces, and scenario config.' },
+      { label: 'Sim', desc: 'Run round-by-round decisions, belief updates, faction formation, and macro feedback.' },
+      { label: 'Report', desc: 'Use explainable tools to inspect evidence, generate reports, export PDF, or share a link.' },
+      { label: 'Interact', desc: 'Interview agents, test assumptions, inject shocks, and compare branch timelines.' }
+    ],
+    blocks: {
+      whatHappens: 'What the system actually does',
+      howToRead: 'How you should interpret it',
+      operatorRule: 'Operator rule'
+    },
+    modules: {
+      overview: {
+        code: 'START',
+        title: 'Murmura forecasts collective response, not a single answer',
+        summary: 'After you provide seed text, Murmura turns it into a runnable social, corporate, market, or narrative world. The point is not to ask an LLM for an answer; it is to let different agents influence one another inside the same world.',
+        steps: [
+          'Read the text while preserving the timeline and context you provided.',
+          'Extract explicit actors, events, places, organizations, resources, and conflicts.',
+          'Infer stakeholders who are affected but not directly named.',
+          'Let agents act round by round and observe how group trends emerge.'
+        ],
+        checks: [
+          'Treat output as a map of possible futures, not a prophecy.',
+          'Check whether agents, metrics, and shocks match the source text.',
+          'Use report evidence and counterfactual branches to test robustness.',
+          'If the seed text is narrow, the simulated world will be narrow too.'
+        ],
+        outcome: 'The strongest workflow is to define the question first, then let the system construct the world. A headline alone rarely contains enough causal structure.'
+      },
+      workflow: {
+        code: 'FLOW',
+        title: 'The five-step workflow is one prediction pipeline',
+        summary: 'Every step leaves state behind. You can pause at graph review, rebuild the environment, change presets, regenerate reports, or question agents during the interaction phase.',
+        steps: [
+          'Step 1 builds the KG by extracting entities, relations, and hidden stakeholders.',
+          'Step 2 creates agent profiles, platform identities, initial memories, and decision spaces.',
+          'Step 3 runs the OASIS subprocess and records actions, beliefs, and events by round.',
+          'Step 4 generates a ReACT report using XAI tools over data and timelines.',
+          'Step 5 supports interviews, evidence checks, and what-if shock injection.'
+        ],
+        checks: [
+          'If the graph is wrong, every later step inherits that error.',
+          'The environment is the entrance to agent worldviews and deserves sampling.',
+          'In simulation, inspect trends, divergence, and tipping points, not only the final round.',
+          'A report is decision support, not delegated judgment.'
+        ],
+        outcome: 'When a result feels strange, return to the earliest step where the mistake could have entered.'
+      },
+      graph: {
+        code: 'GRAPH',
+        title: 'The knowledge graph makes natural language inspectable',
+        summary: 'Murmura converts seed text into nodes and edges: who influences whom, what resource is contested, and which causal chain is forming. This is the foundation for the agent factory and GraphRAG.',
+        steps: [
+          'EntityExtractor finds explicit nodes and relations.',
+          'Alias mapping merges different names for the same entity.',
+          'ImplicitStakeholderService adds indirectly affected actors.',
+          'Graph snapshots evolve during simulation as agents act.'
+        ],
+        checks: [
+          'Nodes should be diverse enough, not just the obvious protagonists.',
+          'Edge direction should match causal or interaction direction.',
+          'Implied actors should be inferable from the seed text, not invented from unrelated knowledge.',
+          'If you forecast a metric, the graph should include things that can move that metric.'
+        ],
+        outcome: 'The graph is the earliest and cheapest quality-control point. If the graph is not credible, do not rush into simulation.'
+      },
+      actors: {
+        code: 'AGENTS',
+        title: 'Agents are decision-makers with memory and preferences',
+        summary: 'Each agent can carry identity, personality, cognitive fingerprint, memory, platform identity, and trust relations. Diversity matters: layers of interest, information, and exposure create different reactions.',
+        steps: [
+          'KGAgentFactory chooses viable roles from graph nodes.',
+          'When target count exceeds explicit roles, the system creates background agents.',
+          'Agents receive Big Five traits, attachment style, and value or political orientation.',
+          'Memories are written to LanceDB for later decisions and interviews.'
+        ],
+        checks: [
+          'Do not look only at agent count; inspect role distribution.',
+          'Key stakeholders should be marked as stakeholders, not background noise.',
+          'Platform identity should match context: the same agent may behave differently on different platforms.',
+          'Overly homogeneous agents produce falsely stable emergence.'
+        ],
+        outcome: 'Bigger is not automatically better. Representative, conflicting, information-diverse agents are what make a run useful.'
+      },
+      simulation: {
+        code: 'SIM',
+        title: 'Simulation shows the shape after interaction',
+        summary: 'Step 3 runs agents by round: posts, decisions, belief updates, emotional shifts, faction formation, echo chambers, macro feedback, and moderation events. It is a path, not a static summary.',
+        steps: [
+          'Each round begins with feed ranking and world-event context.',
+          'Agents act based on memory, relations, beliefs, and platform identity.',
+          'Beliefs update through Bayesian revision and embedding propagation.',
+          'Periodic hooks compute factions, polarization, virality, macro state, and tipping points.'
+        ],
+        checks: [
+          'Watch trend inflections rather than only averages.',
+          'Compare behavior across factions.',
+          'After a shock, look for plausible delay and cascade effects.',
+          'If Python is incompatible, the UI degrades and stops after environment setup.'
+        ],
+        outcome: 'One simulation is one path. Robust claims need an ensemble, fork, or counterfactual branch.'
+      },
+      probability: {
+        code: 'DIST',
+        title: 'Read probability distributions, not just point forecasts',
+        summary: 'Murmura output should be read as a distribution: p50 is the median path, p10-p90 is a wide uncertainty band, and branch gaps show where the model thinks the future may split.',
+        steps: [
+          'Read p50 first to understand the middle path.',
+          'Read p10-p90 to judge tail risk.',
+          'Compare distributions across presets, shocks, and forks.',
+          'Use Monte Carlo and Swarm Ensemble outputs to check sensitivity.'
+        ],
+        checks: [
+          '70% is not certainty; it is frequency language.',
+          'A narrow interval is not always accuracy; it may mean narrow assumptions.',
+          'When distributions are skewed, averages can mislead.',
+          'Decisions need a loss function, not only the highest-probability event.'
+        ],
+        outcome: 'The useful question is not just whether something happens, but under what conditions, at what cost, and with how much uncertainty.'
+      },
+      uncertainty: {
+        code: 'RISK',
+        title: 'Confidence comes from traceability, not confident tone',
+        summary: 'A model can sound certain. What matters is support: input quality, graph coverage, agent diversity, number of sampled paths, tool evidence, and historical calibration.',
+        steps: [
+          'Identify uncertainty sources: text gaps, model assumptions, LLM randomness, and external shocks.',
+          'Check whether report tools and data support the conclusion.',
+          'Inspect whether branches converge or split.',
+          'Turn high-risk conclusions into hypotheses that need verification.'
+        ],
+        checks: [
+          'High confidence with low evidence density is a warning sign.',
+          'If a few agents drive the result, check representativeness.',
+          'Predictions about surprise events should stay conservative.',
+          'Stating limits clearly is more valuable than a polished answer.'
+        ],
+        outcome: 'A trustworthy forecast is not uncertainty-free; it knows where uncertainty lives.'
+      },
+      report: {
+        code: 'REPORT',
+        title: 'Reports are inspectable reasoning artifacts',
+        summary: 'The report stage assembles a ReACT process: outline first, then XAI tools over timelines, factions, metrics, beliefs, and evidence, then a shareable or exportable analysis.',
+        steps: [
+          'Report Orchestrator creates a section plan.',
+          'Each section calls tools over the database and timeline.',
+          'The LLM integrates evidence, charts, and limitations.',
+          'Reports can export PDF and share through a token.'
+        ],
+        checks: [
+          'Conclusions should trace back to simulation events or graph evidence.',
+          'Do not accept strong causal claims without comparison branches.',
+          'The report should separate observations, inferences, and recommendations.',
+          'Before regenerating, make sure the simulation session has not been cleaned up.'
+        ],
+        outcome: 'A good report helps you ask sharper questions; it should not end thinking.'
+      },
+      interaction: {
+        code: 'ASK',
+        title: 'Use interaction to audit the model, not just chat',
+        summary: 'Step 5 can interview agents, question the Narrative Analyst, inspect memory behind an action, and propose what-if assumptions to see whether positions change.',
+        steps: [
+          'Choose the report analyst or a specific agent.',
+          'Ask about a round, faction, metric, action, or causal chain.',
+          'Ask agents to reference their memories and belief changes.',
+          'Inject hypothetical shocks and compare answer consistency.'
+        ],
+        checks: [
+          'Make questions specific: round, metric, actor, and action.',
+          'An agent answer is in-character reasoning, not ground truth.',
+          'If an answer conflicts with the report, inspect the timeline and database evidence.',
+          'Use interaction to find risks, not only supporting quotes.'
+        ],
+        outcome: 'Treat interaction as an audit surface. “How do you know?” is usually more valuable than “What do you think?”'
+      },
+      limits: {
+        code: 'LIMITS',
+        title: 'Model boundaries belong before decisions',
+        summary: 'Murmura is shaped by seed text, LLM provider, data lag, simulation preset, OASIS runtime, and cost caps. Knowing the boundary tells you where the result can and cannot be used.',
+        steps: [
+          'Check that seed text contains enough background and time horizon.',
+          'Confirm step-specific models and API keys in Settings are usable.',
+          'Review cost, concurrency, agent count, and rounds for the use case.',
+          'Label which data is live, delayed, simulated, or LLM-inferred.'
+        ],
+        checks: [
+          'Do not use demo-mode results for high-risk decisions.',
+          'Legal, medical, financial, and safety use cases need external expert review.',
+          'Prompt-injection-bearing inputs must pass safety sanitization.',
+          'Old sessions may not reflect latest data or model settings.'
+        ],
+        outcome: 'The professional use of Murmura is stress-testing a decision process, not replacing the decision-maker.'
+      }
+    },
+    glossary: [
+      { term: 'Seed Text', desc: 'The raw scenario, document, or question context you provide to the system.' },
+      { term: 'Knowledge Firewall', desc: 'Prompt constraints that force reasoning from the seed text instead of later knowledge.' },
+      { term: 'Tipping Point', desc: 'A critical moment where the system distribution shifts or branches sharply.' },
+      { term: 'p10-p90', desc: 'The band containing 80% of sampled outcomes, useful for tail risk and uncertainty.' },
+      { term: 'Stakeholder', desc: 'An actor who can affect the result or is materially affected by it.' },
+      { term: 'What-If Fork', desc: 'A new timeline created by injecting a shock at a round for counterfactual comparison.' }
+    ]
   },
   workspace: {
     title: 'Workspace',
@@ -282,8 +497,38 @@ export default {
     loadMore: 'Load More'
   },
   home: {
+    eyebrow: 'Universal Prediction Workbench',
     subtitle: 'Universal Prediction Engine',
     description: 'Drop any seed text — news, fiction, geopolitical events — AI auto-builds the world, spawns agents, and starts simulation. Combines Multi-Agent Systems, Knowledge Graphs, and Macro Forecasting to foresee collective behavior.',
+    consoleTitle: 'Prediction Console',
+    consoleStatus: 'System Status',
+    consoleStatusLive: 'Available',
+    consoleSignal: 'Clean-room UI · 5-step workflow',
+    pipelineTitle: '5-Step Control Flow',
+    examplesTitle: 'Example Scenarios',
+    sampleWar: 'Energy-market reaction after geopolitical escalation',
+    sampleFiction: 'Collective choices across factions in a fictional world',
+    sampleCompany: 'B2B supply-chain reaction after a new competitor enters',
+    inputLabel: 'INPUT',
+    fileLabel: 'SEED FILE',
+    seedLabel: 'SEED TEXT',
+    questionLabel: 'QUESTION',
+    presetLabel: 'RUN PRESET',
+    toolsTitle: 'Engineering Tools',
+    domainPacks: 'domain packs',
+    metrics: {
+      zeroConfig: 'Zero Config',
+      kg: 'GraphRAG',
+      oasis: 'OASIS',
+      react: 'ReACT'
+    },
+    workflow: {
+      graph: 'Extract entities, relations, and hidden stakeholders',
+      env: 'Generate agents, platform identities, and scenario config',
+      sim: 'Run multi-agent simulation and emergence hooks',
+      report: 'Generate traceable reports through XAI tools',
+      interact: 'Interview agents and explore What-If branches'
+    },
     startTitle: 'Start Predicting Now',
     startSubtitle: 'Upload a document or enter seed text, AI handles the rest',
     dropLabel: 'Drop file here, or click to browse',
@@ -395,12 +640,34 @@ export default {
       },
       expressBadge: '⚡ Express Mode · Auto-configured'
     },
+    workbench: {
+      subtitle: 'A five-step prediction pipeline from seed text to traceable report',
+      session: 'SESSION',
+      graph: 'GRAPH',
+      preset: 'PRESET',
+      engine: 'ENGINE',
+      unavailable: 'LIMITED',
+      ready: 'READY',
+      locked: 'LOCKED',
+      done: 'DONE',
+      active: 'ACTIVE'
+    },
     errors: {
       graphFirst: 'Please complete Graph Build first',
       envFirst: 'Please complete Env Setup and start simulation',
       simFirst: 'Report can be generated after simulation completes',
       reportFirst: 'Please generate report first',
-      engineUnavailable: 'Simulation engine unavailable — use Docker for full features'
+      engineUnavailable: 'Simulation engine unavailable — use Docker for full features',
+      engineUnavailableDetail: 'Simulation engine unavailable — use Docker for full features. The workflow will stop after Environment Setup.'
+    }
+  },
+  step2: {
+    badges: {
+      experimental: 'Experimental'
+    },
+    actions: {
+      creating: 'Creating...',
+      start: 'Start Simulation'
     }
   },
   settings: {
@@ -424,6 +691,15 @@ export default {
         desc: 'Configure LLM models per workflow step. Changes apply immediately, no restart required.',
         quickApply: 'Quick apply:',
         globalFallback: 'Global Defaults (used when no per-step model is set)',
+        models: {
+          sync: 'Sync models',
+          syncing: 'Syncing...',
+          chooseProvider: 'Choose a provider first',
+          unsupported: 'This provider does not support automatic model discovery yet; enter a model id manually',
+          notLoaded: 'Model list has not been synced yet; save/test an API key or sync models',
+          loading: 'Loading model list...',
+          loaded: '{count} models loaded; you can still enter an unlisted model id manually'
+        },
         steps: {
           useGlobal: 'Use global default',
           fillBoth: 'Please fill in both Provider and Model',

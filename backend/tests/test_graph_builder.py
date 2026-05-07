@@ -7,6 +7,8 @@ import uuid
 
 import pytest
 
+from backend.app.services.entity_extractor import _validate_edges, _validate_nodes
+
 # ======================================================================
 # Graph node and edge creation
 # ======================================================================
@@ -178,6 +180,80 @@ class TestEntityExtractorFindsEntities:
 
         result = await mock_llm_client.chat_json(messages=[{"role": "user", "content": ""}])
         assert result["entities"] == []
+
+    def test_validate_nodes_uses_stable_duplicate_ids_and_metadata(self):
+        raw_nodes = [
+            {
+                "id": "Alice",
+                "entity_type": "Person",
+                "title": "Alice",
+                "confidence": 1.3,
+                "source_span": {
+                    "source_ref": "seed_text",
+                    "start_char": 5,
+                    "end_char": 10,
+                    "text": "Alice",
+                },
+            },
+            {
+                "id": "Alice",
+                "entity_type": "Person",
+                "title": "Alice Alias",
+                "confidence": -0.5,
+            },
+        ]
+
+        first = _validate_nodes(raw_nodes, ["Person"])
+        second = _validate_nodes(raw_nodes, ["Person"])
+
+        assert [node["id"] for node in first] == ["alice", "alice_2"]
+        assert [node["id"] for node in second] == ["alice", "alice_2"]
+        assert first[0]["properties"]["confidence"] == 1.0
+        assert first[1]["properties"]["confidence"] == 0.0
+        assert first[0]["properties"]["source_span"]["text"] == "Alice"
+
+    def test_validate_edges_preserves_source_span_for_db_evidence(self):
+        nodes = [
+            {"id": "alice", "entity_type": "Person", "title": "Alice"},
+            {"id": "bob", "entity_type": "Person", "title": "Bob"},
+        ]
+        raw_edges = [
+            {
+                "source_id": "alice",
+                "target_id": "bob",
+                "relation_type": "SUPPORTS",
+                "description": "Alice supports Bob",
+                "confidence": 0.7,
+                "source_span": {
+                    "source_ref": "seed_text",
+                    "start_char": 0,
+                    "end_char": 18,
+                    "text": "Alice supports Bob",
+                },
+                "weight": 2.0,
+            }
+        ]
+
+        edges = _validate_edges(raw_edges, nodes, ["SUPPORTS"])
+
+        assert edges == [
+            {
+                "source_id": "alice",
+                "target_id": "bob",
+                "relation_type": "SUPPORTS",
+                "description": "Alice supports Bob",
+                "weight": 1.0,
+                "confidence": 0.7,
+                "source_text": "Alice supports Bob",
+                "evidence_span": {
+                    "source_ref": "seed_text",
+                    "start_char": 0,
+                    "end_char": 18,
+                    "text": "Alice supports Bob",
+                },
+            }
+        ]
+
 
 
 # ======================================================================

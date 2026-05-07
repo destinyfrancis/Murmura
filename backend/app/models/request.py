@@ -23,6 +23,7 @@ class GraphBuildRequest(BaseModel):
         "macro",
     ]
     seed_text: str = ""
+    session_id: str | None = None
     upload_files: list[str] | None = None
     auto_inject_hk_data: bool = True
 
@@ -71,7 +72,7 @@ class SimulationCreateRequest(BaseModel):
     round_count: int = 40
     macro_scenario_id: str | None = None
     shocks: list[ScheduledShock] = []
-    platforms: dict = {"facebook": True, "instagram": True}
+    platforms: dict = {"twitter": True, "reddit": True}
     llm_provider: str = "openrouter"
     company_count: int = Field(default=0, ge=0, description="Number of B2B company agents to generate (0 = none)")
     domain_pack_id: str = Field(default="hk_city", description="Domain pack to use for this simulation")

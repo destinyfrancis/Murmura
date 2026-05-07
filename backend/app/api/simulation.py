@@ -11,6 +11,7 @@ All handlers delegate to real service implementations:
 from __future__ import annotations
 
 import asyncio
+import uuid
 from pathlib import Path
 from typing import Annotated
 
@@ -35,6 +36,7 @@ from backend.app.services.simulation_manager import (
     store_activity_profiles,
     store_agent_profiles,
     store_universal_agent_profiles,
+    store_universal_agent_relationships,
 )
 from backend.app.services.supply_chain_builder import SupplyChainBuilder
 from backend.app.utils.db import get_db
@@ -53,13 +55,71 @@ logger = get_logger("api.simulation")
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 
+async def _load_graph_seed_text(graph_id: str) -> str:
+    """Load the original graph-holder seed text for a built graph."""
+    from backend.app.utils.db import get_db as _get_db  # noqa: PLC0415
+
+    async with _get_db() as db:
+        row = await (
+            await db.execute(
+                "SELECT seed_text FROM simulation_sessions WHERE id = ?",
+                (graph_id,),
+            )
+        ).fetchone()
+    if not row:
+        return ""
+    try:
+        return str(row["seed_text"] or "")
+    except (KeyError, TypeError, IndexError):
+        if isinstance(row, dict):
+            return str(row.get("seed_text") or "")
+        return ""
+
+
+async def _detect_create_mode(req: SimulationCreateRequest) -> tuple[str, str]:
+    """Infer whether a create request should use HK or KG-driven agents."""
+    if req.scenario_type == "kg_driven":
+        return "kg_driven", await _load_graph_seed_text(req.graph_id)
+
+    seed_text = await _load_graph_seed_text(req.graph_id)
+    if not seed_text.strip():
+        return "hk_demographic", ""
+
+    from backend.app.services.zero_config import ZeroConfigService  # noqa: PLC0415
+
+    detected_mode = await ZeroConfigService().detect_mode_async(seed_text)
+    return detected_mode, seed_text
+
+
+def _build_agent_role_coverage(profiles: list[object]) -> dict[str, object]:
+    """Summarise role/entity coverage for graph-driven agent generation."""
+    role_counts: dict[str, int] = {}
+    entity_type_counts: dict[str, int] = {}
+    relationship_edges = 0
+
+    for profile in profiles:
+        role = str(getattr(profile, "role", "") or "unknown")
+        entity_type = str(getattr(profile, "entity_type", "") or "unknown")
+        role_counts[role] = role_counts.get(role, 0) + 1
+        entity_type_counts[entity_type] = entity_type_counts.get(entity_type, 0) + 1
+        relationship_edges += len(getattr(profile, "relationships", ()) or ())
+
+    return {
+        "roles": role_counts,
+        "entity_types": entity_type_counts,
+        "relationship_edges": relationship_edges,
+    }
+
+
 @router.get("/sessions", response_model=APIResponse)
 async def list_sessions(limit: int = 20, offset: int = 0) -> APIResponse:
     """List all simulation sessions, newest first."""
     from backend.app.utils.db import get_db
 
     try:
-        async with get_db() as db:
+        from backend.app.utils.db import get_db as _get_db  # noqa: PLC0415
+
+        async with _get_db() as db:
             total_row = await (await db.execute("SELECT COUNT(*) as c FROM simulation_sessions")).fetchone()
             rows = await (
                 await db.execute(
@@ -102,6 +162,17 @@ async def list_presets() -> APIResponse:
     return APIResponse(success=True, data={"presets": presets, "total": len(presets)})
 
 
+@router.get("/mode-presets", response_model=APIResponse)
+async def list_mode_presets_endpoint(q: str = "") -> APIResponse:
+    """Return productised first-use mode presets and optional auto-detection."""
+    from backend.app.services.mode_presets import detect_mode_from_text, list_mode_presets  # noqa: PLC0415
+
+    data = {"presets": list_mode_presets()}
+    if q.strip():
+        data["suggested"] = detect_mode_from_text(q)
+    return APIResponse(success=True, data=data, meta={"count": len(data["presets"])})
+
+
 @router.post("/create", response_model=APIResponse)
 @_limiter.limit("10/minute")
 async def create_simulation(
@@ -115,6 +186,7 @@ async def create_simulation(
             s.model_copy(update={"post_content": s.description}) if not s.post_content else s for s in req.shocks
         ]
         req = req.model_copy(update={"shocks": enriched_shocks})
+        mode, seed_text = await _detect_create_mode(req)
 
         # Resolve preset if provided
         if req.preset:
@@ -132,51 +204,95 @@ async def create_simulation(
                 }
             )
 
-        # Load domain pack demographics for agent generation
-        demographics = None
-        try:
-            from backend.app.domain.base import DomainPackRegistry  # noqa: PLC0415
-
-            pack = DomainPackRegistry.get(req.domain_pack_id)
-            demographics = pack.demographics
-        except (KeyError, Exception):
-            logger.debug("Domain pack '%s' not found or has no demographics, using defaults", req.domain_pack_id)
-
-        factory = AgentFactory(demographics=demographics)
-        profile_gen = ProfileGenerator(agent_factory=factory)
-        macro = MacroController()
-
-        distribution = req.agent_distribution or {}
-        profiles = factory.generate_population(req.agent_count, distribution or None)
-
-        if req.family_members:
-            for fm in req.family_members:
-                twin = factory.generate_twin(fm.model_dump())
-                profiles = [*profiles, twin]
-
-        if req.crm_data:
-            crm_records = [c.model_dump() for c in req.crm_data]
-            crm_profiles = factory.generate_crm_agents(crm_records)
-            profiles = [*profiles, *crm_profiles]
-
-        macro_state = await macro.get_baseline_for_scenario(req.scenario_type or "property")
-
         manager = get_simulation_manager()
         request_dict = req.model_dump()
         if user:
             request_dict["owner_id"] = user.id
+        if mode == "kg_driven":
+            request_dict["sim_mode"] = "kg_driven"
+        if seed_text:
+            request_dict["seed_text"] = seed_text
         session_data = await manager.create_session(request_dict, csv_path=None)
         session_id = session_data["session_id"]
 
         session_dir = _PROJECT_ROOT / "data" / "sessions" / session_id
         csv_path = str(session_dir / "agents.csv")
-        csv_content = profile_gen.to_oasis_csv(profiles, macro_state)
-        await asyncio.to_thread(Path(csv_path).write_text, csv_content, encoding="utf-8")
-        logger.info("Wrote %d agents to %s", len(profiles), csv_path)
+        agent_coverage: dict[str, object] | None = None
+
+        if mode == "kg_driven":
+            profiles, csv_path = await generate_agents(
+                session_id=session_id,
+                request={
+                    **request_dict,
+                    "graph_id": req.graph_id,
+                    "seed_text": seed_text,
+                    "agent_count": req.agent_count,
+                },
+                mode="kg_driven",
+            )
+            try:
+                await store_universal_agent_profiles(session_id, profiles)
+            except Exception:
+                logger.warning("Could not store universal agent profiles for session %s", session_id, exc_info=True)
+            try:
+                await store_universal_agent_relationships(session_id, profiles)
+            except Exception:
+                logger.warning("Could not store universal agent relationships for session %s", session_id, exc_info=True)
+            agent_coverage = _build_agent_role_coverage(profiles)
+        else:
+            # Load domain pack demographics for HK/default agent generation
+            demographics = None
+            try:
+                from backend.app.domain.base import DomainPackRegistry  # noqa: PLC0415
+
+                pack = DomainPackRegistry.get(req.domain_pack_id)
+                demographics = pack.demographics
+            except (KeyError, Exception):
+                logger.debug("Domain pack '%s' not found or has no demographics, using defaults", req.domain_pack_id)
+
+            factory = AgentFactory(demographics=demographics)
+            profile_gen = ProfileGenerator(agent_factory=factory)
+            macro = MacroController()
+
+            distribution = req.agent_distribution or {}
+            profiles = factory.generate_population(req.agent_count, distribution or None)
+
+            if req.family_members:
+                for fm in req.family_members:
+                    twin = factory.generate_twin(fm.model_dump())
+                    profiles = [*profiles, twin]
+
+            if req.crm_data:
+                crm_records = [c.model_dump() for c in req.crm_data]
+                crm_profiles = factory.generate_crm_agents(crm_records)
+                profiles = [*profiles, *crm_profiles]
+
+            macro_state = await macro.get_baseline_for_scenario(req.scenario_type or "property")
+            csv_content = profile_gen.to_oasis_csv(profiles, macro_state)
+            await asyncio.to_thread(Path(csv_path).write_text, csv_content, encoding="utf-8")
+            logger.info("Wrote %d agents to %s", len(profiles), csv_path)
+
+            try:
+                await store_agent_profiles(session_id, profiles, profile_gen, macro_state)
+            except Exception:
+                logger.warning(
+                    "Could not store agent profiles for session %s",
+                    session_id,
+                    exc_info=True,
+                )
+
+            # Phase 1B: generate temporal activity profiles and persist alongside agents.
+            try:
+                session_dir = _PROJECT_ROOT / "data" / "sessions" / session_id
+                await store_activity_profiles(session_id, profiles, session_dir, factory)
+            except Exception:
+                logger.warning(
+                    "Could not store activity profiles for session %s",
+                    session_id,
+                    exc_info=True,
+                )
 
         import json as _json  # noqa: PLC0415
-
-        from backend.app.utils.db import get_db  # noqa: PLC0415
 
         async with get_db() as db:
             row = await (
@@ -193,26 +309,6 @@ async def create_simulation(
                     (_json.dumps(cfg), session_id),
                 )
                 await db.commit()
-
-        try:
-            await store_agent_profiles(session_id, profiles, profile_gen, macro_state)
-        except Exception:
-            logger.warning(
-                "Could not store agent profiles for session %s",
-                session_id,
-                exc_info=True,
-            )
-
-        # Phase 1B: generate temporal activity profiles and persist alongside agents.
-        try:
-            session_dir = _PROJECT_ROOT / "data" / "sessions" / session_id
-            await store_activity_profiles(session_id, profiles, session_dir, factory)
-        except Exception:
-            logger.warning(
-                "Could not store activity profiles for session %s",
-                session_id,
-                exc_info=True,
-            )
 
         # ---- B2B enterprise auto-generation ----
         scenario_lower = (req.scenario_type or "").lower()
@@ -258,6 +354,8 @@ async def create_simulation(
                 "company_count": supply_chain_graph.node_count,
                 "supply_chain_edges": supply_chain_graph.edge_count,
             }
+        if agent_coverage is not None:
+            b2b_meta["agent_role_coverage"] = agent_coverage
 
         return APIResponse(
             success=True,
@@ -345,9 +443,10 @@ async def _run_quick_start(
     round_count_final = resolved.rounds
     estimated_duration = round_count_final * agent_count_final // 50
 
+    graph_id = str(uuid.uuid4())
     graph_builder = GraphBuilderService()
-    graph_result = await graph_builder.build_graph(
-        session_id="quick",
+    graph_result = await graph_builder.build_graph_from_seed(
+        graph_id=graph_id,
         scenario_type=config.domain_pack_id,
         seed_text=seed_text,
     )
@@ -370,7 +469,7 @@ async def _run_quick_start(
             "round_count": round_count_final,
             "graph_id": graph_id,
             "domain_pack_id": config.domain_pack_id,
-            "platforms": {"twitter": True, "reddit": True} if is_kg else {"facebook": True, "instagram": True},
+            "platforms": {"twitter": True, "reddit": True},
             "time_config": time_config.to_dict(),
             "owner_id": owner_id,
         },
@@ -393,6 +492,10 @@ async def _run_quick_start(
             await store_universal_agent_profiles(session_id, profiles)
         except Exception:
             logger.warning("Could not store universal agent profiles for %s", session_id, exc_info=True)
+        try:
+            await store_universal_agent_relationships(session_id, profiles)
+        except Exception:
+            logger.warning("Could not store universal agent relationships for %s", session_id, exc_info=True)
     else:
         # --- hk_demographic path: existing logic unchanged ---
         demographics = None
@@ -480,50 +583,24 @@ async def quick_start_upload(
 
     Extracts text then delegates to ``_run_quick_start()``.
     """
-    import io as _io  # noqa: PLC0415
-
     try:
         content = await file.read()
-        if len(content) > _QUICK_START_MAX_BYTES:
-            raise HTTPException(status_code=400, detail="File exceeds 10 MB limit")
+        from backend.app.services.scenario_intake import ScenarioIntakeService  # noqa: PLC0415
 
-        ext = Path(file.filename or "").suffix.lower()
-        if ext not in _QUICK_START_ALLOWED_EXTS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported file type '{ext}'. Allowed: PDF, TXT, Markdown",
-            )
-
-        if ext == ".pdf":
-            seed_text = ""
-            try:
-                import pypdf  # noqa: PLC0415
-
-                reader = pypdf.PdfReader(_io.BytesIO(content))
-                seed_text = "\n\n".join(p.extract_text() or "" for p in reader.pages).strip()
-            except ImportError:
-                try:
-                    import PyPDF2  # noqa: PLC0415, N813
-
-                    reader = PyPDF2.PdfReader(_io.BytesIO(content))
-                    seed_text = "\n\n".join(p.extract_text() or "" for p in reader.pages).strip()
-                except ImportError:
-                    raise HTTPException(
-                        status_code=422,
-                        detail="PDF library not installed. Please upload TXT or Markdown.",
-                    ) from None
-            except Exception as exc:
-                raise HTTPException(status_code=422, detail=f"PDF extraction failed: {exc}") from exc
-        else:
-            seed_text = content.decode("utf-8", errors="replace").strip()
-
-        if not seed_text:
-            raise HTTPException(status_code=422, detail="Could not extract text from file")
+        intake = ScenarioIntakeService(max_bytes=_QUICK_START_MAX_BYTES).from_bytes(
+            content,
+            filename=file.filename,
+            content_type=file.content_type,
+        )
 
         scenario_question_raw = (scenario_question or "").strip()
         scenario_question = sanitize_scenario_description(scenario_question_raw) if scenario_question_raw else ""
         owner_id = user.id if user else None
-        return await _run_quick_start(seed_text, scenario_question, preset, owner_id=owner_id)
+        return await _run_quick_start(intake.text, scenario_question, preset, owner_id=owner_id)
+    except ValueError as exc:
+        message = str(exc)
+        status_code = 400 if "Unsupported" in message or "10 MB" in message else 422
+        raise HTTPException(status_code=status_code, detail=message) from exc
     except HTTPException:
         raise
     except Exception as exc:

@@ -298,41 +298,44 @@ onMounted(async () => {
 .explorer-layout {
   display: grid;
   grid-template-rows: auto auto 1fr auto;
-  height: 100vh;
+  height: calc(100vh - 56px);
   overflow: hidden;
+  background: var(--bg-app);
 }
 
 /* Tab bar */
 .explorer-tabs {
   display: flex;
-  gap: 2px;
-  padding: 8px 12px 0;
+  gap: 8px;
+  padding: 12px 14px;
   background: var(--bg-card);
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border);
 }
 
 .explorer-tab {
-  padding: 6px 16px;
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-radius: 6px 6px 0 0;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
-  font-size: 13px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .explorer-tab:hover {
   color: var(--text-primary);
-  background: var(--bg-secondary);
+  border-color: var(--text-primary);
 }
 
 .explorer-tab.active {
-  background: var(--bg-primary);
-  border-color: var(--border-color);
-  color: var(--text-primary);
-  font-weight: 600;
+  background: var(--text-primary);
+  border-color: var(--text-primary);
+  color: #FFFFFF;
 }
 
 /* Relationship tab wrapper */
@@ -362,7 +365,7 @@ onMounted(async () => {
   width: 32px;
   height: 32px;
   border: 3px solid var(--border-color);
-  border-top-color: var(--accent-blue);
+  border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -385,7 +388,7 @@ onMounted(async () => {
   padding: 8px 16px;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--text-primary);
 }
@@ -396,19 +399,22 @@ onMounted(async () => {
   right: 340px;
   padding: 4px 12px;
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-card);
   color: var(--text-muted);
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
   cursor: pointer;
   transition: all 0.15s;
   z-index: 10;
 }
 
 .contagion-toggle.active {
-  background: rgba(239, 68, 68, 0.1);
-  border-color: #ef4444;
-  color: #ef4444;
+  background: rgba(185, 28, 28, 0.1);
+  border-color: var(--accent-danger);
+  color: var(--accent-danger);
 }
 
 .explorer-scrubber {
@@ -416,7 +422,7 @@ onMounted(async () => {
   justify-content: center;
   padding: 8px 16px;
   background: var(--bg-card);
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--border);
 }
 
 /* Graph legend */
@@ -427,7 +433,7 @@ onMounted(async () => {
   background: var(--bg-card);
   font-size: 11px;
   color: var(--text-muted);
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border);
 }
 
 .legend-item {

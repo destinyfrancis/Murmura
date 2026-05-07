@@ -37,7 +37,7 @@ def _common_patches(preset_agents: int = 100, preset_rounds: int = 15):
     )
 
     mock_gb = MagicMock()
-    mock_gb.build_graph = AsyncMock(return_value={"graph_id": "graph-abc-123"})
+    mock_gb.build_graph_from_seed = AsyncMock(return_value={"graph_id": "graph-abc-123"})
 
     mock_mgr = MagicMock()
     mock_mgr.create_session = AsyncMock(return_value={"session_id": "sess-xyz-456"})

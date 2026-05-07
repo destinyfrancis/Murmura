@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from backend.app.services.cost_tracker import get_session_cost
 from backend.app.services.report_agent_xai import (
     get_agent_story_arcs as _get_agent_story_arcs,
 )
@@ -37,7 +38,6 @@ from backend.app.services.report_agent_xai import (
 )
 from backend.app.services.report_section_generator import _truncate_observation
 from backend.app.services.simulation_ipc import SimulationIPC
-from backend.app.services.cost_tracker import get_session_cost
 from backend.app.utils.db import get_db
 from backend.app.utils.llm_client import (
     get_default_client as _get_llm_client,
@@ -166,6 +166,19 @@ class ReportAgent:
             Dict with report_id, title, content_markdown, summary,
             key_findings, charts_data, agent_log.
         """
+        grounded_modes = {"grounded", "social_forecast", "relationship_forecast", "market_launch_forecast"}
+        if report_type in grounded_modes:
+            from backend.app.services.grounded_report import GroundedReportBuilder  # noqa: PLC0415
+
+            bundle = await GroundedReportBuilder().build(
+                session_id=session_id,
+                report_mode=report_type,
+                question=scenario_question,
+            )
+            report = bundle.to_report_dict()
+            await _persist_report(session_id, report, report_type, [])
+            return report
+
         # --- 3-phase orchestrated path ---
         # Only engage when caller explicitly provides a scenario_question.
         # report_type=="full" without a question still uses the legacy ReACT loop

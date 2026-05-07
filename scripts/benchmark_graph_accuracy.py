@@ -83,7 +83,7 @@ async def run_benchmark():
 
     # Summary Report
     print("\n" + "="*60)
-    print(" MURMURASCOPE GRAPH ACCURACY BENCHMARK REPORT")
+    print(" MURMURA GRAPH ACCURACY BENCHMARK REPORT")
     print("="*60)
     print(f"{'Scenario':<20} | {'Node F1':<10} | {'Edge F1':<10}")
     print("-" * 60)

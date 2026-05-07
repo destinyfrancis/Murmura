@@ -9,7 +9,7 @@ from typing import Any
 import aiosqlite
 
 from backend.app.utils.db import get_db
-from backend.app.utils.llm_client import LLMClient, get_step_provider_model
+from backend.app.utils.llm_client import LLMClient, get_agent_provider_model, get_step_provider_model
 from backend.app.utils.logger import get_logger
 from backend.app.services.agent_memory import AgentMemoryService
 

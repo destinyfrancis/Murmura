@@ -31,10 +31,10 @@ from backend.app.utils.logger import get_logger
 logger = get_logger("backtester")
 
 # ---------------------------------------------------------------------------
-# DB path (project root / data / murmuroscope.db)
+# DB path (project root / data / murmura.db)
 # ---------------------------------------------------------------------------
 
-_DB_PATH: Path = Path(__file__).resolve().parent.parent.parent.parent / "data" / "murmuroscope.db"
+_DB_PATH: Path = Path(__file__).resolve().parent.parent.parent.parent / "data" / "murmura.db"
 
 # ---------------------------------------------------------------------------
 # Result dataclass

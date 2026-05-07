@@ -7,6 +7,7 @@ guided by the ontology's entity types and relation types.
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from typing import Any
 
@@ -398,24 +399,37 @@ def _validate_nodes(
     valid_types = set(entity_types)
     validated: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
+    duplicate_counts: dict[str, int] = {}
 
     for node in raw_nodes:
-        node_id = node.get("id", "")
-        if not node_id or not node.get("title"):
+        node_id = _normalise_identifier(str(node.get("id", "")))
+        title = str(node.get("title", "")).strip()
+        if not node_id or not title:
             continue
         if node.get("entity_type") not in valid_types:
             continue
         if node_id in seen_ids:
-            node_id = f"{node_id}_{uuid.uuid4().hex[:6]}"
+            duplicate_counts[node_id] = duplicate_counts.get(node_id, 1) + 1
+            node_id = f"{node_id}_{duplicate_counts[node_id]}"
 
         seen_ids.add(node_id)
+        properties = node.get("properties", {})
+        if not isinstance(properties, dict):
+            properties = {}
+        confidence = _coerce_confidence(node.get("confidence"))
+        if confidence is not None:
+            properties["confidence"] = confidence
+        source_span = _validate_source_span(node.get("source_span"))
+        if source_span:
+            properties["source_span"] = source_span
+
         validated.append(
             {
                 "id": node_id,
                 "entity_type": node["entity_type"],
-                "title": node["title"],
-                "description": node.get("description", ""),
-                "properties": node.get("properties", {}),
+                "title": title,
+                "description": str(node.get("description", "")),
+                "properties": properties,
             }
         )
 
@@ -446,18 +460,60 @@ def _validate_edges(
         if not isinstance(weight, (int, float)):
             weight = 1.0
         weight = max(0.1, min(1.0, float(weight)))
+        confidence = _coerce_confidence(edge.get("confidence"))
+        source_span = _validate_source_span(edge.get("source_span"))
 
-        validated.append(
-            {
-                "source_id": src,
-                "target_id": tgt,
-                "relation_type": rel,
-                "description": edge.get("description", ""),
-                "weight": weight,
-            }
-        )
+        validated_edge = {
+            "source_id": src,
+            "target_id": tgt,
+            "relation_type": rel,
+            "description": str(edge.get("description", "")),
+            "weight": weight,
+        }
+        if confidence is not None:
+            validated_edge["confidence"] = confidence
+        if source_span:
+            validated_edge["source_text"] = source_span["text"]
+            validated_edge["evidence_span"] = source_span
+        validated.append(validated_edge)
 
     return validated
+
+
+def _normalise_identifier(raw: str) -> str:
+    """Return a stable snake_case identifier compatible with KG storage."""
+    normalised = re.sub(r"[^0-9A-Za-z_]+", "_", raw.strip().lower())
+    normalised = re.sub(r"_+", "_", normalised).strip("_")
+    return normalised
+
+
+def _coerce_confidence(raw: Any) -> float | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, (int, float)):
+        return None
+    return max(0.0, min(1.0, float(raw)))
+
+
+def _validate_source_span(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    text = str(raw.get("text", "")).strip()
+    if not text:
+        return None
+    try:
+        start_char = int(raw.get("start_char", 0))
+        end_char = int(raw.get("end_char", start_char + len(text)))
+    except (TypeError, ValueError):
+        return None
+    if start_char < 0 or end_char <= start_char:
+        return None
+    return {
+        "source_ref": str(raw.get("source_ref") or "seed_text"),
+        "start_char": start_char,
+        "end_char": end_char,
+        "text": text,
+    }
 
 
 # ---------------------------------------------------------------------------

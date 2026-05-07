@@ -8,11 +8,11 @@ services:
     ports:
       - "5001:5001"
     volumes:
-      - murmuroscope-data:/app/data
+      - murmura-data:/app/data
     env_file:
       - .env
     environment:
-      - DATABASE_PATH=/app/data/murmuroscope.db
+      - DATABASE_PATH=/app/data/murmura.db
       - DEMO_MODE=${DEMO_MODE:-true}
     restart: unless-stopped
     init: true
@@ -66,5 +66,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  murmuroscope-data:
+  murmura-data:
     driver: local

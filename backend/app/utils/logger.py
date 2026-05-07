@@ -1,4 +1,4 @@
-"""Centralised logging configuration for Morai."""
+"""Centralised logging configuration for Murmura."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from pathlib import Path
 def setup_logging(
     *,
     level: int | None = None,
-    logger_name: str = "murmuroscope",
+    logger_name: str = "murmura",
 ) -> logging.Logger:
     """Configure and return the application root logger.
 
@@ -62,4 +62,4 @@ def setup_logging(
 
 def get_logger(name: str) -> logging.Logger:
     """Return a child logger under the application namespace."""
-    return logging.getLogger(f"murmuroscope.{name}")
+    return logging.getLogger(f"murmura.{name}")
