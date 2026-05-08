@@ -392,6 +392,11 @@ async def start_simulation(request: Request, req: SimulationStartRequest) -> API
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Bad request") from exc
+    except RuntimeError as exc:
+        if str(exc).startswith("simulation_engine_unavailable"):
+            raise HTTPException(status_code=503, detail="Simulation engine unavailable") from exc
+        logger.exception("start_simulation runtime failure for session %s", req.session_id)
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
     except Exception as exc:
         logger.exception("start_simulation failed for session %s", req.session_id)
         raise HTTPException(status_code=500, detail="Internal server error") from exc
@@ -429,7 +434,7 @@ async def _run_quick_start(
     """Shared business logic for both JSON and file-upload quick-start endpoints."""
     from backend.app.services.graph_builder import GraphBuilderService  # noqa: PLC0415
     from backend.app.services.zero_config import ZeroConfigService  # noqa: PLC0415
-    from backend.app.utils.prompt_security import sanitize_seed_text as _sanitize_seed  # noqa: PLC0415
+    from backend.app.utils.prompt_security import sanitize_source_seed_text as _sanitize_seed  # noqa: PLC0415
 
     seed_text = _sanitize_seed(seed_text)
 
@@ -529,7 +534,12 @@ async def _run_quick_start(
         except Exception:
             logger.warning("Could not store activity profiles for quick-start session %s", session_id, exc_info=True)
 
-    asyncio.create_task(manager.start_session(session_id))
+    from backend.app.services.oasis_compatibility import get_capabilities  # noqa: PLC0415
+
+    capabilities = get_capabilities()
+    simulation_available = bool(capabilities.get("simulation_available", capabilities.get("simulation")))
+    if simulation_available:
+        asyncio.create_task(manager.start_session(session_id))
 
     return APIResponse(
         success=True,
@@ -544,6 +554,8 @@ async def _run_quick_start(
             "round_count": round_count_final,
             "scenario_question": scenario_question,
             "time_config": time_config.to_dict(),
+            "simulation_skipped": not simulation_available,
+            "simulation_skip_reason": capabilities.get("reason", "") if not simulation_available else "",
         },
     )
 
@@ -1097,7 +1109,7 @@ async def rebalance_shards(
 @router.post("/{session_id}/resume", response_model=APIResponse)
 async def resume_session(
     session_id: str,
-    user: Annotated[UserProfile | None, Depends(get_optional_user)] = None,
+    user: Annotated[UserProfile, Depends(get_current_user)],
 ) -> APIResponse:
     """Resume a simulation session that was paused due to exceeding the hard cost cap.
 
@@ -1802,7 +1814,7 @@ async def inject_live_shock(
     request: Request,
     session_id: str,
     shock: ScheduledShock,
-    user: Annotated[UserProfile | None, Depends(get_optional_user)] = None,
+    user: Annotated[UserProfile, Depends(get_current_user)],
 ) -> APIResponse:
     """Inject a live shock into a running simulation (God Mode)."""
     from backend.app.api.ws import push_progress  # noqa: PLC0415

@@ -139,7 +139,8 @@ CREATE TABLE IF NOT EXISTS simulation_sessions (
     created_at TEXT DEFAULT (datetime('now')),
     -- Nullable for backward compatibility with sessions created before auth was enforced
     owner_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-    scenario_question TEXT DEFAULT ''
+    scenario_question TEXT DEFAULT '',
+    domain_pack_id TEXT DEFAULT 'hk_city'
 );
 CREATE INDEX IF NOT EXISTS idx_session_status ON simulation_sessions(status);
 
@@ -211,7 +212,8 @@ CREATE TABLE IF NOT EXISTS reports (
     key_findings TEXT,
     charts_data TEXT,
     agent_log TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT (datetime('now')),
+    share_token TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_report_session ON reports(session_id);
 
@@ -626,7 +628,8 @@ CREATE TABLE IF NOT EXISTS users (
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     display_name TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_admin BOOLEAN DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 

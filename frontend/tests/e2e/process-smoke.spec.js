@@ -70,3 +70,29 @@ test.describe('Brand and i18n sanity', () => {
     await expect(page.locator('body')).not.toContainText(/MORAI|Morai|MurmuraScope/)
   })
 })
+
+test.describe('Public report route', () => {
+  test('renders shared reports at /public/report/:token', async ({ page }) => {
+    await page.route('**/api/report/public/test-token', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: {
+            report_id: 'report-1',
+            report_type: 'full',
+            title: 'Shared Murmura Report',
+            summary: 'A short public summary.',
+            key_findings: ['Finding one'],
+            content_markdown: '## Details\n\nShared content.',
+            created_at: '2026-05-08',
+          },
+        }),
+      })
+    })
+
+    await page.goto('/public/report/test-token')
+    await expect(page.getByRole('heading', { name: 'Shared Murmura Report' })).toBeVisible()
+    await expect(page.locator('body')).not.toContainText(/MORAI|Morai|MurmuraScope/)
+  })
+})

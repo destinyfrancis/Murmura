@@ -294,14 +294,19 @@ PLATFORM_SCRIPTS = {
 }
 
 
-def run_parallel(config: dict[str, Any]) -> None:
-    """Run enabled platform simulations in parallel threads."""
+def run_parallel(config: dict[str, Any]) -> int:
+    """Run enabled platform simulations in parallel threads.
+
+    Returns a process-style exit code. Any platform-level error is fatal for
+    the parent runner, because a completed session with zero actions is worse
+    than a clear failed session.
+    """
     platforms = config.get("platforms", {})
     enabled = [p for p, enabled in platforms.items() if enabled and p in PLATFORM_SCRIPTS]
 
     if not enabled:
         emit_error("No platforms enabled in config")
-        return
+        return 1
 
     session_id = config["session_id"]
     logger.info(
@@ -356,6 +361,8 @@ def run_parallel(config: dict[str, Any]) -> None:
                 "results": results,
             },
         )
+        logger.error("Parallel simulation failed. Results: %s, Errors: %s", results, errors)
+        return 1
     else:
         emit(
             "complete",
@@ -368,6 +375,7 @@ def run_parallel(config: dict[str, Any]) -> None:
         )
 
     logger.info("Parallel simulation finished. Results: %s, Errors: %s", results, errors)
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -392,7 +400,9 @@ def main() -> None:
         sys.exit(1)
 
     try:
-        run_parallel(config)
+        exit_code = run_parallel(config)
+        if exit_code:
+            sys.exit(exit_code)
     except Exception as exc:
         emit_error(f"Fatal error: {exc}")
         logger.exception("Unhandled exception in parallel simulation")

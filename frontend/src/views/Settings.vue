@@ -172,10 +172,25 @@ const languageOptions = [
 
 const itemsPerPageOptions = [10, 20, 50, 100]
 
-// ── Per-step model settings ───────────────────────────────────────────────────
+// ── Model routing ──────────────────────────────────────────────────────────────
+const SIMPLE_MODEL_DEFAULT = {
+  provider: 'openrouter',
+  model: 'deepseek/deepseek-chat-v3.1',
+}
+
+const simpleModelDraft = ref({
+  provider: SIMPLE_MODEL_DEFAULT.provider,
+  model: SIMPLE_MODEL_DEFAULT.model,
+  testStatus: null,
+  testMsg: '',
+})
+
+const simpleModelStatus = ref(null)
+const simpleModelMessage = ref('')
+
 const QUICK_APPLY_PRESETS = {
-  deepseek: { provider: 'openrouter', model: 'deepseek/deepseek-v3.2' },
-  gemini:   { provider: 'google',     model: 'gemini-2.5-pro-preview' },
+  deepseek: { provider: SIMPLE_MODEL_DEFAULT.provider, model: SIMPLE_MODEL_DEFAULT.model },
+  gemini:   { provider: 'google',     model: 'gemini-3.1-pro-preview' },
   gpt4o:    { provider: 'openai',     model: 'gpt-4o' },
 }
 
@@ -195,9 +210,88 @@ const stepDraft = ref(
 
 function applyPreset(presetKey) {
   const p = QUICK_APPLY_PRESETS[presetKey]
+  simpleModelDraft.value.provider = p.provider
+  simpleModelDraft.value.model = p.model
   for (const s of [1, 2, 3, 4, 5]) {
     stepDraft.value[s].provider = p.provider
     stepDraft.value[s].model    = p.model
+  }
+}
+
+function resetStepDrafts() {
+  for (const s of [1, 2, 3, 4, 5]) {
+    stepDraft.value[s].provider = ''
+    stepDraft.value[s].model = ''
+    stepDraft.value[s].model_lite = ''
+    stepDraft.value[s].testStatus = null
+    stepDraft.value[s].testMsg = ''
+  }
+}
+
+async function handleSimpleProviderChange() {
+  const provider = simpleModelDraft.value.provider
+  if (providerSupportsModels(provider) && !modelOptionsFor(provider).length) {
+    await fetchProviderModels(provider)
+  }
+}
+
+async function testSimpleModel() {
+  const draft = simpleModelDraft.value
+  if (!draft.provider || !draft.model) {
+    draft.testStatus = 'error'
+    draft.testMsg = t('settings.tabs.model.simple.fillBoth')
+    return
+  }
+  draft.testStatus = 'testing'
+  draft.testMsg = ''
+  try {
+    const res = await testApiKey(draft.provider, null, draft.model)
+    draft.testStatus = res.data.success ? 'ok' : 'error'
+    draft.testMsg = res.data.message
+  } catch (err) {
+    draft.testStatus = 'error'
+    draft.testMsg = err.response?.data?.detail || t('settings.tabs.api.connFailed')
+  }
+}
+
+async function saveSimpleModel() {
+  const draft = simpleModelDraft.value
+  if (!draft.provider || !draft.model) {
+    simpleModelStatus.value = 'error'
+    simpleModelMessage.value = t('settings.tabs.model.simple.fillBoth')
+    return
+  }
+  simpleModelStatus.value = 'testing'
+  simpleModelMessage.value = t('settings.tabs.model.simple.saving')
+  const payload = {
+    agent_provider: draft.provider,
+    agent_model: draft.model,
+    agent_model_lite: '',
+    report_provider: draft.provider,
+    report_model: draft.model,
+    step1_provider: '',
+    step1_model: '',
+    step2_provider: '',
+    step2_model: '',
+    step3_provider: '',
+    step3_model: '',
+    step3_model_lite: '',
+    step4_provider: '',
+    step4_model: '',
+    step5_provider: '',
+    step5_model: '',
+  }
+  try {
+    const res = await updateSettings(payload)
+    const data = res.data?.settings || res.data
+    if (data?.llm) Object.assign(settings.llm, data.llm)
+    resetStepDrafts()
+    simpleModelStatus.value = 'ok'
+    simpleModelMessage.value = t('settings.tabs.model.simple.saved')
+  } catch (err) {
+    console.error('[Settings] saveSimpleModel failed:', err)
+    simpleModelStatus.value = 'error'
+    simpleModelMessage.value = err.response?.data?.detail || t('settings.tabs.api.connFailed')
   }
 }
 
@@ -246,6 +340,8 @@ async function testStepModel(step) {
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 onMounted(async () => {
   await loadSettings()
+  simpleModelDraft.value.provider = settings.llm?.report_provider || settings.llm?.agent_provider || SIMPLE_MODEL_DEFAULT.provider
+  simpleModelDraft.value.model = settings.llm?.report_model || settings.llm?.agent_model || SIMPLE_MODEL_DEFAULT.model
   // Populate step drafts from loaded settings
   const steps = settings.llm?.steps || {}
   for (const s of [1, 2, 3, 4, 5]) {
@@ -289,7 +385,7 @@ const saveStatusClass = {
     <div class="settings-layout">
 
       <!-- Tab sidebar -->
-      <nav class="settings-sidebar" role="navigation" aria-label="設定分頁">
+      <nav class="settings-sidebar" role="navigation" :aria-label="$t('settings.tabs.navLabel')">
         <button
           v-for="tab in tabs"
           :key="tab.id"
@@ -344,22 +440,22 @@ const saveStatusClass = {
                     autocomplete="off"
                     spellcheck="false"
                     @keyup.enter="handleSaveKey(p.id)"
-                    :aria-label="`${p.name} API Key`"
+                    :aria-label="$t('settings.tabs.api.keyInputAria', { provider: p.name })"
                   />
                   <button
                     class="btn-eye"
                     @click="toggleKeyVisibility(p.id)"
-                    :title="keyVisibility[p.id] ? '隱藏金鑰' : '顯示金鑰'"
-                    :aria-label="keyVisibility[p.id] ? '隱藏金鑰' : '顯示金鑰'"
+                    :title="keyVisibility[p.id] ? $t('settings.tabs.api.hideKey') : $t('settings.tabs.api.showKey')"
+                    :aria-label="keyVisibility[p.id] ? $t('settings.tabs.api.hideKey') : $t('settings.tabs.api.showKey')"
                   >
-                    {{ keyVisibility[p.id] ? 'HIDE' : 'SHOW' }}
+                    {{ keyVisibility[p.id] ? $t('settings.tabs.api.hide') : $t('settings.tabs.api.show') }}
                   </button>
                 </div>
                 <button
                   class="btn-secondary"
                   @click="handleTestKey(p.id)"
                   :disabled="keyTestStatus[p.id] === 'testing'"
-                  :aria-label="`測試 ${p.name} 金鑰`"
+                  :aria-label="$t('settings.tabs.api.testKeyAria', { provider: p.name })"
                 >
                   <span v-if="keyTestStatus[p.id] === 'testing'">{{ $t('settings.tabs.api.testing') }}</span>
                   <span v-else>{{ $t('settings.tabs.api.test') }}</span>
@@ -368,7 +464,7 @@ const saveStatusClass = {
                   class="btn-primary"
                   @click="handleSaveKey(p.id)"
                   :disabled="!keyDraft[p.id].trim()"
-                  :aria-label="`儲存 ${p.name} 金鑰`"
+                  :aria-label="$t('settings.tabs.api.saveKeyAria', { provider: p.name })"
                 >
                   {{ $t('settings.tabs.api.save') }}
                 </button>
@@ -408,140 +504,204 @@ const saveStatusClass = {
             <p class="tab-desc">{{ $t('settings.tabs.model.desc') }}</p>
           </div>
 
-          <!-- Quick-apply presets -->
-          <div class="quick-apply-bar">
-            <span class="qa-label">{{ $t('settings.tabs.model.quickApply') }}</span>
-            <button class="btn-ghost btn-sm" @click="applyPreset('deepseek')">DeepSeek</button>
-            <button class="btn-ghost btn-sm" @click="applyPreset('gemini')">Gemini</button>
-            <button class="btn-ghost btn-sm" @click="applyPreset('gpt4o')">GPT-4o</button>
-          </div>
+          <section class="simple-model-panel">
+            <div class="simple-model-copy">
+              <span class="model-eyebrow">{{ $t('settings.tabs.model.simple.eyebrow') }}</span>
+              <h3 class="simple-model-title">{{ $t('settings.tabs.model.simple.title') }}</h3>
+              <p class="simple-model-desc">{{ $t('settings.tabs.model.simple.desc') }}</p>
+            </div>
 
-          <!-- Per-step model cards -->
-          <div class="step-model-list">
-            <div v-for="def in stepDefs" :key="def.step" class="step-model-card">
-              <div class="step-card-header">
-                <span class="step-badge">{{ def.step }}</span>
-                <h3 class="step-card-title">{{ def.label }}</h3>
+            <div class="simple-model-fields">
+              <div class="form-field">
+                <label class="field-label" for="simple-provider">{{ $t('settings.tabs.model.provider') }}</label>
+                <select
+                  id="simple-provider"
+                  v-model="simpleModelDraft.provider"
+                  class="field-select"
+                  @change="handleSimpleProviderChange"
+                >
+                  <option v-for="opt in providerOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                </select>
               </div>
-              <p class="step-card-hint">{{ def.hint }}</p>
-
-              <div class="step-model-fields">
-                <div class="form-field">
-                  <label class="field-label">Provider</label>
-                  <select
-                    v-model="stepDraft[def.step].provider"
-                    class="field-select"
-                    @change="handleStepProviderChange(def.step)"
-                  >
-                    <option value="">— {{ $t('settings.tabs.model.steps.useGlobal') }} —</option>
-                    <option v-for="opt in providerOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-                  </select>
-                </div>
-                <div class="form-field">
-                  <label class="field-label">Model</label>
-                  <div class="model-input-row">
-                    <input
-                      v-model="stepDraft[def.step].model"
-                      class="field-input"
-                      :list="`models-step-${def.step}`"
-                      placeholder="e.g. deepseek/deepseek-v3.2"
-                      spellcheck="false"
-                    />
-                    <button
-                      class="btn-secondary"
-                      @click="fetchProviderModels(stepDraft[def.step].provider)"
-                      :disabled="!providerSupportsModels(stepDraft[def.step].provider) || modelListStatus[stepDraft[def.step].provider] === 'loading'"
-                    >
-                      <span v-if="modelListStatus[stepDraft[def.step].provider] === 'loading'">{{ $t('settings.tabs.model.models.syncing') }}</span>
-                      <span v-else>{{ $t('settings.tabs.model.models.sync') }}</span>
-                    </button>
-                  </div>
-                  <datalist :id="`models-step-${def.step}`">
-                    <option
-                      v-for="model in modelOptionsFor(stepDraft[def.step].provider)"
-                      :key="model.id"
-                      :value="model.id"
-                    >
-                      {{ model.name }}
-                    </option>
-                  </datalist>
-                  <p class="field-hint">{{ modelListSummary(stepDraft[def.step].provider) }}</p>
-                </div>
-                <div v-if="def.hasLite" class="form-field">
-                  <label class="field-label">{{ $t('settings.tabs.model.agent.lite') }}</label>
+              <div class="form-field">
+                <label class="field-label" for="simple-model">{{ $t('settings.tabs.model.model') }}</label>
+                <div class="model-input-row">
                   <input
-                    v-model="stepDraft[def.step].model_lite"
+                    id="simple-model"
+                    v-model="simpleModelDraft.model"
                     class="field-input"
-                    :list="`models-step-${def.step}`"
-                    :placeholder="$t('settings.tabs.model.agent.liteHint')"
+                    list="models-simple"
+                    placeholder="deepseek/deepseek-chat-v3.1"
                     spellcheck="false"
                   />
+                  <button
+                    class="btn-secondary"
+                    @click="fetchProviderModels(simpleModelDraft.provider)"
+                    :disabled="!providerSupportsModels(simpleModelDraft.provider) || modelListStatus[simpleModelDraft.provider] === 'loading'"
+                  >
+                    <span v-if="modelListStatus[simpleModelDraft.provider] === 'loading'">{{ $t('settings.tabs.model.models.syncing') }}</span>
+                    <span v-else>{{ $t('settings.tabs.model.models.sync') }}</span>
+                  </button>
                 </div>
-              </div>
-
-              <div class="step-card-actions">
-                <button
-                  class="btn-secondary"
-                  @click="testStepModel(def.step)"
-                  :disabled="stepDraft[def.step].testStatus === 'testing'"
-                >
-                  <span v-if="stepDraft[def.step].testStatus === 'testing'">⏳ {{ $t('settings.tabs.api.testing') }}</span>
-                  <span v-else>{{ $t('settings.tabs.api.test') }}</span>
-                </button>
-                <button class="btn-primary" @click="saveStepModel(def.step)">
-                  {{ $t('settings.tabs.api.save') }}
-                </button>
-              </div>
-
-              <div
-                v-if="stepDraft[def.step].testStatus"
-                class="test-result"
-                :class="`test-${stepDraft[def.step].testStatus}`"
-              >
-                <span v-if="stepDraft[def.step].testStatus === 'ok'">✓ {{ stepDraft[def.step].testMsg }}</span>
-                <span v-else-if="stepDraft[def.step].testStatus === 'error'">✗ {{ stepDraft[def.step].testMsg }}</span>
-                <span v-else>⏳ {{ $t('settings.tabs.api.verifying') }}</span>
+                <datalist id="models-simple">
+                  <option
+                    v-for="model in modelOptionsFor(simpleModelDraft.provider)"
+                    :key="model.id"
+                    :value="model.id"
+                  >
+                    {{ model.name }}
+                  </option>
+                </datalist>
+                <p class="field-hint">{{ modelListSummary(simpleModelDraft.provider) }}</p>
               </div>
             </div>
-          </div>
 
-          <!-- Global fallback section (collapsed by default) -->
-          <details class="global-fallback-section">
-            <summary class="global-fallback-toggle">{{ $t('settings.tabs.model.globalFallback') }}</summary>
-            <div class="settings-grid" style="margin-top: 12px;">
-              <div class="settings-group">
-                <h3 class="group-title">{{ $t('settings.tabs.model.agent.title') }}</h3>
-                <div class="form-field">
-                  <label class="field-label" for="agent-provider">Provider</label>
-                  <select id="agent-provider" v-model="settings.llm.agent_provider" class="field-select">
-                    <option v-for="opt in providerOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-                  </select>
-                  <p class="field-hint">{{ $t('settings.tabs.model.agent.providerHint') }}</p>
-                </div>
-                <div class="form-field">
-                  <label class="field-label" for="agent-model">{{ $t('settings.tabs.model.agent.main') }}</label>
-                  <input id="agent-model" v-model="settings.llm.agent_model" class="field-input" placeholder="e.g. deepseek/deepseek-v3.2" spellcheck="false" />
-                  <p class="field-hint">{{ $t('settings.tabs.model.agent.mainHint') }}</p>
-                </div>
-                <div class="form-field">
-                  <label class="field-label" for="agent-model-lite">{{ $t('settings.tabs.model.agent.lite') }}</label>
-                  <input id="agent-model-lite" v-model="settings.llm.agent_model_lite" class="field-input" placeholder="e.g. deepseek/deepseek-chat" spellcheck="false" />
-                  <p class="field-hint">{{ $t('settings.tabs.model.agent.liteHint') }}</p>
-                </div>
+            <div class="simple-model-actions">
+              <button class="btn-ghost btn-sm" @click="applyPreset('deepseek')">
+                {{ $t('settings.tabs.model.simple.recommended') }}
+              </button>
+              <button
+                class="btn-secondary"
+                @click="testSimpleModel"
+                :disabled="simpleModelDraft.testStatus === 'testing'"
+              >
+                <span v-if="simpleModelDraft.testStatus === 'testing'">{{ $t('settings.tabs.api.testing') }}</span>
+                <span v-else>{{ $t('settings.tabs.api.test') }}</span>
+              </button>
+              <button class="btn-primary" @click="saveSimpleModel">
+                {{ $t('settings.tabs.model.simple.save') }}
+              </button>
+            </div>
+
+            <div
+              v-if="simpleModelDraft.testStatus"
+              class="test-result"
+              :class="`test-${simpleModelDraft.testStatus}`"
+            >
+              <span v-if="simpleModelDraft.testStatus === 'ok'">✓ {{ simpleModelDraft.testMsg }}</span>
+              <span v-else-if="simpleModelDraft.testStatus === 'error'">✗ {{ simpleModelDraft.testMsg }}</span>
+              <span v-else>{{ $t('settings.tabs.api.verifying') }}</span>
+            </div>
+            <div
+              v-if="simpleModelStatus"
+              class="test-result"
+              :class="`test-${simpleModelStatus}`"
+            >
+              <span v-if="simpleModelStatus === 'ok'">✓ {{ simpleModelMessage }}</span>
+              <span v-else-if="simpleModelStatus === 'error'">✗ {{ simpleModelMessage }}</span>
+              <span v-else>{{ simpleModelMessage }}</span>
+            </div>
+
+            <div class="model-routing-strip">
+              <div class="routing-item">
+                <span>{{ $t('settings.tabs.model.simple.routingSeed') }}</span>
+                <strong>{{ simpleModelDraft.provider }}</strong>
               </div>
-              <div class="settings-group">
-                <h3 class="group-title">{{ $t('settings.tabs.model.report.title') }}</h3>
-                <div class="form-field">
-                  <label class="field-label" for="report-provider">Provider</label>
-                  <select id="report-provider" v-model="settings.llm.report_provider" class="field-select">
-                    <option v-for="opt in providerOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-                  </select>
-                  <p class="field-hint">{{ $t('settings.tabs.model.report.providerHint') }}</p>
+              <div class="routing-item">
+                <span>{{ $t('settings.tabs.model.simple.routingSimulation') }}</span>
+                <strong>{{ simpleModelDraft.model }}</strong>
+              </div>
+              <div class="routing-item">
+                <span>{{ $t('settings.tabs.model.simple.routingReport') }}</span>
+                <strong>{{ $t('settings.tabs.model.simple.sameModel') }}</strong>
+              </div>
+            </div>
+          </section>
+
+          <details class="global-fallback-section">
+            <summary class="global-fallback-toggle">{{ $t('settings.tabs.model.advanced') }}</summary>
+
+            <div class="quick-apply-bar">
+              <span class="qa-label">{{ $t('settings.tabs.model.quickApply') }}</span>
+              <button class="btn-ghost btn-sm" @click="applyPreset('deepseek')">DeepSeek</button>
+              <button class="btn-ghost btn-sm" @click="applyPreset('gemini')">Gemini</button>
+              <button class="btn-ghost btn-sm" @click="applyPreset('gpt4o')">GPT-4o</button>
+            </div>
+
+            <div class="step-model-list">
+              <div v-for="def in stepDefs" :key="def.step" class="step-model-card">
+                <div class="step-card-header">
+                  <span class="step-badge">{{ def.step }}</span>
+                  <h3 class="step-card-title">{{ def.label }}</h3>
                 </div>
-                <div class="form-field">
-                  <label class="field-label" for="report-model">{{ $t('settings.tabs.model.report.model') }}</label>
-                  <input id="report-model" v-model="settings.llm.report_model" class="field-input" placeholder="e.g. gemini-2.5-pro-preview" spellcheck="false" />
-                  <p class="field-hint">{{ $t('settings.tabs.model.report.modelHint') }}</p>
+                <p class="step-card-hint">{{ def.hint }}</p>
+
+                <div class="step-model-fields">
+                  <div class="form-field">
+                    <label class="field-label">{{ $t('settings.tabs.model.provider') }}</label>
+                    <select
+                      v-model="stepDraft[def.step].provider"
+                      class="field-select"
+                      @change="handleStepProviderChange(def.step)"
+                    >
+                      <option value="">— {{ $t('settings.tabs.model.steps.useGlobal') }} —</option>
+                      <option v-for="opt in providerOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                    </select>
+                  </div>
+                  <div class="form-field">
+                    <label class="field-label">{{ $t('settings.tabs.model.model') }}</label>
+                    <div class="model-input-row">
+                      <input
+                        v-model="stepDraft[def.step].model"
+                        class="field-input"
+                        :list="`models-step-${def.step}`"
+                        placeholder="deepseek/deepseek-chat-v3.1"
+                        spellcheck="false"
+                      />
+                      <button
+                        class="btn-secondary"
+                        @click="fetchProviderModels(stepDraft[def.step].provider)"
+                        :disabled="!providerSupportsModels(stepDraft[def.step].provider) || modelListStatus[stepDraft[def.step].provider] === 'loading'"
+                      >
+                        <span v-if="modelListStatus[stepDraft[def.step].provider] === 'loading'">{{ $t('settings.tabs.model.models.syncing') }}</span>
+                        <span v-else>{{ $t('settings.tabs.model.models.sync') }}</span>
+                      </button>
+                    </div>
+                    <datalist :id="`models-step-${def.step}`">
+                      <option
+                        v-for="model in modelOptionsFor(stepDraft[def.step].provider)"
+                        :key="model.id"
+                        :value="model.id"
+                      >
+                        {{ model.name }}
+                      </option>
+                    </datalist>
+                    <p class="field-hint">{{ modelListSummary(stepDraft[def.step].provider) }}</p>
+                  </div>
+                  <div v-if="def.hasLite" class="form-field">
+                    <label class="field-label">{{ $t('settings.tabs.model.agent.lite') }}</label>
+                    <input
+                      v-model="stepDraft[def.step].model_lite"
+                      class="field-input"
+                      :list="`models-step-${def.step}`"
+                      :placeholder="$t('settings.tabs.model.agent.liteHint')"
+                      spellcheck="false"
+                    />
+                  </div>
+                </div>
+
+                <div class="step-card-actions">
+                  <button
+                    class="btn-secondary"
+                    @click="testStepModel(def.step)"
+                    :disabled="stepDraft[def.step].testStatus === 'testing'"
+                  >
+                    <span v-if="stepDraft[def.step].testStatus === 'testing'">{{ $t('settings.tabs.api.testing') }}</span>
+                    <span v-else>{{ $t('settings.tabs.api.test') }}</span>
+                  </button>
+                  <button class="btn-primary" @click="saveStepModel(def.step)">
+                    {{ $t('settings.tabs.api.save') }}
+                  </button>
+                </div>
+
+                <div
+                  v-if="stepDraft[def.step].testStatus"
+                  class="test-result"
+                  :class="`test-${stepDraft[def.step].testStatus}`"
+                >
+                  <span v-if="stepDraft[def.step].testStatus === 'ok'">✓ {{ stepDraft[def.step].testMsg }}</span>
+                  <span v-else-if="stepDraft[def.step].testStatus === 'error'">✗ {{ stepDraft[def.step].testMsg }}</span>
+                  <span v-else>{{ $t('settings.tabs.api.verifying') }}</span>
                 </div>
               </div>
             </div>
@@ -718,10 +878,15 @@ const saveStatusClass = {
                       placeholder="Your FRED API key"
                       autocomplete="off"
                       @keyup.enter="handleSaveKey('fred')"
-                      aria-label="FRED API Key"
+                      :aria-label="$t('settings.tabs.api.keyInputAria', { provider: 'FRED' })"
                     />
-                  <button class="btn-eye" @click="toggleKeyVisibility('fred')" :title="keyVisibility.fred ? '隱藏' : '顯示'">
-                      {{ keyVisibility.fred ? 'HIDE' : 'SHOW' }}
+                    <button
+                      class="btn-eye"
+                      @click="toggleKeyVisibility('fred')"
+                      :title="keyVisibility.fred ? $t('settings.tabs.api.hideKey') : $t('settings.tabs.api.showKey')"
+                      :aria-label="keyVisibility.fred ? $t('settings.tabs.api.hideKey') : $t('settings.tabs.api.showKey')"
+                    >
+                      {{ keyVisibility.fred ? $t('settings.tabs.api.hide') : $t('settings.tabs.api.show') }}
                     </button>
                   </div>
                   <button class="btn-secondary" @click="handleTestKey('fred')" :disabled="keyTestStatus.fred === 'testing'">
@@ -1396,12 +1561,100 @@ const saveStatusClass = {
   }
 }
 
-/* ── Per-step model UI ─────────────────────────────────────────────── */
+/* ── Model setup UI ────────────────────────────────────────────────── */
+.simple-model-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  padding: 18px;
+  margin-bottom: 18px;
+}
+
+.simple-model-copy {
+  max-width: 720px;
+  margin-bottom: 16px;
+}
+
+.model-eyebrow {
+  display: block;
+  margin-bottom: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.simple-model-title {
+  margin: 0 0 6px;
+  color: var(--text-primary);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.simple-model-desc {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.simple-model-fields {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.75fr) minmax(260px, 1.5fr);
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.simple-model-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.model-routing-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--border);
+}
+
+.routing-item {
+  min-width: 0;
+  padding: 10px 12px;
+  background: var(--bg-input);
+}
+
+.routing-item span,
+.routing-item strong {
+  display: block;
+  min-width: 0;
+}
+
+.routing-item span {
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.routing-item strong {
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .quick-apply-bar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 20px;
+  margin: 16px 0;
   padding: 10px 14px;
   background: var(--bg-input);
   border: 1px solid var(--border);
@@ -1498,7 +1751,7 @@ const saveStatusClass = {
 .global-fallback-section {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 0 16px;
+  padding: 0 16px 4px;
 }
 
 .global-fallback-toggle {
@@ -1528,6 +1781,11 @@ details[open] .global-fallback-toggle::before {
   .model-input-row,
   .step-card-actions {
     flex-wrap: wrap;
+  }
+
+  .simple-model-fields,
+  .model-routing-strip {
+    grid-template-columns: 1fr;
   }
 
   .step-model-fields {

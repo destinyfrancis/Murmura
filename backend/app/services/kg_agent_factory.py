@@ -14,8 +14,11 @@ can be converted into OASIS-compatible simulation agents.
 from __future__ import annotations
 
 import csv
+import asyncio
+import hashlib
 import json
 import os
+import re
 from dataclasses import replace as dc_replace
 from typing import Any
 
@@ -57,6 +60,16 @@ _AGENT_ELIGIBLE_TYPES: frozenset[str] = frozenset(
         "Company",
         "NGO",
         "Institution",
+        "StakeholderGroup",
+        "Government",
+        "StateActor",
+        "NonStateActor",
+        "Militia",
+        "ArmedGroup",
+        "DiplomaticActor",
+        "EconomicActor",
+        "CivilSociety",
+        "InternationalOrganization",
         "Inferred",
         # Universal types for fiction, fantasy, interpersonal scenarios
         "Faction",
@@ -342,7 +355,17 @@ class KGAgentFactory:
         )
 
         # Stage 1 — eligibility filter
-        eligible_nodes = await self._filter_agent_eligible_nodes(nodes)
+        try:
+            eligible_nodes = await asyncio.wait_for(
+                self._filter_agent_eligible_nodes(nodes),
+                timeout=30,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "KGAgentFactory eligibility stage timed out/failed (%s); using deterministic fallback",
+                exc,
+            )
+            eligible_nodes = self._heuristic_filter(nodes)
 
         if not eligible_nodes:
             logger.warning(
@@ -354,13 +377,46 @@ class KGAgentFactory:
         resolved_target = target_count if target_count is not None else len(eligible_nodes)
 
         # Stage 2 — profile generation
-        profiles = await self._generate_profiles(
-            eligible_nodes=eligible_nodes,
-            edges=edges,
-            seed_text=seed_text,
-            target_count=resolved_target,
-            is_cold_start=is_cold_start
-        )
+        try:
+            profiles = await asyncio.wait_for(
+                self._generate_profiles(
+                    eligible_nodes=eligible_nodes,
+                    edges=edges,
+                    seed_text=seed_text,
+                    target_count=resolved_target,
+                    is_cold_start=is_cold_start,
+                ),
+                timeout=60,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "KGAgentFactory profile stage timed out/failed (%s); using deterministic fallback",
+                exc,
+            )
+            profiles = self._build_fallback_profiles(
+                eligible_nodes=eligible_nodes,
+                edges=edges,
+                seed_text=seed_text,
+                target_count=resolved_target,
+            )
+        if resolved_target > 0 and len(profiles) != resolved_target:
+            logger.warning(
+                "KGAgentFactory produced %d profiles for target %d; normalising with fallback profiles",
+                len(profiles),
+                resolved_target,
+            )
+            fallback_profiles = self._build_fallback_profiles(
+                eligible_nodes=eligible_nodes,
+                edges=edges,
+                seed_text=seed_text,
+                target_count=resolved_target,
+            )
+            by_id = {profile.id: profile for profile in profiles}
+            for profile in fallback_profiles:
+                by_id.setdefault(profile.id, profile)
+                if len(by_id) >= resolved_target:
+                    break
+            profiles = list(by_id.values())[:resolved_target]
 
         logger.info("generate_from_kg complete: produced %d profiles", len(profiles))
         return profiles
@@ -552,6 +608,19 @@ class KGAgentFactory:
                 "minister",
                 "president",
                 "figure",
+                "stakeholder",
+                "state",
+                "nonstate",
+                "non-state",
+                "civil",
+                "diplomatic",
+                "militia",
+                "armed",
+                "faction",
+                "public",
+                "investor",
+                "market",
+                "community",
             }
         )
 
@@ -566,6 +635,89 @@ class KGAgentFactory:
         # If heuristic also returns nothing, accept all nodes as a last resort
         included_nodes = [n for n in nodes if _node_included_for_simulation(n)]
         return filtered if filtered else included_nodes
+
+    @staticmethod
+    def _build_fallback_profiles(
+        eligible_nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+        seed_text: str,
+        target_count: int,
+    ) -> list[UniversalAgentProfile]:
+        """Build valid UniversalAgentProfile objects without an LLM call.
+
+        This keeps one-click workflows responsive when the provider is down,
+        misconfigured, or slow. Profiles are intentionally conservative: they
+        use KG titles and graph relationships, then add generic motives and
+        constraints derived from actor type.
+        """
+        if not eligible_nodes:
+            raise RuntimeError("No KG nodes available for fallback agent generation")
+
+        requested = max(_MIN_FALLBACK_AGENTS, int(target_count or len(eligible_nodes)))
+        profiles: list[UniversalAgentProfile] = []
+        seen_ids: set[str] = set()
+        source_nodes = eligible_nodes[:]
+
+        while len(source_nodes) < requested:
+            source_nodes.extend(eligible_nodes)
+
+        for index, node in enumerate(source_nodes[:requested], start=1):
+            name = _node_title(node, fallback=f"Stakeholder {index}")
+            entity_type = str(node.get("entity_type") or node.get("type") or "StakeholderGroup")
+            role = _fallback_role(entity_type, name)
+            agent_id = _fallback_agent_id(name, index, seen_ids)
+            activity_level = _fallback_activity(entity_type, index)
+            influence = _fallback_influence(entity_type)
+            communication_style = _fallback_style(entity_type)
+            persona = (
+                f"{name} acts as {role}. This agent reasons from the supplied seed only, "
+                f"tracks how the scenario changes public narratives, and reacts through "
+                f"{communication_style.replace('_', ' ')} communication. It weighs security, "
+                f"legitimacy, economic pressure, reputational cost, and second-order reactions."
+            )
+            profiles.append(
+                UniversalAgentProfile(
+                    id=agent_id,
+                    name=name,
+                    role=role,
+                    entity_type=entity_type,
+                    persona=persona,
+                    goals=_fallback_goals(entity_type),
+                    capabilities=_fallback_capabilities(entity_type),
+                    constraints=_fallback_constraints(entity_type),
+                    beliefs=(
+                        ("seed_text_is_primary_evidence", 0.9),
+                        ("public_reaction_can_shift_fast", 0.7),
+                    ),
+                    memory_seed=seed_text[:600],
+                    stance_axes=(
+                        ("escalation_tolerance", _fallback_axis(entity_type, "escalation")),
+                        ("diplomatic_flexibility", _fallback_axis(entity_type, "diplomacy")),
+                        ("public_visibility", min(1.0, influence / 3.0)),
+                    ),
+                    relationships=(),
+                    kg_node_id=str(node.get("id") or agent_id),
+                    activity_level=activity_level,
+                    influence_weight=influence,
+                    is_stakeholder=influence >= 1.4,
+                    communication_style=communication_style,
+                    vocabulary_hints=_fallback_vocab(entity_type),
+                    platform_persona="Posts official signals on news-like surfaces and reacts to public-platform narratives.",
+                    platform_identities=_assign_platform_identities(
+                        agent_id=agent_id,
+                        entity_type=entity_type if entity_type in _ENTITY_PLATFORM_MAP else "Person",
+                        communication_style=communication_style,
+                        activity_level=activity_level,
+                    ),
+                    openness=0.45 + (index % 4) * 0.08,
+                    conscientiousness=0.55,
+                    extraversion=0.42 + (index % 5) * 0.06,
+                    agreeableness=0.44,
+                    neuroticism=0.48 + (index % 3) * 0.08,
+                )
+            )
+
+        return _merge_graph_relationships(profiles, edges)
 
     # ------------------------------------------------------------------
     # Stage 2: profile generation
@@ -929,6 +1081,137 @@ class KGAgentFactory:
 def _clamp(value: float, lo: float = 0.0, hi: float = 1.0) -> float:
     """Clamp ``value`` to the range [lo, hi]."""
     return max(lo, min(hi, value))
+
+
+def _node_title(node: dict[str, Any], fallback: str) -> str:
+    title = str(node.get("title") or node.get("label") or node.get("name") or "").strip()
+    return title[:120] if title else fallback
+
+
+def _fallback_agent_id(name: str, index: int, seen_ids: set[str]) -> str:
+    ascii_name = name.encode("ascii", errors="ignore").decode().lower()
+    slug = re.sub(r"[^a-z0-9]+", "_", ascii_name).strip("_")
+    if not slug:
+        slug = "agent"
+    digest = hashlib.sha1(f"{name}:{index}".encode("utf-8")).hexdigest()[:8]
+    candidate = f"{slug[:34]}_{digest}"
+    while candidate in seen_ids:
+        index += 1
+        candidate = f"{slug[:34]}_{digest}_{index}"
+    seen_ids.add(candidate)
+    return candidate
+
+
+def _fallback_role(entity_type: str, name: str) -> str:
+    t = entity_type.lower()
+    if "country" in t or "state" in t or "government" in t:
+        return "state actor weighing military, diplomatic, and domestic legitimacy costs"
+    if "military" in t or "armed" in t or "militia" in t:
+        return "security actor responding to escalation signals and battlefield constraints"
+    if "media" in t:
+        return "media actor amplifying, challenging, and framing public narratives"
+    if "ngo" in t or "civil" in t or "community" in t:
+        return "civil society actor tracking humanitarian, legal, and public pressure"
+    if "company" in t or "economic" in t or "market" in t:
+        return "economic actor reacting to risk, sanctions, prices, and confidence shocks"
+    if "person" in t or "figure" in t or "leader" in name.lower():
+        return "individual decision-maker with reputational and institutional constraints"
+    return "stakeholder group with incentives inferred from graph position and seed evidence"
+
+
+def _fallback_goals(entity_type: str) -> tuple[str, ...]:
+    t = entity_type.lower()
+    if "country" in t or "state" in t or "government" in t:
+        return ("preserve strategic leverage", "manage domestic legitimacy", "avoid uncontrolled escalation")
+    if "media" in t:
+        return ("capture attention", "frame blame and responsibility", "surface turning points")
+    if "economic" in t or "market" in t or "company" in t:
+        return ("price uncertainty", "protect assets and supply lines", "anticipate policy shocks")
+    if "civil" in t or "ngo" in t:
+        return ("reduce civilian harm", "shape international pressure", "document accountability")
+    return ("protect core interests", "influence public interpretation", "adapt to new information")
+
+
+def _fallback_capabilities(entity_type: str) -> tuple[str, ...]:
+    t = entity_type.lower()
+    if "country" in t or "government" in t:
+        return ("official statements", "diplomatic bargaining", "military signaling", "economic policy")
+    if "military" in t or "armed" in t:
+        return ("force posture", "deterrence messaging", "operational escalation")
+    if "media" in t:
+        return ("agenda setting", "source amplification", "narrative reframing")
+    if "economic" in t or "market" in t:
+        return ("capital allocation", "risk repricing", "supply chain adjustment")
+    return ("public messaging", "coalition building", "selective information sharing")
+
+
+def _fallback_constraints(entity_type: str) -> tuple[str, ...]:
+    t = entity_type.lower()
+    if "country" in t or "government" in t:
+        return ("domestic audience costs", "alliance commitments", "uncertain adversary response")
+    if "military" in t or "armed" in t:
+        return ("rules of engagement", "logistical limits", "risk of retaliation")
+    if "media" in t:
+        return ("verification limits", "audience incentives", "source access")
+    if "economic" in t or "market" in t:
+        return ("liquidity limits", "policy uncertainty", "headline volatility")
+    return ("limited information", "reputational exposure", "coordination friction")
+
+
+def _fallback_style(entity_type: str) -> str:
+    t = entity_type.lower()
+    if "media" in t:
+        return "analytical_professional"
+    if "civil" in t or "ngo" in t:
+        return "activist_ideological"
+    if "person" in t:
+        return "emotional_personal"
+    return "strategic_institutional"
+
+
+def _fallback_vocab(entity_type: str) -> tuple[str, ...]:
+    t = entity_type.lower()
+    if "country" in t or "government" in t or "state" in t:
+        return ("deterrence", "red lines", "sanctions", "back-channel")
+    if "military" in t or "armed" in t:
+        return ("posture", "retaliation", "rules of engagement", "force protection")
+    if "media" in t:
+        return ("breaking", "sources", "public reaction", "narrative")
+    if "economic" in t or "market" in t:
+        return ("risk premium", "oil price", "shipping", "volatility")
+    return ("legitimacy", "pressure", "coalition", "public opinion")
+
+
+def _fallback_activity(entity_type: str, index: int) -> float:
+    t = entity_type.lower()
+    base = 0.74 if any(k in t for k in ("media", "government", "country", "state")) else 0.52
+    return _clamp(base + (index % 4) * 0.04)
+
+
+def _fallback_influence(entity_type: str) -> float:
+    t = entity_type.lower()
+    if any(k in t for k in ("country", "state", "government", "military")):
+        return 1.8
+    if "media" in t:
+        return 1.4
+    if any(k in t for k in ("economic", "market", "company")):
+        return 1.2
+    return 1.0
+
+
+def _fallback_axis(entity_type: str, axis: str) -> float:
+    t = entity_type.lower()
+    if axis == "escalation":
+        if any(k in t for k in ("military", "armed")):
+            return 0.72
+        if any(k in t for k in ("civil", "ngo", "media")):
+            return 0.28
+        return 0.5
+    if any(k in t for k in ("diplomatic", "ngo", "international")):
+        return 0.72
+    if any(k in t for k in ("military", "armed")):
+        return 0.34
+    return 0.55
 
 
 def _parse_values(raw: dict) -> dict[str, float]:

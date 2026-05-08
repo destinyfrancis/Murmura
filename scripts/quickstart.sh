@@ -126,9 +126,28 @@ hdr "Step 3/4 — Installing dependencies"
 
 # ── Python venv ───────────────────────────────────────────────────────────────
 VENV_DIR="${PROJECT_ROOT}/.venv311"
+find_oasis_python() {
+    for candidate in python3.11 python3.10 python3; do
+        if command -v "$candidate" >/dev/null 2>&1; then
+            if "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] in ((3, 10), (3, 11)) else 1)' >/dev/null 2>&1; then
+                command -v "$candidate"
+                return 0
+            fi
+        fi
+    done
+    return 1
+}
+
+PYTHON_BIN="$(find_oasis_python || true)"
+if [ -z "$PYTHON_BIN" ]; then
+    echo -e "${RED}No compatible Python found. Murmura simulations require Python 3.10 or 3.11.${RESET}"
+    echo "Install python3.11 or python3.10, then rerun make quickstart."
+    exit 1
+fi
+
 if [ ! -d "$VENV_DIR" ]; then
-    echo "  Creating Python virtual environment (.venv311)..."
-    python3 -m venv "$VENV_DIR"
+    echo "  Creating Python virtual environment (.venv311) with $PYTHON_BIN..."
+    "$PYTHON_BIN" -m venv "$VENV_DIR"
     ok "Created .venv311"
 else
     ok ".venv311 already exists"
@@ -137,9 +156,15 @@ fi
 VENV_PIP="${VENV_DIR}/bin/pip"
 VENV_PYTHON="${VENV_DIR}/bin/python"
 
+if ! "$VENV_PYTHON" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] in ((3, 10), (3, 11)) else 1)' >/dev/null 2>&1; then
+    echo -e "${RED}.venv311 is not using Python 3.10/3.11.${RESET}"
+    echo "Remove .venv311 and rerun make quickstart after installing python3.11 or python3.10."
+    exit 1
+fi
+
 echo "  Installing Python packages (this may take 2–3 min on first run)..."
 "$VENV_PIP" install --quiet --upgrade pip
-"$VENV_PIP" install --quiet -e ".[dev]"
+"$VENV_PIP" install --quiet -e ".[dev,simulation]"
 ok "Python dependencies installed"
 
 # ── Frontend npm ──────────────────────────────────────────────────────────────

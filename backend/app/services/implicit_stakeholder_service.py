@@ -24,7 +24,7 @@ from typing import Any
 from backend.app.utils.db import get_db
 from backend.app.utils.llm_client import LLMClient, get_step_provider_model
 from backend.app.utils.logger import get_logger
-from backend.app.utils.prompt_security import sanitize_seed_text
+from backend.app.utils.prompt_security import sanitize_prompt_seed_text
 from backend.prompts.implicit_stakeholder_prompts import (
     IMPLICIT_STAKEHOLDER_SYSTEM,
     IMPLICIT_STAKEHOLDER_USER,
@@ -260,7 +260,7 @@ class ImplicitStakeholderService:
         existing_nodes: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         """Call LLM and return raw list of implied actor dicts."""
-        safe_seed = sanitize_seed_text(seed_text)
+        safe_seed = sanitize_prompt_seed_text(seed_text)
         node_summaries = [
             {
                 "id": n.get("id"),

@@ -10,11 +10,15 @@ import pytest
 
 from backend.app.utils.prompt_security import (
     MAX_AGENT_FIELD,
+    MAX_PROMPT_SEED_TEXT,
     MAX_SCENARIO_DESC,
     MAX_SEED_TEXT,
+    MAX_SOURCE_SEED_TEXT,
     sanitize_agent_field,
+    sanitize_prompt_seed_text,
     sanitize_scenario_description,
     sanitize_seed_text,
+    sanitize_source_seed_text,
 )
 
 # ---------------------------------------------------------------------------
@@ -53,6 +57,17 @@ class TestTruncation:
         long = "y" * (MAX_AGENT_FIELD + 50)
         result = sanitize_agent_field(long)
         assert len(result) == MAX_AGENT_FIELD
+
+    def test_source_seed_uses_large_ingestion_limit(self) -> None:
+        long = "z" * (MAX_SEED_TEXT + 100)
+        result = sanitize_source_seed_text(long)
+        assert len(result) == len(long)
+        assert len(result) < MAX_SOURCE_SEED_TEXT
+
+    def test_prompt_seed_uses_explicit_prompt_budget(self) -> None:
+        long = "p" * (MAX_PROMPT_SEED_TEXT + 100)
+        result = sanitize_prompt_seed_text(long)
+        assert len(result) == MAX_PROMPT_SEED_TEXT
 
 
 # ---------------------------------------------------------------------------

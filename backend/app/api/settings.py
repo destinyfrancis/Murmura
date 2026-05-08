@@ -17,7 +17,7 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from backend.app.services.runtime_settings import get_override, set_override
 from backend.app.utils.db import get_db
@@ -76,6 +76,31 @@ _SETTINGS_KEY_MAP: dict[str, str] = {
     "external_feed_enabled": "data_external_feed_enabled",
     "feed_refresh_interval": "data_feed_refresh_interval",
 }
+_SETTINGS_KEY_MAP.update(
+    {
+        # Canonical RuntimeSettings keys accepted for external callers and
+        # scripts that bypass the frontend's shorter field names.
+        key: key
+        for key in (
+            "agent_llm_provider",
+            "agent_llm_model",
+            "agent_llm_model_lite",
+            "llm_provider",
+            "report_llm_model",
+            "step1_llm_provider",
+            "step1_llm_model",
+            "step2_llm_provider",
+            "step2_llm_model",
+            "step3_llm_provider",
+            "step3_llm_model",
+            "step3_llm_model_lite",
+            "step4_llm_provider",
+            "step4_llm_model",
+            "step5_llm_provider",
+            "step5_llm_model",
+        )
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -184,6 +209,8 @@ class SettingsUpdateRequest(BaseModel):
     Any subset of keys may be provided; unspecified keys are untouched.
     """
 
+    model_config = ConfigDict(extra="allow")
+
     # LLM config — global fallbacks
     agent_provider: str | None = None
     agent_model: str | None = None
@@ -254,16 +281,17 @@ async def _persist_to_db(key: str, value: str) -> None:
         await db.commit()
 
 
-async def _apply_update(field: str, value: Any) -> None:
+async def _apply_update(field: str, value: Any) -> bool:
     """Map a request field → store key, persist to DB and update in-memory store."""
     store_key = _SETTINGS_KEY_MAP.get(field)
     if store_key is None:
         logger.warning("No store key mapping for field '%s'; skipping", field)
-        return
+        return False
     str_value = str(value) if not isinstance(value, bool) else ("true" if value else "false")
     set_override(store_key, str_value)
     await _persist_to_db(store_key, str_value)
     logger.info("Settings: updated %s → %s", store_key, "***" if "key" in store_key else str_value)
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -283,9 +311,14 @@ async def update_settings(req: SettingsUpdateRequest) -> dict[str, Any]:
     updated: list[str] = []
 
     # Iterate over set fields only
-    for field, value in req.model_dump(exclude_none=True).items():
-        await _apply_update(field, value)
-        updated.append(field)
+    update_fields = req.model_dump(exclude_none=True)
+    for field, value in (req.model_extra or {}).items():
+        if value is not None:
+            update_fields[field] = value
+
+    for field, value in update_fields.items():
+        if await _apply_update(field, value):
+            updated.append(field)
 
     logger.info("Settings updated: %s", updated)
     return {"success": True, "updated": updated, "settings": _build_settings_response(mask_keys=True)}
@@ -357,9 +390,16 @@ async def list_provider_models(req: ProviderModelsRequest) -> dict[str, Any]:
 
 async def _test_provider_model(provider: str, api_key: str, model: str) -> dict[str, Any]:
     """Send a minimal 1-token LLM request to verify a specific model is accessible."""
+    model = model.strip()
+    if not model:
+        return {"ok": False, "message": "Model id is required"}
+    if provider == "openrouter":
+        return await _test_openrouter_model(api_key, model)
+
     try:
-        from backend.app.utils.llm_client import LLMClient  # noqa: PLC0415
-        client = LLMClient()
+        from backend.app.utils.llm_client import get_default_client  # noqa: PLC0415
+
+        client = get_default_client()
         resp = await client.chat(
             [{"role": "user", "content": "hi"}],
             provider=provider,
@@ -372,6 +412,51 @@ async def _test_provider_model(provider: str, api_key: str, model: str) -> dict[
         return {"ok": False, "message": f"Model {model} error: {str(exc)[:120]}"}
 
 
+def _extract_provider_error(resp: httpx.Response) -> str:
+    """Return a compact provider error message without exposing request data."""
+    try:
+        payload = resp.json()
+    except Exception:
+        text = resp.text.strip()
+        return text[:160] if text else ""
+
+    error = payload.get("error")
+    if isinstance(error, dict):
+        message = error.get("message") or error.get("code") or ""
+    elif isinstance(error, str):
+        message = error
+    else:
+        message = payload.get("message", "")
+    return str(message)[:160] if message else ""
+
+
+async def _test_openrouter_model(api_key: str, model: str) -> dict[str, Any]:
+    """Verify an OpenRouter model through the official chat completions API."""
+    timeout = httpx.Timeout(20.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://murmura.local/settings",
+                "X-Title": "Murmura Settings",
+            },
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": "ping"}],
+                "max_tokens": 1,
+                "temperature": 0,
+            },
+        )
+    if resp.status_code == 200:
+        return {"ok": True, "message": f"Model {model} accessible ✓ (via OpenRouter)"}
+
+    message = _extract_provider_error(resp)
+    suffix = f": {message}" if message else ""
+    return {"ok": False, "message": f"Model {model} returned HTTP {resp.status_code}{suffix}"}
+
+
 async def _test_provider_key(provider: str, api_key: str) -> dict[str, Any]:
     """Send a minimal request to validate the API key."""
     timeout = httpx.Timeout(10.0)
@@ -379,12 +464,14 @@ async def _test_provider_key(provider: str, api_key: str) -> dict[str, Any]:
     async with httpx.AsyncClient(timeout=timeout) as client:
         if provider == "openrouter":
             resp = await client.get(
-                "https://openrouter.ai/api/v1/models",
+                "https://openrouter.ai/api/v1/key",
                 headers={"Authorization": f"Bearer {api_key}"},
             )
             if resp.status_code == 200:
                 return {"ok": True, "message": "OpenRouter key valid ✓"}
-            return {"ok": False, "message": f"OpenRouter returned HTTP {resp.status_code}"}
+            message = _extract_provider_error(resp)
+            suffix = f": {message}" if message else ""
+            return {"ok": False, "message": f"OpenRouter returned HTTP {resp.status_code}{suffix}"}
 
         elif provider == "google":
             resp = await client.get(

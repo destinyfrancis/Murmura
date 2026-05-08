@@ -9,6 +9,8 @@ import Step2EnvSetup from '../components/Step2EnvSetup.vue'
 import Step3Simulation from '../components/Step3Simulation.vue'
 import Step4Report from '../components/Step4Report.vue'
 import Step5Interaction from '../components/Step5Interaction.vue'
+import WorkflowGraphPulse from '../components/WorkflowGraphPulse.vue'
+import { getWorkflow } from '../api/workflow.js'
 
 const props = defineProps({
   scenarioType: { type: String, required: true },
@@ -28,6 +30,10 @@ const expressMode = computed(() => route.query.express === '1')
 const expressSessionId = computed(() => route.query.sessionId || null)
 const expressGraphId = computed(() => route.query.graphId || null)
 const expressScenarioQuestion = computed(() => route.query.scenarioQuestion || '')
+const expressWorkflowId = computed(() => route.query.workflowId || null)
+const workflowState = ref(null)
+const workflowError = ref('')
+let _workflowPollId = null
 
 const steps = computed(() => [
   { key: 1, label: t('process.nav.steps.graph.label'), navLabel: t('process.nav.steps.graph.navLabel') },
@@ -41,6 +47,7 @@ const currentStep = ref(1)
 
 const currentStepMeta = computed(() => steps.value[currentStep.value - 1] || steps.value[0])
 const currentStepNumber = computed(() => String(currentStep.value).padStart(2, '0'))
+const viewMode = ref('workbench')
 
 const session = reactive({
   scenarioType: props.scenarioType,
@@ -75,6 +82,45 @@ const stepConfig = {
 const stepStyle = computed(() => ({
   '--left-width': `${stepConfig[currentStep.value]?.leftWidth ?? 60}%`,
 }))
+
+const stepSlugs = ['graph', 'env', 'sim', 'report', 'interact']
+const currentStepSlug = computed(() => stepSlugs[currentStep.value - 1] || 'graph')
+
+const viewModes = computed(() => [
+  { key: 'evidence', label: t('process.views.evidence') },
+  { key: 'split', label: t('process.views.split') },
+  { key: 'workbench', label: t('process.views.workbench') },
+])
+
+const stageFrameClass = computed(() => ({
+  'mode-evidence': viewMode.value === 'evidence',
+  'mode-workbench': viewMode.value === 'workbench',
+}))
+
+const currentStepContext = computed(() => ({
+  title: t(`process.context.steps.${currentStepSlug.value}.title`),
+  desc: t(`process.context.steps.${currentStepSlug.value}.desc`),
+  output: t(`process.context.steps.${currentStepSlug.value}.output`),
+}))
+
+const contextMetrics = computed(() => [
+  { label: t('process.context.metrics.session'), value: session.sessionId ? session.sessionId.slice(0, 8) : '--' },
+  { label: t('process.context.metrics.graph'), value: session.graphId ? session.graphId.slice(0, 8) : '--' },
+  { label: t('process.context.metrics.mode'), value: (session.scenarioType || 'custom').toUpperCase() },
+])
+
+const contextChecklist = computed(() =>
+  steps.value.map((step) => ({
+    ...step,
+    state: currentStep.value === step.key
+      ? t('process.workbench.active')
+      : canGoToStep(step.key) && step.key < currentStep.value
+        ? t('process.workbench.done')
+        : !canGoToStep(step.key)
+          ? t('process.workbench.locked')
+          : t('process.workbench.ready'),
+  }))
+)
 
 const currentComponent = computed(() => {
   const map = {
@@ -113,7 +159,7 @@ function goToStep(step) {
 }
 
 const roundLabel = computed(() =>
-  currentStep.value === 3 && session.sessionId ? 'RUNNING' : ''
+  (currentStep.value === 3 && session.sessionId) || workflowState.value?.status === 'running' ? 'RUNNING' : ''
 )
 
 const sessionTelemetry = computed(() => [
@@ -167,6 +213,39 @@ const currentComponentProps = computed(() => {
 let _expressAdvanceCancelled = false
 const _expressTimeoutIds = []
 
+function _applyWorkflowState(data) {
+  workflowState.value = data
+  if (!data) return
+  if (data.graph_id) session.graphId = data.graph_id
+  if (data.session_id) session.sessionId = data.session_id
+  if (data.report_id) session.reportId = data.report_id
+  if (data.scenario_question) session.scenarioQuestion = data.scenario_question
+  if (data.preset) session.preset = { ...(session.preset || {}), name: data.preset }
+  if (data.step_index && data.step_index >= 1) {
+    currentStep.value = Math.min(5, Math.max(currentStep.value, Number(data.step_index)))
+  }
+  if (data.status === 'completed' || data.status === 'degraded') {
+    session.simulationComplete = true
+    currentStep.value = data.report_id ? 5 : 4
+  }
+}
+
+async function _pollWorkflowOnce() {
+  if (!expressWorkflowId.value) return
+  try {
+    const res = await getWorkflow(expressWorkflowId.value)
+    const data = res.data?.data || res.data
+    workflowError.value = ''
+    _applyWorkflowState(data)
+    if (data?.status === 'completed' || data?.status === 'degraded' || data?.status === 'failed') {
+      if (_workflowPollId) clearInterval(_workflowPollId)
+      _workflowPollId = null
+    }
+  } catch (err) {
+    workflowError.value = err.response?.data?.detail || err.message || t('process.errors.workflowPolling')
+  }
+}
+
 // --- Resource cleanup on navigation away or browser close ---
 function _releaseSessionResources() {
   if (session.sessionId) {
@@ -193,6 +272,8 @@ onUnmounted(() => {
   _expressAdvanceCancelled = true
   _expressTimeoutIds.forEach(id => clearTimeout(id))
   _expressTimeoutIds.length = 0
+  if (_workflowPollId) clearInterval(_workflowPollId)
+  _workflowPollId = null
   window.removeEventListener('beforeunload', _onBeforeUnload)
   // Release resources when navigating away within the SPA
   if (session.sessionId) {
@@ -213,6 +294,19 @@ onMounted(async () => {
 
   if (!expressMode.value) return
   _expressAdvanceCancelled = false
+
+  if (expressWorkflowId.value) {
+    Object.assign(session, {
+      scenarioQuestion: expressScenarioQuestion.value,
+      preset: { ...(session.preset || {}), name: route.query.preset || session.preset.name },
+    })
+    currentStep.value = 1
+    await _pollWorkflowOnce()
+    if (!_workflowPollId) {
+      _workflowPollId = setInterval(_pollWorkflowOnce, 1500)
+    }
+    return
+  }
 
   // Pre-populate session from URL params (reactive() mutation is intentional here —
   // direct field mutation is Vue's intended pattern for reactive(); accepted exception
@@ -257,9 +351,20 @@ watch(
     <header class="process-header">
       <button class="process-brand nav-brand" @click="router.push('/')">Murmura</button>
       <div class="process-heading">
-        <span class="workbench-label">STEP {{ currentStepNumber }}</span>
+        <span class="workbench-label">{{ t('process.workbench.step') }} {{ currentStepNumber }}</span>
         <h1>{{ currentStepMeta?.label }}</h1>
         <p>{{ t('process.workbench.subtitle') }}</p>
+      </div>
+      <div class="process-view-switcher" :aria-label="t('process.views.label')">
+        <button
+          v-for="mode in viewModes"
+          :key="mode.key"
+          class="process-view-btn"
+          :class="{ active: viewMode === mode.key }"
+          @click="viewMode = mode.key"
+        >
+          {{ mode.label }}
+        </button>
       </div>
       <div class="process-telemetry">
         <div v-for="item in sessionTelemetry" :key="item.label" class="telemetry-item">
@@ -341,23 +446,77 @@ watch(
       {{ t('process.errors.engineUnavailableDetail') }}
     </div>
 
-    <!-- Step content — preserve existing PresetSelector + component bindings -->
     <main class="step-content" :style="stepStyle">
-      <PresetSelector
-        v-if="currentStep === 2"
-        v-model="session.preset"
-        class="preset-selector-row"
-      />
-      <component
-        :is="currentComponent"
-        v-bind="currentComponentProps"
-        @graph-built="onGraphBuilt"
-        @simulation-created="onSimulationCreated"
-        @simulation-complete="onSimulationComplete"
-        @report-generated="onReportGenerated"
-        @update:session="onSessionUpdate"
-        @switch-step="goToStep"
-      />
+      <div class="stage-frame" :class="stageFrameClass">
+        <aside class="stage-context workbench-panel" :aria-label="t('process.context.label')">
+          <div class="context-header">
+            <span class="workbench-label">{{ t('process.context.label') }}</span>
+            <span class="context-step">{{ t('process.workbench.step') }} {{ currentStepNumber }}</span>
+          </div>
+
+          <div class="context-note">
+            <h2>{{ currentStepContext.title }}</h2>
+            <p>{{ currentStepContext.desc }}</p>
+          </div>
+
+          <div class="context-metrics">
+            <div v-for="item in contextMetrics" :key="item.label" class="context-metric">
+              <span>{{ item.label }}</span>
+              <strong>{{ item.value }}</strong>
+            </div>
+          </div>
+
+          <div class="context-output">
+            <span class="workbench-label">{{ t('process.context.expectedOutput') }}</span>
+            <p>{{ currentStepContext.output }}</p>
+          </div>
+
+          <div class="context-checklist">
+            <span class="workbench-label">{{ t('process.context.pipeline') }}</span>
+            <button
+              v-for="step in contextChecklist"
+              :key="step.key"
+              class="context-check"
+              :class="{
+                active: currentStep === step.key,
+                done: canGoToStep(step.key) && step.key < currentStep,
+                locked: !canGoToStep(step.key),
+              }"
+              :disabled="!canGoToStep(step.key)"
+              @click="goToStep(step.key)"
+            >
+              <span>{{ String(step.key).padStart(2, '0') }}</span>
+              <strong>{{ step.navLabel }}</strong>
+              <small>{{ step.state }}</small>
+            </button>
+          </div>
+        </aside>
+
+        <section class="stage-workbench">
+          <WorkflowGraphPulse
+            v-if="expressWorkflowId"
+            :workflow="workflowState"
+          />
+          <div v-if="workflowError" class="workflow-error">
+            {{ workflowError }}
+          </div>
+          <PresetSelector
+            v-if="currentStep === 2"
+            v-model="session.preset"
+            class="preset-selector-row"
+          />
+          <component
+            :is="currentComponent"
+            v-bind="currentComponentProps"
+            @graph-built="onGraphBuilt"
+            @simulation-created="onSimulationCreated"
+            @simulation-complete="onSimulationComplete"
+            @report-generated="onReportGenerated"
+            @update:session="onSessionUpdate"
+            @switch-step="goToStep"
+          />
+        </section>
+      </div>
     </main>
   </div>
 </template>
@@ -380,16 +539,16 @@ watch(
 }
 
 .process-brand {
-  font-family: var(--font-mono);
+  font-family: var(--font-editorial);
   font-size: 18px;
-  font-weight: 800;
-  letter-spacing: 2px;
+  font-weight: 700;
+  letter-spacing: 0;
   color: var(--text-primary);
   background: transparent;
-  border: 1px solid var(--text-primary);
+  border: 1px solid var(--border-hover);
   border-radius: var(--radius-sm);
   padding: 8px 12px;
-  text-transform: uppercase;
+  text-transform: none;
   cursor: pointer;
 }
 
@@ -404,14 +563,50 @@ watch(
 }
 
 .process-heading h1 {
-  font-size: 24px;
-  font-weight: 800;
+  font-family: var(--font-editorial);
+  font-size: 28px;
+  font-weight: 700;
   margin: 3px 0 2px;
 }
 
 .process-heading p {
   color: var(--text-muted);
   font-size: 13px;
+}
+
+.process-view-switcher {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-graph);
+  flex-shrink: 0;
+}
+
+.process-view-btn {
+  min-height: 32px;
+  padding: 7px 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.process-view-btn:hover {
+  color: var(--text-primary);
+}
+
+.process-view-btn.active {
+  background: var(--bg-card);
+  color: var(--accent);
+  box-shadow: 0 1px 0 rgba(33,31,27,0.06);
 }
 
 .process-telemetry {
@@ -435,7 +630,7 @@ watch(
   font-family: var(--font-mono);
   font-size: 9px;
   font-weight: 800;
-  letter-spacing: 0.1em;
+  letter-spacing: 0;
   color: var(--text-muted);
 }
 
@@ -451,7 +646,7 @@ watch(
   position: relative;
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  gap: 10px;
+  gap: 8px;
   padding: 16px 24px;
   background: var(--bg-card);
   border-bottom: 1px solid var(--border);
@@ -477,7 +672,7 @@ watch(
   padding: 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--bg-card);
+  background: var(--bg-input);
   color: var(--text-secondary);
   text-align: left;
 }
@@ -488,18 +683,19 @@ watch(
 }
 
 .rail-step.active {
-  border-color: var(--text-primary);
-  background: var(--text-primary);
+  border-color: var(--accent);
+  background: var(--accent);
   color: var(--text-inverse);
 }
 
 .rail-step.done {
   border-color: var(--accent);
+  background: var(--accent-subtle);
 }
 
 .rail-step.locked {
   color: var(--text-quaternary);
-  background: #F3F3F0;
+  background: #E9E9E6;
   cursor: not-allowed;
 }
 
@@ -539,7 +735,7 @@ watch(
 
 .rail-copy small {
   font-size: 9px;
-  letter-spacing: 0.1em;
+  letter-spacing: 0;
   opacity: 0.72;
 }
 
@@ -553,11 +749,11 @@ watch(
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 700;
-  background: var(--accent, #FF6B35);
+  background: var(--accent);
   color: #FFF;
   padding: 2px 8px;
   border-radius: 2px;
-  letter-spacing: 0.05em;
+  letter-spacing: 0;
   text-transform: uppercase;
   display: flex;
   align-items: center;
@@ -588,8 +784,8 @@ watch(
   color: var(--text-primary, #000);
 }
 .view-switch-btn.active {
-  background: var(--bg-card, #FFF);
-  color: var(--text-primary, #000);
+  background: var(--bg-card);
+  color: var(--accent);
   box-shadow: none;
 }
 .view-switch-btn.done {
@@ -614,13 +810,13 @@ watch(
 }
 
 .step-progress-bar {
-  height: 4px;
+  height: 3px;
   display: flex;
   background: var(--bg-app);
 }
 .progress-seg { flex: 1; background: var(--border); }
 .progress-seg.done { background: var(--accent); }
-.progress-seg.active { background: var(--accent); opacity: .5; }
+.progress-seg.active { background: var(--accent); opacity: .72; }
 
 .step-content {
   flex: 1;
@@ -628,6 +824,208 @@ watch(
   flex-direction: column;
   padding: 18px 24px 28px;
   min-height: 0;
+}
+
+.stage-frame {
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+  transition: grid-template-columns var(--duration-layout) var(--ease-standard);
+}
+
+.stage-frame.mode-workbench {
+  grid-template-columns: 0 minmax(0, 1fr);
+  gap: 0;
+}
+
+.stage-frame.mode-evidence {
+  grid-template-columns: minmax(320px, 560px) 0;
+  gap: 0;
+}
+
+.stage-context {
+  padding: 18px;
+  min-width: 0;
+  overflow: hidden auto;
+  max-height: calc(100vh - 228px);
+  background: var(--bg-card);
+}
+
+.stage-frame.mode-workbench .stage-context,
+.stage-frame.mode-evidence .stage-workbench {
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+}
+
+.stage-workbench {
+  min-width: 0;
+  min-height: 0;
+  transition: opacity var(--duration-standard) var(--ease-standard);
+}
+
+.workflow-error {
+  border: 1px solid var(--accent-danger);
+  background: var(--accent-subtle);
+  color: var(--accent-danger);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  padding: 9px 10px;
+  margin-bottom: 12px;
+}
+
+.context-header,
+.context-metric,
+.context-check {
+  display: flex;
+  align-items: center;
+}
+
+.context-header {
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.context-step {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 7px;
+  color: var(--accent);
+  background: var(--accent-subtle);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.context-note {
+  padding: 18px 0 14px;
+}
+
+.context-note h2 {
+  font-family: var(--font-editorial);
+  font-size: 25px;
+  font-weight: 700;
+  line-height: 1.08;
+  margin: 0 0 10px;
+}
+
+.context-note p,
+.context-output p {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.context-metrics {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.context-metric {
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  padding: 8px 9px;
+}
+
+.context-metric span,
+.context-check small {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.context-metric strong {
+  min-width: 0;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.context-output {
+  display: grid;
+  gap: 8px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.context-checklist {
+  display: grid;
+  gap: 6px;
+  padding-top: 14px;
+}
+
+.context-checklist > .workbench-label {
+  margin-bottom: 3px;
+}
+
+.context-check {
+  width: 100%;
+  min-width: 0;
+  justify-content: flex-start;
+  gap: 9px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.context-check:hover:not(:disabled) {
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+
+.context-check.active {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.context-check.done {
+  border-color: var(--accent);
+}
+
+.context-check.locked {
+  color: var(--text-quaternary);
+  background: #E9E9E6;
+  cursor: not-allowed;
+}
+
+.context-check span,
+.context-check strong {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.context-check strong {
+  flex: 1;
+  min-width: 0;
+}
+
+.stage-workbench :deep(.step1),
+.stage-workbench :deep(.step2),
+.stage-workbench :deep(.step3),
+.stage-workbench :deep(.step4),
+.stage-workbench :deep(.step5) {
+  min-width: 0;
 }
 
 .express-badge {
@@ -648,13 +1046,13 @@ watch(
 .capability-warning {
   margin: 16px 24px;
   padding: 12px 16px;
-  background: #FFF4E5;
-  color: #663C00;
+  background: #F6E7C8;
+  color: #6B4210;
   border-radius: 4px;
   font-family: var(--font-mono);
   font-size: 14px;
   font-weight: 600;
-  border: 1px solid #FFD8A8;
+  border: 1px solid #D8B468;
 }
 
 @media (max-width: 1060px) {
@@ -667,12 +1065,31 @@ watch(
     min-width: 100%;
   }
 
+  .process-view-switcher {
+    order: 3;
+  }
+
   .workflow-rail {
     display: none;
   }
 
   .compact-switcher {
     display: block;
+  }
+
+  .stage-frame,
+  .stage-frame.mode-evidence,
+  .stage-frame.mode-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .stage-frame.mode-workbench .stage-context,
+  .stage-frame.mode-evidence .stage-workbench {
+    display: none;
+  }
+
+  .stage-context {
+    max-height: none;
   }
 }
 
@@ -683,8 +1100,25 @@ watch(
     padding-right: 14px;
   }
 
+  .process-heading {
+    min-width: 0;
+  }
+
+  .process-view-switcher {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .process-view-btn {
+    flex: 1;
+  }
+
   .process-telemetry {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .stage-context {
+    padding: 14px;
   }
 }
 </style>

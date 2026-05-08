@@ -126,6 +126,8 @@ async def get_report(report_id: str) -> APIResponse:
         if row is None:
             raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
 
+        row_data = dict(row)
+        agent_log_raw = row_data.get("agent_log")
         report = {
             "report_id": row["id"],
             "session_id": row["session_id"],
@@ -135,7 +137,7 @@ async def get_report(report_id: str) -> APIResponse:
             "summary": row["summary"],
             "key_findings": json.loads(row["key_findings"]) if row["key_findings"] else [],
             "charts_data": json.loads(row["charts_data"]) if row["charts_data"] else None,
-            "agent_log": json.loads(row["agent_log"]) if row.get("agent_log") else [],
+            "agent_log": json.loads(agent_log_raw) if agent_log_raw else [],
             "created_at": row["created_at"],
         }
         return APIResponse(success=True, data=report)

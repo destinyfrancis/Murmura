@@ -66,7 +66,7 @@ _RETRY_BASE_DELAY_S = 1.0
 _PROVIDERS: dict[str, dict[str, Any]] = {
     "fireworks": {
         "base_url": "https://api.fireworks.ai/inference/v1",
-        "default_model": "accounts/fireworks/models/deepseek/deepseek-v3.2",
+        "default_model": "accounts/fireworks/models/deepseek-v3p2",
         "cost_per_1k_input": 0.00009,
         "cost_per_1k_output": 0.00027,
         "env_key": "FIREWORKS_API_KEY",

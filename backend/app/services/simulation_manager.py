@@ -196,6 +196,18 @@ class SimulationManager:
                 logger.info("Session %s is already %s — ignoring start request", session_id, session.status.value)
                 return
 
+            from backend.app.services.oasis_compatibility import get_capabilities  # noqa: PLC0415
+
+            capabilities = get_capabilities()
+            if not bool(capabilities.get("simulation_available", capabilities.get("simulation"))):
+                reason = str(capabilities.get("reason") or "unknown")
+                failed = session.with_status(
+                    SessionStatus.FAILED,
+                    error_message=f"Simulation engine unavailable: {reason}",
+                )
+                await _update_session_status(failed)
+                raise RuntimeError(f"simulation_engine_unavailable:{reason}")
+
             # Idempotent: check if already queued or running
             async with get_db() as db:
                 cursor = await db.execute(
@@ -225,6 +237,25 @@ class SimulationManager:
         by the background worker.
         """
         session = await _load_session(session_id)
+
+        from backend.app.services.oasis_compatibility import get_capabilities  # noqa: PLC0415
+
+        capabilities = get_capabilities()
+        if not bool(capabilities.get("simulation_available", capabilities.get("simulation"))):
+            reason = str(capabilities.get("reason") or "unknown")
+            failed = session.with_status(
+                SessionStatus.FAILED,
+                error_message=f"Simulation engine unavailable: {reason}",
+            )
+            await _update_session_status(failed)
+            async with get_db() as db:
+                await db.execute(
+                    "UPDATE simulation_jobs SET status = 'failed', error_message = ?, updated_at = datetime('now') "
+                    "WHERE id = ?",
+                    (f"Simulation engine unavailable: {reason}", job_id),
+                )
+                await db.commit()
+            raise RuntimeError(f"simulation_engine_unavailable:{reason}")
         
         # Internal transition from CREATED to RUNNING on the session record
         updated = session.with_status(SessionStatus.RUNNING)
@@ -1184,7 +1215,12 @@ async def _build_runner_config(session: SessionState) -> dict[str, Any]:
     if not llm_model or llm_model in ("accounts/fireworks/models/deepseek/deepseek-v3.2", "deepseek/deepseek-v3.2"):
         # Use AGENT_LLM_MODEL env var if set, else default for the provider
         agent_model_env = os.environ.get("AGENT_LLM_MODEL", "")
-        llm_model = agent_model_env or "deepseek/deepseek-v3.2"
+        if agent_model_env and agent_model_env not in ("accounts/fireworks/models/deepseek/deepseek-v3.2",):
+            llm_model = agent_model_env
+        elif provider == "fireworks":
+            llm_model = "accounts/fireworks/models/deepseek-v3p2"
+        else:
+            llm_model = "deepseek/deepseek-v3.2"
 
     return {
         "session_id": session.id,

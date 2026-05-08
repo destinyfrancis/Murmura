@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from backend.app.utils.llm_client import LLMClient, get_agent_provider_model
 from backend.app.utils.logger import get_logger
-from backend.app.utils.prompt_security import sanitize_seed_text
+from backend.app.utils.prompt_security import sanitize_prompt_seed_text
 from backend.prompts.text_processor_prompts import (
     ANALYZE_SEED_SYSTEM,
     ANALYZE_SEED_USER,
@@ -214,7 +214,7 @@ class TextProcessor:
         if not seed_text or not seed_text.strip():
             raise ValueError("seed_text cannot be empty")
 
-        truncated = sanitize_seed_text(seed_text[:12000])
+        truncated = sanitize_prompt_seed_text(seed_text)
 
         messages = [
             {"role": "system", "content": ANALYZE_SEED_SYSTEM},

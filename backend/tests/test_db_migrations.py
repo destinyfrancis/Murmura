@@ -53,3 +53,27 @@ async def test_tier_column_exists_after_migration(tmp_path):
             cursor = await db.execute("PRAGMA table_info(agent_profiles)")
             cols = [row[1] for row in await cursor.fetchall()]
     assert "tier" in cols
+
+
+@pytest.mark.asyncio
+async def test_schema_contains_runtime_migrated_columns(tmp_path):
+    """Fresh DB schema should include columns that startup used to add at runtime."""
+    import backend.app.utils.db as db_module
+
+    fake_settings = _make_tmp_settings(tmp_path, "test_schema_converged.db")
+    with patch.object(db_module, "get_settings", return_value=fake_settings):
+        await db_module.init_db()
+        await db_module.apply_migrations()
+        async with db_module.get_db() as db:
+            session_cols = [
+                row[1]
+                for row in await (
+                    await db.execute("PRAGMA table_info(simulation_sessions)")
+                ).fetchall()
+            ]
+            report_cols = [row[1] for row in await (await db.execute("PRAGMA table_info(reports)")).fetchall()]
+            user_cols = [row[1] for row in await (await db.execute("PRAGMA table_info(users)")).fetchall()]
+
+    assert "domain_pack_id" in session_cols
+    assert "share_token" in report_cols
+    assert "is_admin" in user_cols

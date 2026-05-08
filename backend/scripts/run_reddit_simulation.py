@@ -16,11 +16,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import csv
 import json
 import logging
+import os
 import signal
+import sqlite3
 import sys
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -36,14 +38,18 @@ logger = logging.getLogger("reddit_simulation")
 # ---------------------------------------------------------------------------
 
 try:
-    from oasis import oasis
-    from oasis.social_agent.agents_generator import generate_agents
-    from oasis.social_platform.channel import Channel
-    from oasis.social_platform.typing import ActionType, DefaultPlatformType
+    import oasis
+    from oasis import (
+        ActionType,
+        DefaultPlatformType,
+        LLMAction,
+        ManualAction,
+        generate_reddit_agent_graph,
+    )
 except ImportError as exc:
     logger.error(
         "OASIS framework not installed. "
-        "Install via: pip install oasis-social-sim  "
+        "Install via: pip install camel-oasis  "
         "(or ensure the oasis package is on PYTHONPATH). "
         "Original error: %s",
         exc,
@@ -56,7 +62,7 @@ except ImportError as exc:
                     "platform": "reddit",
                     "message": (
                         "OASIS framework not found. Install it with "
-                        "'pip install oasis-social-sim' or add it to PYTHONPATH."
+                        "'pip install camel-oasis' or add it to PYTHONPATH."
                     ),
                 },
             }
@@ -86,16 +92,6 @@ except ImportError as exc:
         flush=True,
     )
     sys.exit(1)
-
-# ManualAction import (best-effort; used for shock injection)
-try:
-    from oasis.environment.env_action import LLMAction, ManualAction  # noqa: F401
-
-    _HAS_MANUAL_ACTION = True
-except ImportError:
-    _HAS_MANUAL_ACTION = False
-    logger.warning("oasis.environment.env_action not found — shock injection via ManualAction will be skipped.")
-
 
 # ---------------------------------------------------------------------------
 # JSONL IPC helpers
@@ -132,17 +128,27 @@ LLM_PROVIDER_URLS: dict[str, str] = {
     "together": "https://api.together.xyz/v1",
     "openrouter": "https://openrouter.ai/api/v1",
 }
+LLM_ENV_KEYS: dict[str, str] = {
+    "fireworks": "FIREWORKS_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "together": "TOGETHER_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+}
 
 
 def build_model(config: dict[str, Any]) -> Any:
     """Create a CAMEL ModelFactory model from config."""
     provider = config.get("llm_provider", "openrouter")
     model_name = config.get("llm_model", "deepseek/deepseek-v3.2")
-    api_key = config["llm_api_key"]
+    if provider == "fireworks" and model_name == "deepseek/deepseek-v3.2":
+        model_name = "accounts/fireworks/models/deepseek-v3p2"
+    env_key = LLM_ENV_KEYS.get(provider, "OPENROUTER_API_KEY")
+    api_key = config.get("llm_api_key") or os.environ.get(env_key, "") or os.environ.get("OPENROUTER_API_KEY", "")
     base_url = config.get("llm_base_url", LLM_PROVIDER_URLS.get(provider, ""))
 
     if not api_key:
-        raise ValueError("llm_api_key is required")
+        raise ValueError(f"API key is required for provider '{provider}'")
     if not base_url:
         raise ValueError(f"No base URL for provider '{provider}'. Set llm_base_url in config.")
 
@@ -181,6 +187,58 @@ _SHOCK_SUBREDDIT_MAP: dict[str, str] = {
 
 
 # ---------------------------------------------------------------------------
+# Profile conversion
+# ---------------------------------------------------------------------------
+
+
+def _reddit_profile_json_from_csv(agent_csv_path: str) -> str:
+    """Convert Murmura agents.csv into camel-oasis Reddit JSON profiles."""
+    csv_path = Path(agent_csv_path)
+    json_path = csv_path.with_name(f"{csv_path.stem}_reddit_profiles.json")
+
+    profiles: list[dict[str, Any]] = []
+    with open(csv_path, newline="", encoding="utf-8") as fh:
+        reader = csv.DictReader(fh)
+        for idx, row in enumerate(reader):
+            persona = row.get("user_char") or row.get("description") or f"Agent {idx}"
+            username = row.get("username") or row.get("userid") or f"agent_{idx}"
+            profiles.append(
+                {
+                    "username": username,
+                    "bio": row.get("description") or persona[:240],
+                    "persona": persona,
+                    "mbti": "INTJ",
+                    "gender": "unspecified",
+                    "age": 35,
+                    "country": "unknown",
+                }
+            )
+
+    if not profiles:
+        raise ValueError(f"Agent CSV contains no rows: {agent_csv_path}")
+
+    with open(json_path, "w", encoding="utf-8") as fh:
+        json.dump(profiles, fh, ensure_ascii=False)
+
+    return str(json_path)
+
+
+def _effective_action_count(db_path: str) -> int:
+    if not Path(db_path).exists():
+        return 0
+    try:
+        conn = sqlite3.connect(db_path, timeout=5)
+        row = conn.execute(
+            "SELECT COUNT(*) FROM trace WHERE action NOT IN ('sign_up', 'refresh')"
+        ).fetchone()
+        conn.close()
+        return int(row[0] or 0)
+    except Exception as exc:
+        logger.warning("effective_action_count failed: %s", exc)
+        return 0
+
+
+# ---------------------------------------------------------------------------
 # Shock injection
 # ---------------------------------------------------------------------------
 
@@ -190,7 +248,7 @@ def get_shocks_for_round(shocks: list[dict[str, Any]], round_num: int) -> list[d
     return [s for s in shocks if s.get("round_number") == round_num]
 
 
-async def inject_shock(env: Any, shock: dict[str, Any]) -> None:
+async def inject_shock(env: Any, agent_graph: Any, shock: dict[str, Any]) -> None:
     """Inject a macro shock into the environment via ManualAction CREATE_POST.
 
     For Reddit, shocks are posted to the most relevant HK subreddit.
@@ -203,23 +261,20 @@ async def inject_shock(env: Any, shock: dict[str, Any]) -> None:
         )
         return
 
-    if not _HAS_MANUAL_ACTION:
-        logger.warning(
-            "ManualAction not available — shock '%s' at round %d skipped",
-            shock.get("shock_type", "unknown"),
-            shock.get("round_number", -1),
-        )
+    subreddit = _SHOCK_SUBREDDIT_MAP.get(shock.get("shock_type", ""), "HongKong")
+    agents = agent_graph.get_agents([0])
+    if not agents:
+        logger.warning("No agent available for shock injection")
         return
 
-    subreddit = _SHOCK_SUBREDDIT_MAP.get(shock.get("shock_type", ""), "HongKong")
+    _, agent = agents[0]
 
     try:
         manual = ManualAction(
-            agent_id=0,
-            action=ActionType.CREATE_POST,
-            content=post_content,
+            action_type=ActionType.CREATE_POST,
+            action_args={"content": f"[r/{subreddit}] {post_content}"},
         )
-        await env.step(env_action=manual)
+        await env.step({agent: manual})
         logger.info(
             "Injected shock '%s' to r/%s at round %d",
             shock.get("shock_type", "unknown"),
@@ -310,25 +365,25 @@ async def run_reddit_simulation(config: dict[str, Any]) -> None:
     # Build LLM model
     model = build_model(config)
 
-    # Generate agent graph from CSV
-    emit_progress(0, round_count, "Generating agents from CSV")
-    channel = Channel()
-
-    agent_graph = await generate_agents(
-        agent_info_path=agent_csv_path,
-        channel=channel,
+    # Generate agent graph from CSV via the JSON profile format used by the
+    # current camel-oasis Reddit helper.
+    emit_progress(0, round_count, "Generating Reddit agents from CSV")
+    reddit_profile_path = _reddit_profile_json_from_csv(agent_csv_path)
+    agent_graph = await generate_reddit_agent_graph(
+        profile_path=reddit_profile_path,
         model=model,
-        start_time=datetime.now(),
-        recsys_type="reddit",
         available_actions=[
             ActionType.CREATE_POST,
-            ActionType.UPVOTE,
-            ActionType.DOWNVOTE,
+            ActionType.LIKE_POST,
+            ActionType.DISLIKE_POST,
             ActionType.CREATE_COMMENT,
+            ActionType.DO_NOTHING,
+            ActionType.SEARCH_POSTS,
+            ActionType.TREND,
         ],
     )
 
-    agent_count = len(agent_graph.nodes) if hasattr(agent_graph, "nodes") else 0
+    agent_count = agent_graph.get_num_nodes()
     logger.info("Agent graph built with %d agents", agent_count)
 
     # Create OASIS environment
@@ -345,9 +400,11 @@ async def run_reddit_simulation(config: dict[str, Any]) -> None:
 
     # Reset environment
     await env.reset()
+    llm_actions = {agent: LLMAction() for _, agent in agent_graph.get_agents()}
 
     # Run simulation rounds
     total_actions = 0
+    runtime_errors: list[str] = []
     last_round = 0
 
     for round_num in range(1, round_count + 1):
@@ -361,13 +418,18 @@ async def run_reddit_simulation(config: dict[str, Any]) -> None:
         # Inject any scheduled shocks before stepping
         round_shocks = get_shocks_for_round(shocks, round_num)
         for shock in round_shocks:
-            await inject_shock(env, shock)
+            await inject_shock(env, agent_graph, shock)
 
         # Execute one simulation round
         try:
-            await env.step()
+            before_actions = _effective_action_count(db_path)
+            await env.step(llm_actions)
+            round_action_count = _effective_action_count(db_path) - before_actions
+            if round_action_count <= 0:
+                raise RuntimeError("No effective LLM actions were recorded; model call likely failed")
         except Exception as exc:
             logger.error("Error in round %d: %s", round_num, exc)
+            runtime_errors.append(f"round {round_num}: {exc}")
             emit(
                 "error",
                 {
@@ -378,8 +440,6 @@ async def run_reddit_simulation(config: dict[str, Any]) -> None:
             )
             continue
 
-        round_stats = _extract_round_stats(env, round_num)
-        round_action_count = round_stats.get("action_count", 0)
         total_actions += round_action_count
 
         emit_progress(round_num, round_count, f"Round {round_num}/{round_count} complete")
@@ -389,6 +449,9 @@ async def run_reddit_simulation(config: dict[str, Any]) -> None:
             round_count,
             round_action_count,
         )
+
+    if runtime_errors and total_actions == 0:
+        raise RuntimeError("; ".join(runtime_errors[:3]))
 
     # Final summary
     rounds_done = last_round if not _shutdown_requested else last_round - 1

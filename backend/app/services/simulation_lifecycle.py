@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
+import subprocess
 import sys
 from collections.abc import Callable, Coroutine
 from pathlib import Path
@@ -23,25 +25,44 @@ logger = get_logger("simulation_runner")
 # Project root is 4 levels up: services → app → backend → project_root
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
+
+def _is_supported_python(python_bin: Path) -> bool:
+    """Return whether *python_bin* is Python 3.10 or 3.11."""
+    try:
+        result = subprocess.run(
+            [
+                str(python_bin),
+                "-c",
+                "import sys; raise SystemExit(0 if sys.version_info[:2] in ((3, 10), (3, 11)) else 1)",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception:
+        return False
+    return result.returncode == 0
+
+
 def _find_compatible_python() -> Path:
     """Find a Python 3.10 or 3.11 binary to satisfy OASIS requirements."""
     # 1. Check local .venv311
     venv_python = _PROJECT_ROOT / ".venv311" / "bin" / "python"
-    if venv_python.exists():
+    if venv_python.exists() and _is_supported_python(venv_python):
         return venv_python
-    
+
     # 2. Check current executable
     major, minor = sys.version_info[:2]
     if major == 3 and minor in (10, 11):
         return Path(sys.executable)
-    
+
     # 3. Search in PATH
-    import shutil # noqa: PLC0415
     for ver in ("3.11", "3.10"):
         found = shutil.which(f"python{ver}")
-        if found:
+        if found and _is_supported_python(Path(found)):
             return Path(found)
-            
+
     # 4. Fallback to current (and hope for the best)
     return Path(sys.executable)
 
@@ -128,6 +149,9 @@ class SimulationLifecycleMixin:
 
         # Late import to avoid circular dependency: ws imports nothing from here.
         from backend.app.api.ws import push_progress  # noqa: PLC0415
+        from backend.app.services.oasis_compatibility import ensure_oasis_available  # noqa: PLC0415
+
+        ensure_oasis_available()
 
         # Validate prerequisites (L5).
         if not _PYTHON_BIN.exists():
@@ -137,7 +161,7 @@ class SimulationLifecycleMixin:
                 "OASIS requires Python 3.10/3.11. "
                 "Please run 'make quickstart' or set up a compatible virtual environment."
             )
-        
+
         # Log which python we are using for visibility
         logger.info("Using Python: %s", _PYTHON_BIN)
 
@@ -209,14 +233,27 @@ class SimulationLifecycleMixin:
         # can safely guard their cleanup even if creation fails mid-way.
         log_file = None
         process = None
+        runtime_errors: list[str] = []
         import time as _time_mod  # noqa: PLC0415
 
         _sim_start_time = _time_mod.perf_counter()
         try:
             log_file = log_file_path.open("wb")
 
-            # Pass API key via env var (not in the config file on disk).
+            # Pass API keys via env vars (not in the config file on disk).
             subprocess_env = {**os.environ, "OPENROUTER_API_KEY": _get_api_key()}
+            provider = str(full_config.get("llm_provider") or "openrouter")
+            provider_env_keys = {
+                "fireworks": "FIREWORKS_API_KEY",
+                "deepseek": "DEEPSEEK_API_KEY",
+                "openai": "OPENAI_API_KEY",
+                "together": "TOGETHER_API_KEY",
+                "openrouter": "OPENROUTER_API_KEY",
+            }
+            provider_key = str(config.get("llm_api_key") or "")
+            provider_env_key = provider_env_keys.get(provider)
+            if provider_key and provider_env_key:
+                subprocess_env[provider_env_key] = provider_key
 
             process = await self._subprocess_mgr.launch(
                 session_id,
@@ -247,6 +284,10 @@ class SimulationLifecycleMixin:
                 if update.get("type") == "post":
                     await self._handle_post_update(session_id, update)
 
+                if update.get("type") == "error":
+                    message = str(update.get("data", {}).get("message") or update)
+                    runtime_errors.append(message[:500])
+
                 # Log non-content actions (follow, like, lurk, etc.)
                 if update.get("type") == "action":
                     await self._handle_action_update(session_id, update)
@@ -267,6 +308,9 @@ class SimulationLifecycleMixin:
 
             await process.wait()
             self._subprocess_mgr.check_exit_code(session_id)
+            if runtime_errors:
+                joined = "; ".join(runtime_errors[:3])
+                raise RuntimeError(f"OASIS emitted error event(s): {joined}")
 
             # Take final KG snapshot at completion
             try:
@@ -569,13 +613,8 @@ class SimulationLifecycleMixin:
             except Exception:
                 logger.exception("dry_run progress_callback error session=%s", session_id)
 
-        # Clean up buffers (mirrors the finally block in run())
-        self._posts_buffer.pop(session_id, None)
-        self._macro_state.pop(session_id, None)
-        self._round_profiles.pop(session_id, None)
-        rc = self._round_caches.pop(session_id, None)
-        if rc is not None:
-            rc.clear()
+        # Clean up buffers/tasks (mirrors the finally block in run()).
         if self._batch_writer is not None:
             self._batch_writer.clear()
+        await self.cleanup_session(session_id)
         logger.info("dry_run complete for session %s (%d rounds)", session_id, mock_rounds)

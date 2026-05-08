@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -268,10 +269,13 @@ class TestGenerateSubQueries:
             cost_usd=0.0,
         )
 
-        with patch("backend.app.services.report_agent_xai.LLMClient") as MockLLMClient:
-            instance = MockLLMClient.return_value
-            instance.chat = AsyncMock(return_value=mock_llm_response)
+        mock_instance = MagicMock()
+        mock_instance.chat = AsyncMock(return_value=mock_llm_response)
 
+        with patch(
+            "backend.app.services.report_agent_xai._get_xai_llm",
+            return_value=mock_instance,
+        ):
             from backend.app.services.report_agent_xai import _generate_sub_queries
 
             result = asyncio.run(_generate_sub_queries("什麼議題最重要？"))
@@ -545,6 +549,36 @@ class TestGetPlatformBreakdown:
         assert "total_actions" in entry
         assert "sentiment" in entry
         assert "top_action_types" in entry
+
+
+class TestEnsembleForecast:
+    @pytest.mark.asyncio
+    async def test_uses_current_ensemble_results_schema(self, tmp_db):
+        """get_ensemble_forecast should query metric_name, not legacy metric columns."""
+        async with aiosqlite.connect(tmp_db) as db:
+            db.row_factory = aiosqlite.Row
+            await db.execute(
+                """INSERT INTO ensemble_results
+                   (session_id, n_trials, metric_name, p10, p25, p50, p75, p90)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                ("sess-ensemble", 500, "sentiment", 0.1, 0.2, 0.5, 0.8, 0.9),
+            )
+            await db.commit()
+
+        from backend.app.services.report_agent_xai import handle_ensemble_forecast
+
+        raw = await handle_ensemble_forecast("sess-ensemble", {"metric": "sentiment"}, None)
+        data = json.loads(raw)
+        assert data == [
+            {
+                "metric": "sentiment",
+                "p10": 0.1,
+                "p25": 0.2,
+                "p50": 0.5,
+                "p75": 0.8,
+                "p90": 0.9,
+            }
+        ]
 
 
 class TestGetAgentStoryArcs:

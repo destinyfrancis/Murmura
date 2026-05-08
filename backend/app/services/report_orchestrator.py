@@ -91,7 +91,8 @@ class ReportOrchestrator:
             async with get_db() as db:
                 session_row = await (
                     await db.execute(
-                        "SELECT sim_mode, preset, seed_text, config_json FROM simulation_sessions WHERE id=?",
+                        """SELECT sim_mode, seed_text, config_json, agent_count, round_count
+                           FROM simulation_sessions WHERE id=?""",
                         (session_id,),
                     )
                 ).fetchone()
@@ -111,8 +112,9 @@ class ReportOrchestrator:
         if not session_row:
             return {"sim_mode": "kg_driven", "agent_count": 0, "round_count": 0}
 
-        # Extract time_config from config_json if present
+        # Extract optional metadata from config_json if present.
         time_config = None
+        config_data: dict[str, Any] = {}
         config_json_raw = session_row["config_json"]
         if config_json_raw:
             try:
@@ -121,10 +123,17 @@ class ReportOrchestrator:
             except (json.JSONDecodeError, TypeError):
                 pass
 
+        agent_count = agent_count_row["cnt"] if agent_count_row else 0
+        if not agent_count:
+            agent_count = int(session_row["agent_count"] or config_data.get("agent_count") or 0)
+        round_count = (round_count_row["max_round"] or 0) if round_count_row else 0
+        if not round_count:
+            round_count = int(session_row["round_count"] or config_data.get("round_count") or 0)
+
         return {
             "sim_mode": session_row["sim_mode"] or "kg_driven",
-            "agent_count": agent_count_row["cnt"] if agent_count_row else 0,
-            "round_count": (round_count_row["max_round"] or 0) if round_count_row else 0,
+            "agent_count": agent_count,
+            "round_count": round_count,
             "seed_text": session_row["seed_text"] or "",
             "time_config": time_config,
         }
