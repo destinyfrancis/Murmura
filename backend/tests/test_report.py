@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -45,6 +46,77 @@ class TestReportGenerationProducesMarkdown:
         report_id = str(uuid.uuid4())
         response = await test_client.get(f"/api/report/{report_id}")
         assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_get_report_handles_agent_log_column(self, tmp_path):
+        """GET report should not call sqlite Row.get() and should decode agent_log safely."""
+        from contextlib import asynccontextmanager
+        from unittest.mock import patch
+
+        import aiosqlite
+
+        from backend.app.api.report import get_report
+
+        db_path = tmp_path / "reports.db"
+        schema_path = Path(__file__).parent.parent / "database" / "schema.sql"
+        async with aiosqlite.connect(db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await db.executescript(schema_path.read_text(encoding="utf-8"))
+            session_id = str(uuid.uuid4())
+            await db.execute(
+                """INSERT INTO simulation_sessions
+                   (id, name, sim_mode, agent_count, round_count, llm_provider)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (session_id, "test-session", "kg_driven", 2, 3, "test"),
+            )
+            await db.execute(
+                """INSERT INTO reports
+                   (id, session_id, report_type, title, content_markdown,
+                    summary, key_findings, charts_data, agent_log)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    "r-empty",
+                    session_id,
+                    "full",
+                    "Empty Log",
+                    "content",
+                    "summary",
+                    "[]",
+                    "{}",
+                    None,
+                ),
+            )
+            await db.execute(
+                """INSERT INTO reports
+                   (id, session_id, report_type, title, content_markdown,
+                    summary, key_findings, charts_data, agent_log)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    "r-log",
+                    session_id,
+                    "full",
+                    "With Log",
+                    "content",
+                    "summary",
+                    "[]",
+                    "{}",
+                    json.dumps([{"step_type": "Thought", "content": "ok"}]),
+                ),
+            )
+            await db.commit()
+
+        @asynccontextmanager
+        async def _patched_get_db():
+            async with aiosqlite.connect(db_path) as conn:
+                conn.row_factory = aiosqlite.Row
+                yield conn
+
+        with patch("backend.app.api.report.get_db", _patched_get_db):
+            empty = await get_report("r-empty")
+            with_log = await get_report("r-log")
+
+        assert empty.data["agent_log"] == []
+        assert with_log.data["agent_log"] == [{"step_type": "Thought", "content": "ok"}]
 
     @pytest.mark.asyncio
     async def test_report_stored_in_db(self, test_db):

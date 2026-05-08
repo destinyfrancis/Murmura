@@ -240,6 +240,39 @@ class TestParallelScriptRequiredKeys:
             assert key in REQUIRED_CONFIG_KEYS, f"Expected '{key}' in REQUIRED_CONFIG_KEYS"
 
 
+class TestParallelScriptFailureSemantics:
+    """Parallel platform failures must be visible to the parent process."""
+
+    def test_platform_errors_return_nonzero(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from backend.scripts import run_parallel_simulation as parallel
+
+        def fake_run_platform_thread(
+            _script_name: str,
+            platform: str,
+            _config: dict[str, Any],
+            _results: dict[str, Any],
+            errors: dict[str, str],
+            _shutdown_event: Any,
+        ) -> None:
+            errors[platform] = "oasis missing"
+
+        monkeypatch.setattr(parallel, "_run_platform_thread", fake_run_platform_thread)
+
+        exit_code = parallel.run_parallel(
+            {
+                "session_id": "parallel_failure",
+                "agent_csv_path": "/tmp/agents.csv",
+                "round_count": 1,
+                "platforms": {"twitter": True, "reddit": True},
+                "llm_provider": "openrouter",
+                "llm_model": "test",
+                "oasis_db_path": "/tmp/oasis.db",
+            }
+        )
+
+        assert exit_code == 1
+
+
 class TestPlatformScriptSelection:
     """Task 3.1 — platform-aware script selection logic in SimulationRunner.run()."""
 

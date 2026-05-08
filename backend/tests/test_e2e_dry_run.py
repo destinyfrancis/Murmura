@@ -64,7 +64,10 @@ async def dry_run_db(tmp_path):
         finally:
             await conn.close()
 
-    with patch("backend.app.utils.db.get_db", _mock_get_db):
+    with (
+        patch("backend.app.utils.db.get_db", _mock_get_db),
+        patch("backend.scripts.action_logger.get_db", _mock_get_db),
+    ):
         yield db_path, _mock_get_db
 
 
@@ -210,7 +213,7 @@ async def test_dry_run_memory_pipeline(seeded_session):
         )
         row = await cursor.fetchone()
         # dry_run emits 2 posts per round * 3 rounds = 6
-        assert row["cnt"] >= 0  # action_logger may or may not be initialized
+        assert row["cnt"] >= 6
 
 
 @pytest.mark.asyncio

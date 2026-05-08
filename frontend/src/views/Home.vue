@@ -5,7 +5,8 @@ import { useI18n } from 'vue-i18n'
 import DomainBuilder from '../components/DomainBuilder.vue'
 import DataConnectorPanel from '../components/DataConnectorPanel.vue'
 import OnboardingTooltip from '../components/OnboardingTooltip.vue'
-import { quickStart, quickStartWithFile } from '../api/simulation.js'
+import { createWorkflow, createWorkflowWithFile } from '../api/workflow.js'
+import { generateRealitySeed } from '../api/realitySeed.js'
 import { useOnboarding } from '../composables/useOnboarding.js'
 
 const router = useRouter()
@@ -18,6 +19,13 @@ const quickStartPreset = ref('fast')
 const quickStartFile = ref(null)
 const quickStartDragging = ref(false)
 const quickStartError = ref(null)
+const realityTopic = ref('')
+const realityRequirement = ref('')
+const realityFile = ref(null)
+const realityIncludeLatest = ref(true)
+const realityLoading = ref(false)
+const realityError = ref(null)
+const realityResult = ref(null)
 
 const domainPacks = ref([])
 const selectedDomain = ref('hk_city')
@@ -29,13 +37,6 @@ const PRESETS = computed(() => [
   { key: 'fast',     label: t('home.presets.fast'),     hint: t('home.presets.fastHint') },
   { key: 'standard', label: t('home.presets.standard'), hint: t('home.presets.standardHint') },
   { key: 'deep',     label: t('home.presets.deep'),     hint: t('home.presets.deepHint') },
-])
-
-const STATUS_METRICS = computed(() => [
-  { value: '01', label: t('home.metrics.zeroConfig') },
-  { value: 'KG', label: t('home.metrics.kg') },
-  { value: 'MAS', label: t('home.metrics.oasis') },
-  { value: 'XAI', label: t('home.metrics.react') },
 ])
 
 const WORKFLOW_STEPS = computed(() => [
@@ -93,6 +94,54 @@ function setQSFile(f) {
 }
 function clearQSFile() { quickStartFile.value = null }
 
+function onRealityFileInput(e) {
+  const f = e.target.files?.[0]
+  if (!f) return
+  const ext = qsFileExt(f.name)
+  if (!QS_ALLOWED_EXTS.includes(ext)) {
+    realityError.value = t('home.errors.format', { ext })
+    return
+  }
+  if (f.size > QS_MAX_BYTES) {
+    realityError.value = t('home.errors.size')
+    return
+  }
+  realityFile.value = f
+}
+
+function clearRealityFile() {
+  realityFile.value = null
+}
+
+const canGenerateRealitySeed = computed(() =>
+  !realityLoading.value && realityTopic.value.trim() && realityRequirement.value.trim()
+)
+
+async function handleGenerateRealitySeed() {
+  if (!canGenerateRealitySeed.value) return
+  realityLoading.value = true
+  realityError.value = null
+  realityResult.value = null
+  try {
+    const res = await generateRealitySeed({
+      topic: realityTopic.value,
+      simulationRequirement: realityRequirement.value,
+      includeLatest: realityIncludeLatest.value,
+      exportPdf: true,
+      file: realityFile.value,
+    })
+    const data = res.data?.data || res.data
+    realityResult.value = data
+    quickStartFile.value = null
+    quickStartText.value = data.seed_text || data.markdown || ''
+    quickStartQuestion.value = realityRequirement.value
+  } catch (e) {
+    realityError.value = e.response?.data?.detail || e.message || t('home.realitySeed.error')
+  } finally {
+    realityLoading.value = false
+  }
+}
+
 const canQuickStart = computed(() =>
   !quickStartLoading.value && (quickStartFile.value || quickStartText.value.trim())
 )
@@ -120,26 +169,24 @@ async function handleQuickStart() {
   try {
     let res
     if (quickStartFile.value) {
-      res = await quickStartWithFile(
+      res = await createWorkflowWithFile(
         quickStartFile.value,
         quickStartQuestion.value,
         quickStartPreset.value,
       )
     } else {
-      res = await quickStart(
+      res = await createWorkflow(
         quickStartText.value,
         quickStartQuestion.value,
         quickStartPreset.value,
       )
     }
     const d = res?.data?.data || res?.data
-    const sessionId = d?.session_id
-    const graphId = d?.graph_id || ''
-    if (sessionId) {
+    const workflowId = d?.workflow_id
+    if (workflowId) {
       const q = new URLSearchParams({
         express: '1',
-        sessionId,
-        graphId,
+        workflowId,
         scenarioQuestion: quickStartQuestion.value,
         preset: quickStartPreset.value,
       })
@@ -167,13 +214,6 @@ async function handleQuickStart() {
         <h1 class="hero-title">Murmura</h1>
         <p class="hero-subtitle">{{ t('home.subtitle') }}</p>
         <p class="hero-desc">{{ t('home.description') }}</p>
-
-        <div class="status-metrics" :aria-label="t('home.consoleStatus')">
-          <div v-for="metric in STATUS_METRICS" :key="metric.label" class="metric-tile">
-            <span class="metric-value">{{ metric.value }}</span>
-            <span class="metric-label">{{ metric.label }}</span>
-          </div>
-        </div>
 
         <div class="workflow-panel">
           <div class="workflow-header">
@@ -211,6 +251,72 @@ async function handleQuickStart() {
           <span class="console-code">READY</span>
         </div>
         <p class="qs-subtitle">{{ t('home.startSubtitle') }}</p>
+
+        <div class="reality-seed-box">
+          <div class="reality-seed-head">
+            <div>
+              <span class="workbench-label">{{ t('home.realitySeed.label') }}</span>
+              <h3>{{ t('home.realitySeed.title') }}</h3>
+            </div>
+            <label class="reality-toggle">
+              <input v-model="realityIncludeLatest" type="checkbox" />
+              <span>{{ t('home.realitySeed.latest') }}</span>
+            </label>
+          </div>
+
+          <label class="console-field-label">{{ t('home.realitySeed.topic') }}</label>
+          <input
+            v-model="realityTopic"
+            class="qs-question"
+            :placeholder="t('home.realitySeed.topicPlaceholder')"
+          />
+
+          <label class="console-field-label">{{ t('home.realitySeed.requirement') }}</label>
+          <textarea
+            v-model="realityRequirement"
+            class="qs-textarea reality-requirement"
+            rows="3"
+            :placeholder="t('home.realitySeed.requirementPlaceholder')"
+          />
+
+          <div class="reality-actions">
+            <label class="reality-file-btn">
+              <input
+                type="file"
+                accept=".pdf,.txt,.md,.markdown"
+                @change="onRealityFileInput"
+              />
+              {{ realityFile ? realityFile.name : t('home.realitySeed.attach') }}
+            </label>
+            <button
+              v-if="realityFile"
+              class="reality-clear-btn"
+              @click="clearRealityFile"
+            >
+              {{ t('home.realitySeed.clear') }}
+            </button>
+            <button
+              class="reality-generate-btn"
+              :disabled="!canGenerateRealitySeed"
+              @click="handleGenerateRealitySeed"
+            >
+              {{ realityLoading ? t('home.realitySeed.generating') : t('home.realitySeed.generate') }}
+            </button>
+          </div>
+
+          <p v-if="realityError" class="qs-error">{{ realityError }}</p>
+          <div v-if="realityResult" class="reality-result">
+            <span>{{ t('home.realitySeed.ready', { count: realityResult.sources?.length || 0 }) }}</span>
+            <a
+              v-if="realityResult.pdf_url"
+              :href="realityResult.pdf_url"
+              target="_blank"
+              rel="noreferrer"
+            >
+              {{ t('home.realitySeed.openPdf') }}
+            </a>
+          </div>
+        </div>
 
         <label class="console-field-label">{{ t('home.fileLabel') }}</label>
         <div
@@ -345,13 +451,13 @@ async function handleQuickStart() {
 .home {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 16px;
 }
 
 .home-console {
   display: grid;
-  grid-template-columns: minmax(0, 1.04fr) minmax(380px, 0.96fr);
-  gap: 18px;
+  grid-template-columns: minmax(300px, 0.72fr) minmax(420px, 1.28fr);
+  gap: 16px;
   align-items: stretch;
 }
 
@@ -359,18 +465,14 @@ async function handleQuickStart() {
 .prediction-console,
 .home-tools,
 .tool-panel {
-  padding: 22px;
+  padding: 20px;
 }
 
 .mission-panel {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  background:
-    linear-gradient(90deg, rgba(0,0,0,0.035) 1px, transparent 1px),
-    linear-gradient(rgba(0,0,0,0.035) 1px, transparent 1px),
-    var(--bg-card);
-  background-size: 28px 28px;
+  gap: 18px;
+  background: var(--bg-card);
 }
 
 .mission-topline,
@@ -390,34 +492,35 @@ async function handleQuickStart() {
   border-radius: var(--radius-sm);
   padding: 4px 8px;
   color: var(--text-secondary);
-  background: rgba(255,255,255,0.82);
+  background: var(--bg-input);
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 800;
-  letter-spacing: 0.08em;
+  letter-spacing: 0;
   text-transform: uppercase;
 }
 
 .hero-title {
-  font-family: var(--font-mono);
-  font-size: clamp(48px, 9vw, 112px);
-  font-weight: 800;
-  line-height: 0.86;
+  font-family: var(--font-editorial);
+  font-size: clamp(50px, 7vw, 92px);
+  font-weight: 700;
+  line-height: 0.92;
   letter-spacing: 0;
   color: var(--text-primary);
-  text-transform: uppercase;
+  text-transform: none;
   margin: 20px 0 0;
 }
 
 .hero-subtitle {
   width: fit-content;
-  background: var(--text-primary);
-  color: var(--text-inverse);
-  padding: 5px 10px;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  border-left: 3px solid var(--accent);
+  padding: 6px 10px 6px 9px;
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 800;
-  letter-spacing: 0.08em;
+  letter-spacing: 0;
   text-transform: uppercase;
 }
 
@@ -425,38 +528,7 @@ async function handleQuickStart() {
   color: var(--text-secondary);
   max-width: 680px;
   font-size: 15px;
-  line-height: 1.75;
-}
-
-.status-metrics {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-}
-
-.metric-tile {
-  border: 1px solid var(--border);
-  background: rgba(255,255,255,0.86);
-  padding: 12px;
-  min-height: 74px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-
-.metric-value {
-  font-family: var(--font-mono);
-  font-size: 20px;
-  font-weight: 800;
-  color: var(--accent);
-}
-
-.metric-label {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 800;
-  color: var(--text-muted);
-  text-transform: uppercase;
+  line-height: 1.7;
 }
 
 .workflow-panel,
@@ -467,18 +539,24 @@ async function handleQuickStart() {
 
 .workflow-list {
   display: grid;
-  gap: 8px;
+  gap: 0;
   margin-top: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
 }
 
 .workflow-item {
   display: grid;
-  grid-template-columns: 42px 86px 1fr;
+  grid-template-columns: 42px 1fr;
   gap: 12px;
   align-items: center;
-  border: 1px solid var(--border);
-  background: rgba(255,255,255,0.9);
-  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  padding: 11px 12px;
+}
+
+.workflow-item:last-child {
+  border-bottom: 0;
 }
 
 .workflow-num,
@@ -489,7 +567,7 @@ async function handleQuickStart() {
 }
 
 .workflow-num {
-  color: var(--text-muted);
+  color: var(--accent);
 }
 
 .workflow-label {
@@ -497,6 +575,7 @@ async function handleQuickStart() {
 }
 
 .workflow-desc {
+  grid-column: 2;
   color: var(--text-secondary);
   font-size: 13px;
   line-height: 1.45;
@@ -510,7 +589,7 @@ async function handleQuickStart() {
 .example-seed {
   text-align: left;
   padding: 9px 10px;
-  background: var(--bg-card);
+  background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
@@ -525,6 +604,7 @@ async function handleQuickStart() {
 .prediction-console {
   display: flex;
   flex-direction: column;
+  background: var(--bg-card);
 }
 
 .console-header {
@@ -532,12 +612,101 @@ async function handleQuickStart() {
 }
 
 .console-header h2 {
-  font-size: 22px;
-  font-weight: 800;
+  font-family: var(--font-editorial);
+  font-size: 28px;
+  font-weight: 700;
   margin-top: 4px;
 }
 
 .qs-subtitle { color: var(--text-muted); font-size: 13px; margin-bottom: 18px; line-height: 1.5; }
+
+.reality-seed-box {
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  margin-bottom: 16px;
+}
+
+.reality-seed-head,
+.reality-actions,
+.reality-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.reality-seed-head h3 {
+  font-family: var(--font-editorial);
+  font-size: 20px;
+  margin-top: 3px;
+}
+
+.reality-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.reality-requirement {
+  min-height: 88px;
+}
+
+.reality-actions {
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.reality-file-btn,
+.reality-clear-btn,
+.reality-generate-btn {
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  padding: 9px 11px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.reality-file-btn input {
+  display: none;
+}
+
+.reality-generate-btn {
+  margin-left: auto;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.reality-generate-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.reality-result {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.reality-result a {
+  color: var(--accent);
+  font-weight: 800;
+  text-decoration: none;
+}
 
 .console-field-label {
   display: block;
@@ -546,11 +715,11 @@ async function handleQuickStart() {
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 800;
-  letter-spacing: 0.12em;
+  letter-spacing: 0;
 }
 
 .qs-drop-zone {
-  border: 1px dashed var(--border-hover);
+  border: 1px dashed var(--accent);
   background: var(--bg-input);
   padding: 24px 20px;
   text-align: center;
@@ -602,8 +771,9 @@ async function handleQuickStart() {
   border: 1px solid var(--border-color); border-radius: var(--radius-sm);
   color: var(--text-primary); padding: 12px; font-size: 14px;
   resize: vertical; box-sizing: border-box;
-  font-family: inherit;
+  font-family: var(--font-body);
   min-height: 132px;
+  line-height: 1.55;
 }
 .qs-textarea:disabled { opacity: 0.4; cursor: not-allowed; }
 .qs-question {
@@ -628,8 +798,8 @@ async function handleQuickStart() {
   text-transform: uppercase;
 }
 .qs-preset-pill.active {
-  background: var(--text-primary);
-  border-color: var(--text-primary);
+  background: var(--accent);
+  border-color: var(--accent);
   color: #FFF;
 }
 .qs-preset-pill:hover:not(.active) {
@@ -647,15 +817,15 @@ async function handleQuickStart() {
   font-family: var(--font-mono);
   font-size: 14px;
   font-weight: 800;
-  letter-spacing: 0.08em;
+  letter-spacing: 0;
   text-transform: uppercase;
   cursor: pointer;
   animation: engine-pulse 2s infinite;
   transition: background 0.2s, border-color 0.2s;
 }
 .quick-start-btn:hover:not(:disabled) {
-  background: var(--accent, #FF6B35);
-  border-color: var(--accent, #FF6B35);
+  background: var(--accent);
+  border-color: var(--accent);
   transform: translateY(-2px);
 }
 .quick-start-btn:disabled {
@@ -752,7 +922,7 @@ async function handleQuickStart() {
   border-color: var(--accent);
   color: var(--accent);
   font-family: var(--font-mono);
-  letter-spacing: 1px;
+  letter-spacing: 0;
   font-weight: 700;
 }
 
@@ -782,10 +952,6 @@ async function handleQuickStart() {
   .home-tools,
   .tool-panel {
     padding: 16px;
-  }
-
-  .status-metrics {
-    grid-template-columns: repeat(2, 1fr);
   }
 
   .workflow-item {

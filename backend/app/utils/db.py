@@ -119,6 +119,9 @@ async def apply_migrations() -> None:
         # Phase 1: simulation_sessions missing columns
         "ALTER TABLE simulation_sessions ADD COLUMN owner_id TEXT",
         "ALTER TABLE simulation_sessions ADD COLUMN scenario_question TEXT DEFAULT ''",
+        "ALTER TABLE simulation_sessions ADD COLUMN domain_pack_id TEXT DEFAULT 'hk_city'",
+        "ALTER TABLE reports ADD COLUMN share_token TEXT",
+        "ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT 0",
         # Phase 1: agent_profiles big5 aliases + goals + nationality
         "ALTER TABLE agent_profiles ADD COLUMN big5_openness REAL",
         "ALTER TABLE agent_profiles ADD COLUMN big5_conscientiousness REAL",

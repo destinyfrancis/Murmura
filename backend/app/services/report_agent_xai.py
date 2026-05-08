@@ -152,14 +152,14 @@ async def handle_ensemble_forecast(session_id: str, params: dict[str, Any], _ipc
     async with get_db() as db:
         if metric:
             cursor = await db.execute(
-                """SELECT metric, p10, p25, p50, p75, p90, mean, std_dev
+                """SELECT metric_name, p10, p25, p50, p75, p90
                    FROM ensemble_results
-                   WHERE session_id = ? AND metric = ?""",
+                   WHERE session_id = ? AND metric_name = ?""",
                 (session_id, metric),
             )
         else:
             cursor = await db.execute(
-                """SELECT metric, p10, p25, p50, p75, p90, mean, std_dev
+                """SELECT metric_name, p10, p25, p50, p75, p90
                    FROM ensemble_results
                    WHERE session_id = ?""",
                 (session_id,),
@@ -169,7 +169,11 @@ async def handle_ensemble_forecast(session_id: str, params: dict[str, Any], _ipc
     if not rows:
         return "No ensemble forecast results found. Run Monte Carlo simulation first."
 
-    results = [dict(r) for r in rows]
+    results = []
+    for row in rows:
+        item = dict(row)
+        item["metric"] = item.pop("metric_name", "")
+        results.append(item)
     return json.dumps(results, indent=2)
 
 

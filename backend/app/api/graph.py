@@ -19,7 +19,7 @@ from backend.app.models.response import APIResponse, GraphBuildResponse
 from backend.app.services.graph_builder import GraphBuilderService
 from backend.app.utils.db import get_db
 from backend.app.utils.logger import get_logger
-from backend.app.utils.prompt_security import sanitize_seed_text
+from backend.app.utils.prompt_security import sanitize_source_seed_text
 
 router = APIRouter(prefix="/graph", tags=["graph"])
 logger = get_logger("api.graph")
@@ -73,7 +73,7 @@ async def build_graph(request: Request, req: GraphBuildRequest) -> APIResponse:
     graph_id = req.session_id or str(uuid.uuid4())
 
     # Detect mode (hk_demographic vs kg_driven) — still used by simulation routing.
-    safe_seed = sanitize_seed_text(req.seed_text) if req.seed_text else ""
+    safe_seed = sanitize_source_seed_text(req.seed_text) if req.seed_text else ""
     if safe_seed.strip():
         from backend.app.services.zero_config import ZeroConfigService  # noqa: PLC0415
 
@@ -303,7 +303,7 @@ async def analyze_seed(request: Request, req: GraphBuildRequest) -> APIResponse:
     if not req.seed_text or not req.seed_text.strip():
         raise HTTPException(status_code=400, detail="seed_text is required")
 
-    safe_seed = sanitize_seed_text(req.seed_text)
+    safe_seed = sanitize_source_seed_text(req.seed_text)
 
     try:
         processor = TextProcessor()

@@ -30,7 +30,7 @@ from backend.app.models.universal_scenario import (
 )
 from backend.app.utils.llm_client import LLMClient
 from backend.app.utils.logger import get_logger
-from backend.app.utils.prompt_security import sanitize_seed_text
+from backend.app.utils.prompt_security import sanitize_prompt_seed_text
 from backend.prompts.scenario_generation_prompts import (
     SCENARIO_GENERATION_SYSTEM,
     SCENARIO_GENERATION_USER,
@@ -110,7 +110,7 @@ class ScenarioGenerator:
     ) -> dict[str, Any]:
         """Build prompts, call the LLM, and return the parsed JSON dict."""
         agent_summaries = _build_agent_summaries(agent_profiles)
-        safe_seed = sanitize_seed_text(seed_text)
+        safe_seed = sanitize_prompt_seed_text(seed_text)
 
         user_content = SCENARIO_GENERATION_USER.format(
             seed_text=safe_seed,

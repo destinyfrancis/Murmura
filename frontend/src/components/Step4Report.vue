@@ -33,7 +33,7 @@ async function handleShare() {
     const res = await shareReport(reportId)
     const token = res.data?.data?.token || res.data?.token
     if (token) {
-      const url = `${window.location.origin}/report/public/${token}`
+      const url = `${window.location.origin}/public/report/${token}`
       await navigator.clipboard.writeText(url)
       shareStatus.value = '分享連結已複製到剪貼板'
     } else {

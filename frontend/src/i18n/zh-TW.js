@@ -513,6 +513,22 @@ export default {
     questionPlaceholder: '（選填）你想預測什麼？例如：哪個陣營最終會佔主導？社會情緒走向如何？',
     launchBtn: '一鍵預測',
     launching: '啟動中...',
+    realitySeed: {
+      label: '現實種子',
+      title: '生成現實種子文件',
+      latest: '抓取最新資料',
+      topic: '議題',
+      topicPlaceholder: '例如：伊朗與美國戰爭風險、武漢大學輿情、某公司競爭格局',
+      requirement: '模擬需求',
+      requirementPlaceholder: '你想模擬甚麼？例如：如果美國直接介入，全球輿論與能源市場會如何反應？',
+      attach: '附加資料',
+      clear: '移除',
+      generate: '生成種子 PDF',
+      generating: '生成中...',
+      ready: '已生成種子檔案，包含 {count} 個來源；內容已放入下方種子文本。',
+      openPdf: '打開 PDF',
+      error: '生成現實種子失敗'
+    },
     customDomain: '自定義領域包',
     dataConnector: '數據連接器',
     godView: '上帝視角',
@@ -604,6 +620,21 @@ export default {
       copy: '構建技術：FastAPI · Vue 3 · OASIS · LanceDB'
     }
   },
+  workflowGraph: {
+    kicker: 'LIVE WORKFLOW',
+    title: '動態代理圖譜',
+    queued: 'queued',
+    seed: 'SEED',
+    graph: 'GRAPH',
+    agents: 'AGENTS',
+    sim: 'SIM',
+    report: 'REPORT',
+    nodes: 'NODES',
+    edges: 'EDGES',
+    agentCount: 'AGENTS',
+    agent: 'Agent',
+    waiting: '等待工作流事件...'
+  },
   process: {
     nav: {
       steps: {
@@ -617,6 +648,7 @@ export default {
     },
     workbench: {
       subtitle: '從種子文本到可追溯報告的五步預測流水線',
+      step: 'STEP',
       session: 'SESSION',
       graph: 'GRAPH',
       preset: 'PRESET',
@@ -627,13 +659,57 @@ export default {
       done: 'DONE',
       active: 'ACTIVE'
     },
+    views: {
+      label: '流程視圖',
+      evidence: '證據',
+      split: '雙欄',
+      workbench: '工作台'
+    },
+    context: {
+      label: '流程脈絡',
+      expectedOutput: '本步輸出',
+      pipeline: '流水線',
+      metrics: {
+        session: 'SESSION',
+        graph: 'GRAPH',
+        mode: 'MODE'
+      },
+      steps: {
+        graph: {
+          title: '先把世界寫成圖譜',
+          desc: '集中處理種子文本、文件與角色資料，抽取實體、關係、隱含持份者，形成後續模擬可引用的知識底稿。',
+          output: '知識圖譜、節點/邊統計、場景類型與可用的 graph id。'
+        },
+        env: {
+          title: '把圖譜轉成可運行環境',
+          desc: '根據圖譜生成代理人、平台身份、輪數、衝擊排程與宏觀場景。初學模式保持精簡，進階模式才展開更多控制。',
+          output: 'simulation session、代理人配置、平台設定與 shock schedule。'
+        },
+        sim: {
+          title: '只觀察當前模擬',
+          desc: '運行 OASIS 多智能體模擬，追蹤回合、行為、信念、派系、衝擊與湧現 hooks。這一步應該像監控一場實驗。',
+          output: '完整 timeline、agent actions、emergence metrics 與完成狀態。'
+        },
+        report: {
+          title: '生成可追溯報告',
+          desc: '用 ReACT 報告流程把模擬數據轉成分析結論，同時保留工具調用、證據標籤與 XAI 側欄。',
+          output: 'report id、Markdown 報告、PDF/分享入口與可點擊證據。'
+        },
+        interact: {
+          title: '進入深度互動',
+          desc: '基於已完成的報告和模擬記憶，訪談代理人、查看角色檔案，並探索 What-If 分支。',
+          output: 'agent interview、memory search、roleplay 對話與後續假設分支。'
+        }
+      }
+    },
     errors: {
       graphFirst: '請先完成圖譜構建',
       envFirst: '請先完成環境設置並啟動模擬',
       simFirst: '模擬完成後才可生成報告',
       reportFirst: '請先生成報告',
       engineUnavailable: '模擬引擎不可用 — 請使用 Docker 以獲得完整功能',
-      engineUnavailableDetail: '模擬引擎不可用 — 請使用 Docker 以獲得完整功能。流程將在環境設定後停止。'
+      engineUnavailableDetail: '模擬引擎不可用 — 請使用 Docker 以獲得完整功能。流程將在環境設定後停止。',
+      workflowPolling: '工作流輪詢失敗'
     }
   },
   step2: {
@@ -651,6 +727,7 @@ export default {
       subtitle: '管理 API 金鑰、模型選擇及系統偏好設定'
     },
     tabs: {
+      navLabel: '設定分頁',
       api: {
         title: 'API 金鑰',
         desc: '設定各 LLM 服務提供商的 API 金鑰。金鑰已加密儲存，顯示時僅顯示尾部 4 碼。',
@@ -659,13 +736,37 @@ export default {
         test: '測試',
         save: '儲存',
         verifying: '⏳ 正在驗證金鑰…',
-        connFailed: '連線失敗'
+        connFailed: '連線失敗',
+        show: 'SHOW',
+        hide: 'HIDE',
+        showKey: '顯示金鑰',
+        hideKey: '隱藏金鑰',
+        keyInputAria: '{provider} API 金鑰',
+        testKeyAria: '測試 {provider} 金鑰',
+        saveKeyAria: '儲存 {provider} 金鑰'
       },
       model: {
         title: '模型選擇',
-        desc: '為每個工作流步驟獨立設定 LLM 模型。儲存後即時生效，無需重啟伺服器。',
+        desc: '選一套主要 LLM 給整個工作流使用。除非你要做成本或品質調校，無需逐步設定。',
         quickApply: '快速套用：',
+        advanced: '進階：逐步模型覆蓋',
         globalFallback: '全域預設（各步驟未設定時使用）',
+        provider: 'Provider',
+        model: 'Model',
+        simple: {
+          eyebrow: '簡化路由',
+          title: '一個模型，跑完整個模擬流程',
+          desc: '現實種子、知識圖譜、模擬代理、報告生成會先共用這個模型；儲存時會清除舊的逐步覆蓋，避免某一步仍然用錯 provider 或失效 model id。',
+          recommended: '使用推薦',
+          save: '套用到全流程',
+          saving: '正在儲存模型路由…',
+          saved: '已套用；全流程會使用這套模型',
+          fillBoth: '請選擇 Provider 並填寫 Model',
+          routingSeed: '現實種子',
+          routingSimulation: '模擬',
+          routingReport: '報告',
+          sameModel: '同一模型'
+        },
         models: {
           sync: '同步模型',
           syncing: '同步中…',

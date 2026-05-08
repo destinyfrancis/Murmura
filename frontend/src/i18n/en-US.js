@@ -538,6 +538,22 @@ export default {
     questionPlaceholder: '(Optional) What do you want to predict? e.g. Which faction will dominate? How will social sentiment evolve?',
     launchBtn: 'One-Click Predict',
     launching: 'Launching...',
+    realitySeed: {
+      label: 'Reality Seed',
+      title: 'Generate Reality Seed',
+      latest: 'Fetch latest',
+      topic: 'TOPIC',
+      topicPlaceholder: 'e.g. Iran-US war risk, Wuhan University public opinion, a company rivalry',
+      requirement: 'SIMULATION REQUIREMENT',
+      requirementPlaceholder: 'What do you want to simulate? e.g. If the US intervenes directly, how will public opinion and energy markets react?',
+      attach: 'Attach material',
+      clear: 'Remove',
+      generate: 'Generate Seed PDF',
+      generating: 'Generating...',
+      ready: 'Seed dossier generated with {count} sources; its seed text is now inserted below.',
+      openPdf: 'Open PDF',
+      error: 'Failed to generate reality seed'
+    },
     customDomain: 'Custom Domain Pack',
     dataConnector: 'Data Connector',
     godView: 'God View',
@@ -629,6 +645,21 @@ export default {
       copy: 'Built with FastAPI · Vue 3 · OASIS · LanceDB'
     }
   },
+  workflowGraph: {
+    kicker: 'LIVE WORKFLOW',
+    title: 'Dynamic Agent Graph',
+    queued: 'queued',
+    seed: 'SEED',
+    graph: 'GRAPH',
+    agents: 'AGENTS',
+    sim: 'SIM',
+    report: 'REPORT',
+    nodes: 'NODES',
+    edges: 'EDGES',
+    agentCount: 'AGENTS',
+    agent: 'Agent',
+    waiting: 'Waiting for workflow events...'
+  },
   process: {
     nav: {
       steps: {
@@ -642,6 +673,7 @@ export default {
     },
     workbench: {
       subtitle: 'A five-step prediction pipeline from seed text to traceable report',
+      step: 'STEP',
       session: 'SESSION',
       graph: 'GRAPH',
       preset: 'PRESET',
@@ -652,13 +684,57 @@ export default {
       done: 'DONE',
       active: 'ACTIVE'
     },
+    views: {
+      label: 'Workflow View',
+      evidence: 'Evidence',
+      split: 'Split',
+      workbench: 'Workbench'
+    },
+    context: {
+      label: 'Workflow Context',
+      expectedOutput: 'Expected Output',
+      pipeline: 'Pipeline',
+      metrics: {
+        session: 'SESSION',
+        graph: 'GRAPH',
+        mode: 'MODE'
+      },
+      steps: {
+        graph: {
+          title: 'Turn the world into a graph first',
+          desc: 'Handle seed text, documents, and persona data here, extracting entities, relationships, and hidden stakeholders for the simulation to reference.',
+          output: 'Knowledge graph, node/edge statistics, scenario type, and usable graph id.'
+        },
+        env: {
+          title: 'Convert the graph into a runnable environment',
+          desc: 'Generate agents, platform identities, round counts, shock schedules, and macro scenarios. Beginner mode stays compact; advanced mode exposes deeper controls.',
+          output: 'Simulation session, agent configuration, platform setup, and shock schedule.'
+        },
+        sim: {
+          title: 'Observe the current simulation only',
+          desc: 'Run the OASIS multi-agent simulation while tracking rounds, actions, beliefs, factions, shocks, and emergence hooks. This step should feel like monitoring an experiment.',
+          output: 'Timeline, agent actions, emergence metrics, and completion state.'
+        },
+        report: {
+          title: 'Generate a traceable report',
+          desc: 'Use the ReACT report flow to turn simulation data into conclusions while preserving tool calls, evidence tags, and the XAI sidebar.',
+          output: 'Report id, Markdown report, PDF/share entry points, and clickable evidence.'
+        },
+        interact: {
+          title: 'Enter deep interaction',
+          desc: 'Use the completed report and simulation memory to interview agents, inspect dossiers, and explore What-If branches.',
+          output: 'Agent interviews, memory search, roleplay dialogue, and follow-up branches.'
+        }
+      }
+    },
     errors: {
       graphFirst: 'Please complete Graph Build first',
       envFirst: 'Please complete Env Setup and start simulation',
       simFirst: 'Report can be generated after simulation completes',
       reportFirst: 'Please generate report first',
       engineUnavailable: 'Simulation engine unavailable — use Docker for full features',
-      engineUnavailableDetail: 'Simulation engine unavailable — use Docker for full features. The workflow will stop after Environment Setup.'
+      engineUnavailableDetail: 'Simulation engine unavailable — use Docker for full features. The workflow will stop after Environment Setup.',
+      workflowPolling: 'Workflow polling failed'
     }
   },
   step2: {
@@ -676,6 +752,7 @@ export default {
       subtitle: 'Manage API keys, model selection, and system preferences'
     },
     tabs: {
+      navLabel: 'Settings sections',
       api: {
         title: 'API Keys',
         desc: 'Configure API keys for LLM providers. Keys are stored encrypted and masked upon display.',
@@ -684,13 +761,37 @@ export default {
         test: 'Test',
         save: 'Save',
         verifying: '⏳ Verifying key...',
-        connFailed: 'Connection failed'
+        connFailed: 'Connection failed',
+        show: 'SHOW',
+        hide: 'HIDE',
+        showKey: 'Show key',
+        hideKey: 'Hide key',
+        keyInputAria: '{provider} API key',
+        testKeyAria: 'Test {provider} key',
+        saveKeyAria: 'Save {provider} key'
       },
       model: {
         title: 'Model Selection',
-        desc: 'Configure LLM models per workflow step. Changes apply immediately, no restart required.',
+        desc: 'Choose one primary LLM for the whole workflow. Per-step routing is only needed for cost or quality tuning.',
         quickApply: 'Quick apply:',
+        advanced: 'Advanced: per-step overrides',
         globalFallback: 'Global Defaults (used when no per-step model is set)',
+        provider: 'Provider',
+        model: 'Model',
+        simple: {
+          eyebrow: 'Simple routing',
+          title: 'One model for the full simulation flow',
+          desc: 'Reality Seed, graph build, simulation agents, and report generation will share this model. Saving clears old per-step overrides so one stale provider or invalid model id cannot break a step.',
+          recommended: 'Use recommended',
+          save: 'Apply to workflow',
+          saving: 'Saving model routing...',
+          saved: 'Applied; the full workflow now uses this model',
+          fillBoth: 'Choose a provider and enter a model',
+          routingSeed: 'Reality Seed',
+          routingSimulation: 'Simulation',
+          routingReport: 'Report',
+          sameModel: 'Same model'
+        },
         models: {
           sync: 'Sync models',
           syncing: 'Syncing...',

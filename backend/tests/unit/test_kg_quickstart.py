@@ -54,7 +54,7 @@ async def test_run_quick_start_kg_driven_mode():
         patch("backend.app.api.simulation.generate_agents", mock_gen_agents),
         patch("backend.app.api.simulation.store_universal_agent_profiles", new_callable=AsyncMock),
         patch("backend.app.models.simulation_config.resolve_preset", return_value=MagicMock(agents=100, rounds=30)),
-        patch("backend.app.utils.prompt_security.sanitize_seed_text", side_effect=lambda x: x),
+        patch("backend.app.utils.prompt_security.sanitize_source_seed_text", side_effect=lambda x: x),
         patch("asyncio.create_task"),
     ):
         result = await _run_quick_start("USA and Iran enter full military conflict.", "predict oil prices", "standard")
@@ -104,7 +104,7 @@ async def test_run_quick_start_hk_mode_unchanged():
         patch("backend.app.api.simulation.MacroController", return_value=mock_macro),
         patch("backend.app.api.simulation.ProfileGenerator", return_value=mock_profile_gen),
         patch("backend.app.models.simulation_config.resolve_preset", return_value=MagicMock(agents=100, rounds=15)),
-        patch("backend.app.utils.prompt_security.sanitize_seed_text", side_effect=lambda x: x),
+        patch("backend.app.utils.prompt_security.sanitize_source_seed_text", side_effect=lambda x: x),
         patch("backend.app.api.simulation.store_agent_profiles", new_callable=AsyncMock),
         patch("backend.app.api.simulation.store_activity_profiles", new_callable=AsyncMock),
         patch("asyncio.to_thread", new_callable=AsyncMock),

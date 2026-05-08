@@ -58,6 +58,7 @@ function goHome() {
   --accent-danger: #B91C1C;
   --accent-success:#047857;
   --accent-yellow: #B45309;
+  --accent-blue-note: var(--accent);
 
   --text-primary:   #050505;
   --text-secondary: #525252;
@@ -70,6 +71,7 @@ function goHome() {
   --font-mono: 'JetBrains Mono', monospace;
   --font-sans: 'Space Grotesk', 'Noto Sans HK', sans-serif;
   --font-body: 'Inter', 'Noto Sans HK', system-ui, sans-serif;
+  --font-editorial: var(--font-sans);
 
   /* Legacy aliases */
   --bg-primary:      var(--bg-app);
@@ -82,8 +84,8 @@ function goHome() {
   --accent-orange:   var(--accent-warn);
   --accent-red:      var(--accent-danger);
   --accent-cyan:     var(--accent-hover);
-  --accent-purple:   #7C3AED;
-  --accent-pink:     #EC4899;
+  --accent-purple:   var(--accent-blue-note);
+  --accent-pink:     var(--accent);
   --accent-blue-light: var(--accent-subtle);
   --accent-rgb: 255, 107, 53;
 
@@ -267,7 +269,7 @@ a, button, input, select, textarea {
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 800;
-  letter-spacing: 0.12em;
+  letter-spacing: 0;
   text-transform: uppercase;
 }
 
@@ -285,7 +287,7 @@ a, button, input, select, textarea {
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 800;
-  letter-spacing: 0.06em;
+  letter-spacing: 0;
   text-transform: uppercase;
 }
 
@@ -361,7 +363,7 @@ a, button, input, select, textarea {
   font-size: 18px;
   font-weight: 800;
   font-family: var(--font-mono);
-  letter-spacing: 2px;
+  letter-spacing: 0;
   text-transform: uppercase;
   color: var(--text-inverse);
 }
@@ -376,7 +378,7 @@ a, button, input, select, textarea {
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 800;
-  letter-spacing: 0.08em;
+  letter-spacing: 0;
   padding: 8px 10px;
   border-radius: var(--radius-xs);
   text-transform: uppercase;

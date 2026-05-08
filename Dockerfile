@@ -21,10 +21,8 @@ RUN apt-get update && \
 
 # Install Python dependencies
 COPY pyproject.toml ./
-RUN pip install --upgrade pip && pip install .
-
-# Copy source
 COPY backend/ ./backend/
+RUN pip install --upgrade pip && pip install ".[simulation]"
 
 # Non-root user
 RUN adduser --disabled-password --gecos "" morai && \

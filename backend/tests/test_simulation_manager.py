@@ -96,7 +96,13 @@ async def sim_db(tmp_path):
         finally:
             await conn.close()
 
-    with patch("backend.app.services.simulation_manager.get_db", _fake_get_db):
+    with (
+        patch("backend.app.services.simulation_manager.get_db", _fake_get_db),
+        patch(
+            "backend.app.services.oasis_compatibility.get_capabilities",
+            return_value={"simulation": True, "simulation_available": True, "reason": ""},
+        ),
+    ):
         # Also open a long-lived conn for assertions inside tests.
         db = await aiosqlite.connect(db_path)
         db.row_factory = aiosqlite.Row
@@ -491,6 +497,27 @@ class TestStartSession:
         await sim_db.commit()
 
         await mgr.start_session(sid)
+        mock_runner.run.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_start_marks_failed_when_oasis_unavailable(self, sim_db, mock_runner, valid_request, tmp_path):
+        mgr = SimulationManager(runner=mock_runner)
+        with patch("backend.app.services.simulation_manager._PROJECT_ROOT", tmp_path):
+            created = await mgr.create_session(valid_request)
+        sid = created["session_id"]
+
+        with patch(
+            "backend.app.services.oasis_compatibility.get_capabilities",
+            return_value={"simulation": False, "simulation_available": False, "reason": "oasis_missing"},
+        ):
+            with pytest.raises(RuntimeError, match="simulation_engine_unavailable:oasis_missing"):
+                await mgr.start_session(sid)
+
+        row = await (
+            await sim_db.execute("SELECT status, error_message FROM simulation_sessions WHERE id = ?", (sid,))
+        ).fetchone()
+        assert row["status"] == "failed"
+        assert "oasis_missing" in row["error_message"]
         mock_runner.run.assert_not_awaited()
 
 

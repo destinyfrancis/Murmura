@@ -19,6 +19,8 @@ from backend.app.utils.logger import setup_logging
 # Router module names under backend.app.api
 _ROUTER_MODULES = (
     "auth",
+    "workflow",
+    "reality_seed",
     "graph",
     "simulation_macro",
     "simulation_branches",

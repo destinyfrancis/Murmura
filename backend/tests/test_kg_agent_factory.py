@@ -458,7 +458,7 @@ class TestGenerateFromKg:
             profiles[0].name = "mutated"  # type: ignore[misc]
 
     @pytest.mark.asyncio
-    async def test_raises_when_llm_generation_fails(self):
+    async def test_falls_back_when_llm_generation_fails(self):
         filter_response = {"eligible": [{"node_id": "n1"}], "excluded": []}
 
         mock_llm = MagicMock()
@@ -466,12 +466,16 @@ class TestGenerateFromKg:
         mock_llm.chat_json = AsyncMock(side_effect=[filter_response, RuntimeError("LLM down")])
         factory = KGAgentFactory(llm_client=mock_llm)
 
-        with pytest.raises(RuntimeError, match="LLM profile generation failed"):
-            await factory.generate_from_kg(
-                nodes=_SAMPLE_NODES,
-                edges=_SAMPLE_EDGES,
-                seed_text="scenario",
-            )
+        profiles = await factory.generate_from_kg(
+            nodes=_SAMPLE_NODES,
+            edges=_SAMPLE_EDGES,
+            seed_text="scenario",
+            target_count=2,
+        )
+
+        assert len(profiles) == 2
+        assert all(isinstance(profile, UniversalAgentProfile) for profile in profiles)
+        assert mock_llm.chat_json.await_count == 2
 
     @pytest.mark.asyncio
     async def test_falls_back_to_all_nodes_when_no_eligible(self):
@@ -690,10 +694,11 @@ class TestFullPipeline:
             reader = csv.DictReader(fh)
             rows = list(reader)
 
-        assert len(rows) == 1
-        assert rows[0]["userid"] == "supreme_leader"
-        assert "determined leader" in rows[0]["user_char"]
-        assert len(rows[0]["username"]) > 6
+        assert len(rows) == 5
+        primary = next(row for row in rows if row["userid"] == "supreme_leader")
+        assert "determined leader" in primary["user_char"]
+        assert len(primary["username"]) > 6
+        assert all(row["userid"] for row in rows)
 
     @pytest.mark.asyncio
     async def test_pipeline_with_multiple_agents(self, tmp_path):

@@ -42,7 +42,7 @@ _ALIAS_MAP: dict[str, frozenset[str]] = {
 
 from backend.app.utils.llm_client import LLMClient, get_step_provider_model
 from backend.app.utils.logger import get_logger
-from backend.app.utils.prompt_security import sanitize_seed_text
+from backend.app.utils.prompt_security import sanitize_prompt_seed_text
 from backend.prompts.ontology_prompts import (
     ENTITY_EXTRACTION_SYSTEM,
     ENTITY_EXTRACTION_USER,
@@ -215,7 +215,7 @@ class EntityExtractor:
                 "content": ENTITY_EXTRACTION_USER.format(
                     entity_types=", ".join(entity_types),
                     relation_types=", ".join(relation_types),
-                    seed_text=sanitize_seed_text(seed_text),
+                    seed_text=sanitize_prompt_seed_text(seed_text),
                 ),
             },
         ]

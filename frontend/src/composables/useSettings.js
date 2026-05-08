@@ -57,6 +57,7 @@ const settings = reactive({
 
 const saveStatus = ref('idle') // 'idle' | 'saving' | 'saved' | 'error'
 const isLoaded = ref(false)
+let _isHydratingBackend = false
 let _debounceTimer = null
 
 // ── UI Prefs: apply immediately from localStorage on module load ───────────────
@@ -116,6 +117,7 @@ watch(
   _collectBackendSettings,
   () => {
     if (!isLoaded.value) return // Don't save during initial hydration
+    if (_isHydratingBackend) return
     _scheduleSave()
   },
   { deep: true }
@@ -148,6 +150,7 @@ export function useSettings() {
    */
   async function loadSettings() {
     if (isLoaded.value) return
+    _isHydratingBackend = true
     try {
       const res = await getSettings()
       const data = res.data
@@ -158,6 +161,11 @@ export function useSettings() {
       isLoaded.value = true
     } catch (err) {
       console.error('[useSettings] loadSettings failed:', err)
+      _isHydratingBackend = false
+    } finally {
+      Promise.resolve().then(() => {
+        _isHydratingBackend = false
+      })
     }
   }
 

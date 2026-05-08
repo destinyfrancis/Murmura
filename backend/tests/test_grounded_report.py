@@ -89,3 +89,78 @@ async def test_grounded_market_report_contains_standard_sections_and_evidence(te
     assert "kg_edges:" in content
     assert report["charts_data"]["evidence_bundle"]
     assert report["key_findings"]
+
+
+@pytest.mark.asyncio
+async def test_grounded_report_without_actions_uses_graph_scope_forecast(test_db):
+    session_id = "grounded_report_no_actions"
+    graph_id = "grounded_report_graph_scope"
+    await test_db.execute(
+        """
+        INSERT INTO simulation_sessions
+            (id, name, sim_mode, seed_text, scenario_type, graph_id,
+             agent_count, round_count, llm_provider, llm_model, oasis_db_path,
+             current_round)
+        VALUES (?, 'No Actions Report', 'kg_driven', '能源衝突影響航運與保險',
+                'global_macro', ?, 2, 3, 'test', 'test-model', '', 0)
+        """,
+        (session_id, graph_id),
+    )
+    await test_db.execute(
+        """
+        INSERT INTO simulation_sessions
+            (id, name, sim_mode, seed_text, scenario_type, graph_id,
+             agent_count, round_count, llm_provider, llm_model, oasis_db_path)
+        VALUES (?, 'Graph Holder', 'kg_driven', '能源衝突影響航運與保險',
+                'global_macro', ?, 0, 0, 'system', 'none', '')
+        """,
+        (graph_id, graph_id),
+    )
+    await test_db.executemany(
+        """
+        INSERT INTO kg_nodes
+            (id, session_id, entity_type, title, description, properties,
+             confidence_score)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            ("energy", graph_id, "EconomicActor", "能源公司", "供應風險", "{}", 0.9),
+            ("shipping", graph_id, "Company", "航運公司", "航線改道", "{}", 0.85),
+            (
+                "insurer",
+                graph_id,
+                "Institution",
+                "保險市場",
+                "保費上升",
+                '{"source":"implicit_discovery","evidence_phrase":"保險費暴升"}',
+                0.8,
+            ),
+        ],
+    )
+    await test_db.execute(
+        """
+        INSERT INTO kg_edges
+            (session_id, source_id, target_id, relation_type, description,
+             source_text, evidence_span, confidence_score)
+        VALUES (?, 'energy', 'shipping', 'AFFECTED_BY', '能源衝突影響航運',
+                '能源衝突影響航運與保險', '{"start":0,"end":12}', 0.9)
+        """,
+        (graph_id,),
+    )
+    await test_db.commit()
+
+    @asynccontextmanager
+    async def _mock_get_db():
+        yield test_db
+
+    with (
+        patch("backend.app.services.grounded_report.get_db", _mock_get_db),
+        patch("backend.app.services.graph_rag_query.get_db", _mock_get_db),
+    ):
+        bundle = await GroundedReportBuilder().build(session_id, "social_forecast", question="能源衝突")
+
+    content = bundle.content_markdown
+    assert "graph-based scenario forecast" in content
+    assert "## Scenario Outcome Matrix" in content
+    assert "Nodes: 3" in content
+    assert "kg_edges:" in content

@@ -224,16 +224,26 @@ LLM_URLS: dict[str, str] = {
     "together": "https://api.together.xyz/v1",
     "openrouter": "https://openrouter.ai/api/v1",
 }
+LLM_ENV_KEYS: dict[str, str] = {
+    "fireworks": "FIREWORKS_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "together": "TOGETHER_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+}
 
 
 def build_model(config: dict[str, Any]) -> Any:
     provider = config.get("llm_provider", "openrouter")
     model_name = config.get("llm_model", "deepseek/deepseek-v3.2")
-    api_key = config.get("llm_api_key") or os.environ.get("OPENROUTER_API_KEY", "")
+    if provider == "fireworks" and model_name == "deepseek/deepseek-v3.2":
+        model_name = "accounts/fireworks/models/deepseek-v3p2"
+    env_key = LLM_ENV_KEYS.get(provider, "OPENROUTER_API_KEY")
+    api_key = config.get("llm_api_key") or os.environ.get(env_key, "") or os.environ.get("OPENROUTER_API_KEY", "")
     base_url = config.get("llm_base_url") or LLM_URLS.get(provider, "")
 
     if not api_key:
-        raise ValueError("llm_api_key is required in config")
+        raise ValueError(f"API key is required for provider '{provider}'")
     if not base_url:
         raise ValueError(f"No base_url for provider '{provider}'")
 
@@ -244,6 +254,35 @@ def build_model(config: dict[str, Any]) -> Any:
         model_config_dict={"temperature": 0.7, "max_tokens": 4096},
         api_key=api_key,
     )
+
+
+def _max_post_id(db_path: str) -> int:
+    if not Path(db_path).exists():
+        return 0
+    try:
+        conn = sqlite3.connect(db_path, timeout=5)
+        row = conn.execute("SELECT COALESCE(MAX(post_id), 0) FROM post").fetchone()
+        conn.close()
+        return int(row[0] or 0)
+    except Exception as exc:
+        logger.warning("max_post_id failed: %s", exc)
+        return 0
+
+
+def _effective_action_count(db_path: str) -> int:
+    """Count user-visible actions, excluding setup and passive refresh traces."""
+    if not Path(db_path).exists():
+        return 0
+    try:
+        conn = sqlite3.connect(db_path, timeout=5)
+        row = conn.execute(
+            "SELECT COUNT(*) FROM trace WHERE action NOT IN ('sign_up', 'refresh')"
+        ).fetchone()
+        conn.close()
+        return int(row[0] or 0)
+    except Exception as exc:
+        logger.warning("effective_action_count failed: %s", exc)
+        return 0
 
 
 # ---------------------------------------------------------------------------
@@ -360,6 +399,7 @@ async def run_simulation(config: dict[str, Any]) -> None:
     llm_actions = {agent: LLMAction() for _, agent in all_agents_list}
 
     total_actions = 0
+    runtime_errors: list[str] = []
     last_round = 0
     last_post_id = 0
     last_trace_ts = ""
@@ -374,20 +414,33 @@ async def run_simulation(config: dict[str, Any]) -> None:
         # Shocks first
         for shock in get_shocks_for_round(shocks, round_num):
             await inject_shock(env, agent_graph, shock)
+            last_post_id = max(last_post_id, _max_post_id(db_path))
 
         # Normal LLM round
         try:
+            before_actions = _effective_action_count(db_path)
             await env.step(llm_actions)
-            total_actions += agent_count
+            round_action_count = _effective_action_count(db_path) - before_actions
+            if round_action_count <= 0:
+                raise RuntimeError("No effective LLM actions were recorded; model call likely failed")
+            total_actions += round_action_count
             # Emit new agent posts from OASIS DB for this round
             last_post_id = emit_new_posts(db_path, round_num, last_post_id)
             # Emit non-content actions from trace table (follow, like, lurk, etc.)
             last_trace_ts = emit_new_actions(db_path, round_num, last_trace_ts)
-            emit_progress(round_num, round_count, f"Round {round_num}/{round_count} done — {agent_count} actions")
+            emit_progress(
+                round_num,
+                round_count,
+                f"Round {round_num}/{round_count} done — {round_action_count} actions",
+            )
             logger.info("Round %d/%d complete", round_num, round_count)
         except Exception as exc:
             logger.error("Round %d error: %s", round_num, exc)
+            runtime_errors.append(f"round {round_num}: {exc}")
             emit("error", {"platform": "twitter", "round": round_num, "message": str(exc)})
+
+    if runtime_errors and total_actions == 0:
+        raise RuntimeError("; ".join(runtime_errors[:3]))
 
     emit(
         "complete",
