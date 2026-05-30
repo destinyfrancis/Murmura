@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from typing import Any
 
 from backend.app.utils.logger import get_logger
@@ -125,6 +126,7 @@ class KGDrivenHooksMixin:
                 cursor = await db.execute(
                     """SELECT id, oasis_username AS name,
                               json_extract(properties, '$.role') AS role,
+                              json_extract(properties, '$.entity_type') AS entity_type,
                               json_extract(properties, '$.faction') AS faction,
                               is_stakeholder,
                               activity_level
@@ -141,6 +143,7 @@ class KGDrivenHooksMixin:
                         "id": r["id"],
                         "name": r["name"] or "",
                         "role": r["role"] or "",
+                        "entity_type": r["entity_type"] or "",
                         "faction": r["faction"] or "none",
                         "is_stakeholder": bool(r["is_stakeholder"]) if r["is_stakeholder"] else False,
                         "activity_level": float(r["activity_level"]) if r["activity_level"] else 0.5,
@@ -166,7 +169,10 @@ class KGDrivenHooksMixin:
                             from backend.app.models.universal_agent_profile import (
                                 UniversalAgentProfile,  # noqa: PLC0415
                             )
-                            from backend.app.services.scenario_generator import ScenarioGenerator  # noqa: PLC0415
+                            from backend.app.services.scenario_generator import (  # noqa: PLC0415
+                                ScenarioGenerator,
+                                build_fallback_scenario_config,
+                            )
 
                             # Resolve graph_id for this session
                             gcursor = await db.execute(
@@ -202,7 +208,7 @@ class KGDrivenHooksMixin:
                                     id=a["id"],
                                     name=a["name"],
                                     role=a["role"],
-                                    entity_type="Person",
+                                    entity_type=a.get("entity_type") or "Actor",
                                     persona="",
                                     goals=(),
                                     capabilities=(),
@@ -214,7 +220,23 @@ class KGDrivenHooksMixin:
                             ]
 
                             gen = ScenarioGenerator()
-                            scenario_cfg = await gen.generate(seed_desc, kg_nodes, kg_edges, agent_profiles)
+                            try:
+                                scenario_timeout_s = float(os.environ.get("KG_SCENARIO_TIMEOUT_S", "30"))
+                                scenario_cfg = await asyncio.wait_for(
+                                    gen.generate(seed_desc, kg_nodes, kg_edges, agent_profiles),
+                                    timeout=max(1.0, scenario_timeout_s),
+                                )
+                            except Exception:
+                                logger.warning(
+                                    "ScenarioGenerator failed for session %s — using deterministic fallback config",
+                                    session_id,
+                                    exc_info=True,
+                                )
+                                scenario_cfg = build_fallback_scenario_config(
+                                    seed_text=seed_desc,
+                                    kg_nodes=kg_nodes,
+                                    agent_profiles=agent_profiles,
+                                )
                             if scenario_cfg and scenario_cfg.metrics:
                                 self._kg_sessions[session_id].active_metrics = {m.id: 0.5 for m in scenario_cfg.metrics}
                                 metric_keys = list(self._kg_sessions[session_id].active_metrics.keys())
@@ -475,8 +497,11 @@ class KGDrivenHooksMixin:
         active_metric_keys = tuple(baseline_metrics.keys())
         recent_event_contents = [e.content for e in current_events]
 
-        concurrency = getattr(getattr(self, "_preset", None), "hook_config", None)
-        concurrency = getattr(concurrency, "llm_concurrency", 50) if concurrency else 50
+        concurrency_cfg = getattr(getattr(self, "_preset", None), "hook_config", None)
+        concurrency = getattr(concurrency_cfg, "llm_concurrency", 50) if concurrency_cfg else 50
+        env_concurrency = int(os.environ.get("SIMULATION_CONCURRENCY_LIMIT", "0") or "0")
+        if env_concurrency > 0:
+            concurrency = env_concurrency
         semaphore = asyncio.Semaphore(concurrency)
 
         async def _deliberate_one(agent: dict) -> Any:
@@ -1715,4 +1740,3 @@ class KGDrivenHooksMixin:
             logger.info("Micro-Macro Loop: Written %d belief edges for session %s", len(final_edges), session_id)
         except Exception:
             logger.exception("Micro-Macro Loop failed for session %s", session_id)
-

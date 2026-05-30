@@ -11,6 +11,10 @@ export function createSimulation(data) {
   return api.post('/simulation/create', payload)
 }
 
+export function runSimulationPreflight(data) {
+  return api.post('/simulation/preflight', data)
+}
+
 export function startSimulation(data) {
   return api.post('/simulation/start', data)
 }
@@ -259,4 +263,12 @@ export function getExternalFeed(forceRefresh = false) {
 
 export function getConfidenceScore(sessionId) {
   return api.get(`/simulation/${sessionId}/confidence-score`)
+}
+
+export function getConfidenceReport(sessionId) {
+  return api.get(`/simulation/${sessionId}/confidence-report`)
+}
+
+export function getSimulationArtifacts(sessionId) {
+  return api.get(`/simulation/${sessionId}/artifacts`)
 }

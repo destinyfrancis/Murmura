@@ -19,6 +19,10 @@ const graphEvent = computed(() =>
   [...events.value].reverse().find((event) => event.event_type === 'graph_built')
 )
 
+const latestSimulationEvent = computed(() =>
+  [...events.value].reverse().find((event) => event.step === 'simulation' || event.event_type === 'simulation_status')
+)
+
 const agentNames = computed(() => {
   const names = agentsEvent.value?.payload?.agents || []
   if (names.length) return names
@@ -30,6 +34,9 @@ const graphStats = computed(() => ({
   nodes: graphEvent.value?.payload?.node_count || artifacts.value.node_count || 0,
   edges: graphEvent.value?.payload?.edge_count || artifacts.value.edge_count || 0,
   agents: agentsEvent.value?.payload?.agent_count || agentNames.value.length,
+  status: latestSimulationEvent.value?.payload?.status || props.workflow?.status || 'queued',
+  actions: latestSimulationEvent.value?.payload?.action_count || artifacts.value.action_count || 0,
+  failure: latestSimulationEvent.value?.payload?.failure_reason || artifacts.value.failure_reason || '',
 }))
 
 const stageNodes = computed(() => [
@@ -106,7 +113,20 @@ const timeline = computed(() => events.value.slice(-8).reverse())
           <span>{{ t('workflowGraph.agentCount') }}</span>
           <strong>{{ graphStats.agents }}</strong>
         </div>
+        <div>
+          <span>{{ t('workflowGraph.simStatus') }}</span>
+          <strong>{{ graphStats.status }}</strong>
+        </div>
+        <div>
+          <span>{{ t('workflowGraph.actions') }}</span>
+          <strong>{{ graphStats.actions }}</strong>
+        </div>
       </div>
+    </div>
+
+    <div v-if="graphStats.failure" class="wf-failure">
+      <span>{{ t('workflowGraph.failure') }}</span>
+      <strong>{{ graphStats.failure }}</strong>
     </div>
 
     <div class="wf-log" aria-live="polite">
@@ -268,6 +288,23 @@ const timeline = computed(() => events.value.slice(-8).reverse())
   padding-top: 10px;
   display: grid;
   gap: 6px;
+}
+
+.wf-failure {
+  border-top: 1px solid var(--border);
+  padding: 10px 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--accent-danger);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.wf-failure strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .wf-log-row {

@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
+from backend.app.config import get_settings
 from backend.app.models.response import APIResponse
 from backend.app.utils.db import get_db
 from backend.app.utils.logger import get_logger
@@ -29,8 +30,9 @@ logger = get_logger("api.auth")
 
 _limiter = Limiter(key_func=get_remote_address)
 
-_raw_secret = os.environ.get("AUTH_SECRET_KEY")
-_debug_mode = os.environ.get("DEBUG", "false").lower() == "true"
+_settings = get_settings()
+_raw_secret = os.environ.get("AUTH_SECRET_KEY") or _settings.AUTH_SECRET_KEY
+_debug_mode = os.environ.get("DEBUG", str(_settings.DEBUG)).lower() == "true"
 
 if not _raw_secret:
     if _debug_mode:

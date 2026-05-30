@@ -5,6 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from pydantic_settings import BaseSettings
+from dotenv import load_dotenv
+
+
+load_dotenv(override=False)
 
 
 def _default_database_path() -> str:

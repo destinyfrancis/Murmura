@@ -44,6 +44,7 @@ class ViralityScorer:
             """SELECT id, agent_id, round_number
                FROM simulation_actions
                WHERE session_id = ?
+                 AND agent_id IS NOT NULL
                  AND (parent_action_id IS NULL OR parent_action_id = 0)
                  AND action_type IN ('create_post','post')
                ORDER BY id""",
@@ -61,6 +62,7 @@ class ViralityScorer:
                       COALESCE(spread_depth, 0) AS depth
                FROM simulation_actions
                WHERE session_id = ?
+                 AND agent_id IS NOT NULL
                  AND action_type IN ('create_post','post','repost','quote_post')
                ORDER BY id""",
             (session_id,),

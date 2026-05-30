@@ -16,6 +16,7 @@ Pipeline:
 from __future__ import annotations
 
 import json
+import os
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -100,7 +101,11 @@ class ImplicitStakeholderService:
 
         try:
             raw_actors = await self._call_llm(seed_text, existing_nodes)
-        except Exception:
+        except Exception as exc:
+            if os.environ.get("MURMURA_STRICT_LIVE") == "1":
+                raise RuntimeError(
+                    f"oasis_runtime_error: implicit_stakeholder_discovery_failed:{exc.__class__.__name__}"
+                ) from exc
             logger.exception("ImplicitStakeholderService: LLM call failed for graph %s", graph_id)
             return DiscoveryResult(stakeholders=(), nodes_added=0)
 
@@ -261,6 +266,9 @@ class ImplicitStakeholderService:
     ) -> list[dict[str, Any]]:
         """Call LLM and return raw list of implied actor dicts."""
         safe_seed = sanitize_prompt_seed_text(seed_text)
+        strict_live = os.environ.get("MURMURA_STRICT_LIVE") == "1"
+        default_max = "8" if strict_live else "30"
+        max_actors = max(1, min(_MAX_IMPLICIT, int(os.environ.get("IMPLICIT_STAKEHOLDER_MAX_ACTORS", default_max))))
         node_summaries = [
             {
                 "id": n.get("id"),
@@ -269,19 +277,55 @@ class ImplicitStakeholderService:
             }
             for n in existing_nodes
         ]
-        user_content = IMPLICIT_STAKEHOLDER_USER.format(
-            seed_text=safe_seed,
-            node_count=len(node_summaries),
-            existing_nodes_json=json.dumps(node_summaries, ensure_ascii=False, indent=2),
-        )
-        messages = [
-            {"role": "system", "content": IMPLICIT_STAKEHOLDER_SYSTEM},
-            {"role": "user", "content": user_content},
-        ]
+        if strict_live:
+            existing_labels = [
+                str(item.get("label") or item.get("id") or "")[:80]
+                for item in node_summaries
+                if item.get("label") or item.get("id")
+            ]
+            user_content = (
+                "Seed text:\n"
+                f"{safe_seed}\n\n"
+                "Existing actors already represented:\n"
+                f"{json.dumps(existing_labels[:120], ensure_ascii=False, separators=(',', ':'))}\n\n"
+                f"Return at most {max_actors} important missing decision-making actors. "
+                "Only include actors grounded in the seed text. Keep every string under 90 characters. "
+                "Return valid JSON only with this exact shape: "
+                '{"implied_actors":[{"id":"slug","name":"name","entity_type":"Organization",'
+                '"role":"short role","relevance_reason":"short reason","why_missing":"short reason",'
+                '"evidence_phrase":"seed phrase","inferred_role":"short action","confidence":0.5}]}'
+            )
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You discover missing stakeholders for simulations. "
+                        "Output compact valid JSON only. No markdown. No trailing commas."
+                    ),
+                },
+                {"role": "user", "content": user_content},
+            ]
+        else:
+            user_content = IMPLICIT_STAKEHOLDER_USER.format(
+                seed_text=safe_seed,
+                node_count=len(node_summaries),
+                existing_nodes_json=json.dumps(node_summaries, ensure_ascii=False, separators=(",", ":")),
+            )
+            user_content += (
+                f"\n\nSTRICT OUTPUT LIMIT: Return at most {max_actors} implied actors. "
+                "Use compact one-sentence fields, no markdown, no trailing commas, valid JSON only."
+            )
+            messages = [
+                {"role": "system", "content": IMPLICIT_STAKEHOLDER_SYSTEM},
+                {"role": "user", "content": user_content},
+            ]
         _s1_provider, _s1_model = get_step_provider_model(1)
-        raw = await self._llm.chat_json(messages, max_tokens=4096, temperature=0.3,
+        token_default = "2048" if strict_live else "3072"
+        max_tokens = max(1024, int(os.environ.get("IMPLICIT_STAKEHOLDER_MAX_TOKENS", token_default)))
+        raw = await self._llm.chat_json(messages, max_tokens=max_tokens, temperature=0.1,
                                         provider=_s1_provider, model=_s1_model)
-        return raw.get("implied_actors", [])
+        raw_actors = raw.get("implied_actors", [])
+        return raw_actors[:max_actors]
 
     async def _load_kg_nodes(self, graph_id: str) -> list[dict[str, Any]]:
         """Return lightweight node dicts from DB for deduplication."""

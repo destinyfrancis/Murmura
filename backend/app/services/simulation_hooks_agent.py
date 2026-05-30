@@ -189,6 +189,26 @@ class AgentHooksMixin:
                 logger.warning("Failed to build username mapping for session=%s", session_id)
                 username_to_agent_id = {}
 
+        if not username_to_agent_id:
+            logger.debug(
+                "Skipping memory summarization for session=%s round=%d: no agent mapping",
+                session_id,
+                round_number,
+            )
+            try:
+                from backend.app.services.simulation_memory_graph_loop import (  # noqa: PLC0415
+                    SimulationMemoryGraphLoop,
+                )
+
+                await SimulationMemoryGraphLoop().process_round(session_id, round_number)
+            except Exception:
+                logger.exception(
+                    "deterministic memory graph loop failed session=%s round=%d",
+                    session_id,
+                    round_number,
+                )
+            return
+
         try:
             from backend.app.services.agent_memory import AgentMemoryService  # noqa: PLC0415
 
@@ -621,12 +641,14 @@ class AgentHooksMixin:
                         AVG(CASE sentiment WHEN 'positive' THEN 1.0 WHEN 'negative' THEN -1.0 ELSE 0.0 END) AS sent_avg,
                         COUNT(*) AS post_count
                     FROM simulation_actions
-                    WHERE session_id = ? AND round_number = ?
+                    WHERE session_id = ? AND round_number = ? AND agent_id IS NOT NULL
                     GROUP BY agent_id""",
                     (session_id, round_num),
                 )
                 sentiment_rows = await cursor2.fetchall()
                 for row in sentiment_rows:
+                    if row[0] is None:
+                        continue
                     aid = int(row[0])
                     feed_data[aid] = {
                         "sentiment_avg": float(row[1] or 0.0),
@@ -747,13 +769,15 @@ class AgentHooksMixin:
                 # Load feed posts for belief update
                 cursor = await db4.execute(
                     """SELECT agent_id, content FROM simulation_actions
-                    WHERE session_id = ? AND round_number = ?""",
+                    WHERE session_id = ? AND round_number = ? AND agent_id IS NOT NULL""",
                     (session_id, round_num),
                 )
                 action_rows = await cursor.fetchall()
 
             feed_data: dict[int, list[str]] = {}
             for row in action_rows:
+                if row[0] is None:
+                    continue
                 aid = int(row[0])
                 content = str(row[1] or "")
                 feed_data.setdefault(aid, []).append(content)

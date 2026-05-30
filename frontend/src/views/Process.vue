@@ -44,6 +44,7 @@ const steps = computed(() => [
 ])
 
 const currentStep = ref(1)
+const advancedViewsEnabled = computed(() => route.query.advanced === '1')
 
 const currentStepMeta = computed(() => steps.value[currentStep.value - 1] || steps.value[0])
 const currentStepNumber = computed(() => String(currentStep.value).padStart(2, '0'))
@@ -87,9 +88,13 @@ const stepSlugs = ['graph', 'env', 'sim', 'report', 'interact']
 const currentStepSlug = computed(() => stepSlugs[currentStep.value - 1] || 'graph')
 
 const viewModes = computed(() => [
-  { key: 'evidence', label: t('process.views.evidence') },
-  { key: 'split', label: t('process.views.split') },
   { key: 'workbench', label: t('process.views.workbench') },
+  ...(advancedViewsEnabled.value
+    ? [
+        { key: 'evidence', label: t('process.views.evidence') },
+        { key: 'split', label: t('process.views.split') },
+      ]
+    : []),
 ])
 
 const stageFrameClass = computed(() => ({
@@ -228,6 +233,10 @@ function _applyWorkflowState(data) {
     session.simulationComplete = true
     currentStep.value = data.report_id ? 5 : 4
   }
+  if (data.status === 'failed') {
+    session.simulationComplete = false
+    workflowError.value = data.artifacts?.failure_reason || data.error_message || t('process.errors.workflowFailed')
+  }
 }
 
 async function _pollWorkflowOnce() {
@@ -355,7 +364,7 @@ watch(
         <h1>{{ currentStepMeta?.label }}</h1>
         <p>{{ t('process.workbench.subtitle') }}</p>
       </div>
-      <div class="process-view-switcher" :aria-label="t('process.views.label')">
+      <div v-if="advancedViewsEnabled" class="process-view-switcher" :aria-label="t('process.views.label')">
         <button
           v-for="mode in viewModes"
           :key="mode.key"

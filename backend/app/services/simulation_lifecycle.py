@@ -76,6 +76,45 @@ _INSTAGRAM_SCRIPT = _PROJECT_ROOT / "backend" / "scripts" / "run_instagram_simul
 ProgressCallback = Callable[[dict[str, Any]], Coroutine[Any, Any, None]]
 
 
+def _progress_round_for_hooks(
+    update: dict[str, Any],
+    *,
+    multi_platform: bool,
+    processed_rounds: set[int],
+) -> int | None:
+    """Return the completed round that should run hooks, or None.
+
+    Platform scripts emit several ``round=0`` progress updates while they build
+    agents and reset their environments.  Those are status updates, not a round
+    boundary.  In multi-platform runs, child platforms also emit their own
+    per-round progress; hooks must wait for the aggregate "parallel" progress
+    emitted after every enabled platform finishes that round.
+    """
+    if update.get("type") != "progress":
+        return None
+
+    data = update.get("data", {})
+    if not isinstance(data, dict):
+        return None
+
+    try:
+        round_num = int(data.get("round", 0))
+    except (TypeError, ValueError):
+        return None
+
+    if round_num <= 0:
+        return None
+
+    if multi_platform and data.get("platform") != "parallel":
+        return None
+
+    if round_num in processed_rounds:
+        return None
+
+    processed_rounds.add(round_num)
+    return round_num
+
+
 def _clear_ws_progress(session_id: str) -> None:
     """Clear WebSocket progress buffer for a completed/failed session."""
     try:
@@ -229,11 +268,14 @@ class SimulationLifecycleMixin:
 
         # Write stderr to a log file to avoid pipe buffer blocking.
         log_file_path = config_dir / "sim.log"
+        stdout_log_path = config_dir / "sim.stdout.log"
         # log_file and process are initialised to None so the finally clause
         # can safely guard their cleanup even if creation fails mid-way.
         log_file = None
         process = None
         runtime_errors: list[str] = []
+        processed_hook_rounds: set[int] = set()
+        multi_platform_run = enabled_count > 1
         import time as _time_mod  # noqa: PLC0415
 
         _sim_start_time = _time_mod.perf_counter()
@@ -268,6 +310,8 @@ class SimulationLifecycleMixin:
                 line = raw_line.decode("utf-8", errors="replace").strip()
                 if not line:
                     continue
+                with stdout_log_path.open("a", encoding="utf-8") as stdout_log:
+                    stdout_log.write(line + "\n")
 
                 update = _try_parse_jsonl(line)
                 if update is None:
@@ -299,18 +343,25 @@ class SimulationLifecycleMixin:
                     except Exception:
                         logger.exception("Progress callback error for session %s", session_id)
 
-                # Process memories when a round completes
-                if update.get("type") == "progress":
-                    completed_round = update.get("data", {}).get("round")
-                    if completed_round is not None:
-                        completed_round_int = int(completed_round)
-                        await self._execute_round_hooks(session_id, completed_round_int)
+                # Process per-round hooks only at real, de-duplicated round boundaries.
+                completed_round_int = _progress_round_for_hooks(
+                    update,
+                    multi_platform=multi_platform_run,
+                    processed_rounds=processed_hook_rounds,
+                )
+                if completed_round_int is not None:
+                    await self._execute_round_hooks(session_id, completed_round_int)
 
             await process.wait()
             self._subprocess_mgr.check_exit_code(session_id)
             if runtime_errors:
                 joined = "; ".join(runtime_errors[:3])
                 raise RuntimeError(f"OASIS emitted error event(s): {joined}")
+            from backend.app.services.simulation_artifacts import count_effective_actions  # noqa: PLC0415
+
+            action_count = await count_effective_actions(session_id)
+            if action_count <= 0:
+                raise RuntimeError("no_effective_actions: OASIS completed without effective actions")
 
             # Take final KG snapshot at completion
             try:

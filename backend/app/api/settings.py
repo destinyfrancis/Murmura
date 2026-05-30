@@ -13,15 +13,17 @@ API keys 的優先級：
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Annotated, Any
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 
+from backend.app.api.auth import UserProfile, require_admin
 from backend.app.services.runtime_settings import get_override, set_override
 from backend.app.utils.db import get_db
 from backend.app.utils.logger import get_logger
+from backend.app.utils.secret_settings import encrypt_setting_value
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 logger = get_logger("api.settings")
@@ -269,6 +271,7 @@ class ProviderModelsRequest(BaseModel):
 
 async def _persist_to_db(key: str, value: str) -> None:
     """Upsert a single setting into app_settings."""
+    stored_value = encrypt_setting_value(key, value)
     async with get_db() as db:
         await db.execute(
             """INSERT INTO app_settings (key, value, updated_at)
@@ -276,7 +279,7 @@ async def _persist_to_db(key: str, value: str) -> None:
                ON CONFLICT(key) DO UPDATE SET
                    value = excluded.value,
                    updated_at = excluded.updated_at""",
-            (key, value),
+            (key, stored_value),
         )
         await db.commit()
 
@@ -288,8 +291,8 @@ async def _apply_update(field: str, value: Any) -> bool:
         logger.warning("No store key mapping for field '%s'; skipping", field)
         return False
     str_value = str(value) if not isinstance(value, bool) else ("true" if value else "false")
-    set_override(store_key, str_value)
     await _persist_to_db(store_key, str_value)
+    set_override(store_key, str_value)
     logger.info("Settings: updated %s → %s", store_key, "***" if "key" in store_key else str_value)
     return True
 
@@ -300,13 +303,16 @@ async def _apply_update(field: str, value: Any) -> bool:
 
 
 @router.get("")
-async def get_settings() -> dict[str, Any]:
+async def get_settings(_user: Annotated[UserProfile, Depends(require_admin)]) -> dict[str, Any]:
     """Return all current settings with API keys masked."""
     return _build_settings_response(mask_keys=True)
 
 
 @router.put("")
-async def update_settings(req: SettingsUpdateRequest) -> dict[str, Any]:
+async def update_settings(
+    req: SettingsUpdateRequest,
+    _user: Annotated[UserProfile, Depends(require_admin)],
+) -> dict[str, Any]:
     """Update one or more settings.  Writes to DB + RuntimeSettingsStore immediately."""
     updated: list[str] = []
 
@@ -325,9 +331,12 @@ async def update_settings(req: SettingsUpdateRequest) -> dict[str, Any]:
 
 
 @router.post("/test-key")
-async def test_api_key(req: TestKeyRequest) -> dict[str, Any]:
+async def test_api_key(
+    req: TestKeyRequest,
+    _user: Annotated[UserProfile, Depends(require_admin)],
+) -> dict[str, Any]:
     """Test whether an API key (and optionally a specific model) is valid."""
-    provider = req.provider.lower()
+    provider = req.provider.strip().lower()
     # Resolve key: use request value, fall back to stored key
     api_key = (req.api_key or "").strip() or _get_env_key(provider)
 
@@ -347,14 +356,17 @@ async def test_api_key(req: TestKeyRequest) -> dict[str, Any]:
 
         return {"success": True, "provider": provider, "message": result["message"]}
     except Exception as exc:
-        logger.warning("test-key failed for %s: %s", provider, exc)
-        return {"success": False, "provider": provider, "message": str(exc)}
+        logger.warning("test-key failed for provider=%s", provider)
+        return {"success": False, "provider": provider, "message": "Unable to validate API key"}
 
 
 @router.post("/models")
-async def list_provider_models(req: ProviderModelsRequest) -> dict[str, Any]:
+async def list_provider_models(
+    req: ProviderModelsRequest,
+    _user: Annotated[UserProfile, Depends(require_admin)],
+) -> dict[str, Any]:
     """Return a normalized model list for providers that expose catalog APIs."""
-    provider = req.provider.lower()
+    provider = req.provider.strip().lower()
     api_key = (req.api_key or "").strip() or _get_env_key(provider)
 
     if provider not in {"openrouter", "fireworks"}:
@@ -378,8 +390,8 @@ async def list_provider_models(req: ProviderModelsRequest) -> dict[str, Any]:
             "models": models,
             "message": f"Loaded {len(models)} models from {provider}",
         }
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("model discovery failed for %s: %s", provider, exc)
+    except Exception:  # noqa: BLE001
+        logger.warning("model discovery failed for provider=%s", provider)
         return {
             "success": False,
             "provider": provider,
@@ -408,8 +420,8 @@ async def _test_provider_model(provider: str, api_key: str, model: str) -> dict[
             api_key=api_key,
         )
         return {"ok": True, "message": f"Model {model} accessible ✓ (via {provider})"}
-    except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "message": f"Model {model} error: {str(exc)[:120]}"}
+    except Exception:  # noqa: BLE001
+        return {"ok": False, "message": f"Model {model} is not accessible"}
 
 
 def _extract_provider_error(resp: httpx.Response) -> str:

@@ -1,24 +1,18 @@
 <script setup>
-import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import DemoModeBanner from '@/components/DemoModeBanner.vue'
 
-const router = useRouter()
 const { t } = useI18n()
-
-function goHome() {
-  router.push('/')
-}
 </script>
 
 <template>
   <div class="app-shell">
     <DemoModeBanner />
     <header class="app-header">
-      <div class="header-left" @click="goHome">
+      <router-link to="/" class="header-left" :aria-label="t('nav.home')">
         <span class="logo">⬡</span>
         <span class="brand">Murmura</span>
-      </div>
+      </router-link>
       <nav class="header-nav">
         <router-link to="/" class="nav-link">{{ t('nav.home') }}</router-link>
         <router-link to="/app" class="nav-link">{{ t('nav.workspace') }}</router-link>
@@ -350,8 +344,8 @@ a, button, input, select, textarea {
   display: flex;
   align-items: center;
   gap: 10px;
-  cursor: pointer;
   user-select: none;
+  color: inherit;
 }
 
 .logo {

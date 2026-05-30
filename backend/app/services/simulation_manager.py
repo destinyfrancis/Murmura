@@ -208,6 +208,10 @@ class SimulationManager:
                 await _update_session_status(failed)
                 raise RuntimeError(f"simulation_engine_unavailable:{reason}")
 
+            from backend.app.services.simulation_preflight import SimulationPreflightService  # noqa: PLC0415
+
+            await SimulationPreflightService().ensure_ready_for_session(session_id)
+
             # Idempotent: check if already queued or running
             async with get_db() as db:
                 cursor = await db.execute(
@@ -708,6 +712,28 @@ async def store_universal_agent_profiles(
         oasis_row = p.to_oasis_row()
         goals_json = json.dumps(list(getattr(p, "goals", ())), ensure_ascii=False)
         nationality = getattr(p, "nationality", "") or ""
+        properties_json = json.dumps(
+            {
+                "role": p.role,
+                "entity_type": p.entity_type,
+                "kg_node_id": p.kg_node_id,
+                "goals": list(getattr(p, "goals", ())),
+                "capabilities": list(getattr(p, "capabilities", ())),
+                "constraints": list(getattr(p, "constraints", ())),
+                "beliefs": dict(getattr(p, "beliefs", ())),
+                "stance_axes": dict(getattr(p, "stance_axes", ())),
+                "importance": getattr(p, "influence_weight", 1.0),
+                "activity_level": getattr(p, "activity_level", 0.5),
+                "influence_weight": getattr(p, "influence_weight", 1.0),
+                "is_stakeholder": bool(getattr(p, "is_stakeholder", False)),
+                "openness": p.openness,
+                "conscientiousness": p.conscientiousness,
+                "extraversion": p.extraversion,
+                "agreeableness": p.agreeableness,
+                "neuroticism": p.neuroticism,
+            },
+            ensure_ascii=False,
+        )
         rows.append(
             (
                 session_id,
@@ -733,6 +759,7 @@ async def store_universal_agent_profiles(
                 getattr(p, "activity_level", 0.5),
                 getattr(p, "influence_weight", 1.0),
                 int(getattr(p, "is_stakeholder", False)),
+                properties_json,
                 # big5_* aliases (mirror openness/conscientiousness/etc.)
                 p.openness,
                 p.conscientiousness,
@@ -755,10 +782,11 @@ async def store_universal_agent_profiles(
                 monthly_income, savings,
                 oasis_persona, oasis_username, created_at,
                 activity_level, influence_weight, is_stakeholder,
+                properties,
                 big5_openness, big5_conscientiousness, big5_extraversion,
                 big5_agreeableness, big5_neuroticism,
                 goals, nationality)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             rows,
         )
         await db.commit()
@@ -986,7 +1014,7 @@ async def _persist_session(
       recover shocks, family_members, crm_data, and the CSV path.
     - estimated_cost_usd from the SessionState cost estimate.
     """
-    llm_model = request.get("llm_model", "deepseek/deepseek-v3.2")
+    llm_model = request.get("llm_model") or ""
     seed_text = request.get("seed_text", session.scenario_type)
 
     # Embed csv_path in the request blob so _build_runner_config can read it.
@@ -999,11 +1027,11 @@ async def _persist_session(
         await db.execute(
             """INSERT INTO simulation_sessions
                (id, name, sim_mode, seed_text, scenario_type, graph_id,
-                agent_count, round_count, llm_provider, llm_model,
+                agent_count, round_count, llm_provider, llm_model, platforms,
                 macro_scenario_id, oasis_db_path, status,
                 estimated_cost_usd, config_json, created_at, domain_pack_id,
                 owner_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 session.id,
                 session.name,
@@ -1015,6 +1043,7 @@ async def _persist_session(
                 session.round_count,
                 session.llm_provider,
                 llm_model,
+                json.dumps(session.platforms, ensure_ascii=False),
                 request.get("macro_scenario_id"),
                 oasis_db_path,
                 session.status.value,
@@ -1192,15 +1221,17 @@ async def _build_runner_config(session: SessionState) -> dict[str, Any]:
 
     # Fall back to env vars if no BYOK key
     if not api_key:
+        from backend.app.services.runtime_settings import get_override  # noqa: PLC0415
+
         if provider == "openrouter":
-            api_key = os.environ.get("OPENROUTER_API_KEY", "")
+            api_key = get_override("api_key_openrouter") or os.environ.get("OPENROUTER_API_KEY", "")
         elif provider == "fireworks":
-            api_key = os.environ.get("FIREWORKS_API_KEY", "")
+            api_key = get_override("api_key_fireworks") or os.environ.get("FIREWORKS_API_KEY", "")
         else:
             from backend.app.utils.llm_client import _PROVIDERS  # noqa: PLC0415
 
             env_key = _PROVIDERS.get(provider, {}).get("env_key", "")
-            api_key = os.environ.get(env_key, "") if env_key else ""
+            api_key = get_override(f"api_key_{provider}") or (os.environ.get(env_key, "") if env_key else "")
 
     if not base_url:
         if provider == "openrouter":
@@ -1212,13 +1243,19 @@ async def _build_runner_config(session: SessionState) -> dict[str, Any]:
 
             base_url = _PROVIDERS.get(provider, {}).get("base_url", "")
 
-    if not llm_model or llm_model in ("accounts/fireworks/models/deepseek/deepseek-v3.2", "deepseek/deepseek-v3.2"):
+    known_bad_models = {
+        "accounts/fireworks/models/deepseek-v3p2",
+        "accounts/fireworks/models/deepseek/deepseek-v3.2",
+    }
+    if not llm_model or llm_model in (*known_bad_models, "deepseek/deepseek-v3.2"):
         # Use AGENT_LLM_MODEL env var if set, else default for the provider
-        agent_model_env = os.environ.get("AGENT_LLM_MODEL", "")
-        if agent_model_env and agent_model_env not in ("accounts/fireworks/models/deepseek/deepseek-v3.2",):
+        from backend.app.services.runtime_settings import get_override  # noqa: PLC0415
+
+        agent_model_env = get_override("agent_llm_model") or os.environ.get("AGENT_LLM_MODEL", "")
+        if agent_model_env and agent_model_env not in known_bad_models:
             llm_model = agent_model_env
         elif provider == "fireworks":
-            llm_model = "accounts/fireworks/models/deepseek-v3p2"
+            llm_model = "accounts/fireworks/models/minimax-m2p5"
         else:
             llm_model = "deepseek/deepseek-v3.2"
 

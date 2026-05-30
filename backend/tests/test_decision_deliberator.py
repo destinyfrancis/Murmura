@@ -143,6 +143,10 @@ class TestExtractList:
     def test_wrapped_results(self):
         assert _extract_list({"results": [{"a": 1}]}) == [{"a": 1}]
 
+    def test_single_decision_dict(self):
+        raw = {"agent_id": 1, "action": "stay", "reasoning": "ok"}
+        assert _extract_list(raw) == [raw]
+
     def test_no_list_returns_none(self):
         assert _extract_list({"foo": "bar"}) is None
 

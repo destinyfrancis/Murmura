@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from backend.app.utils.llm_client import LLMClient
+from backend.app.utils.llm_client import LLMClient, LLMResponse
 
 # ---------------------------------------------------------------------------
 # Helper: build a mock httpx.Response
@@ -269,3 +269,57 @@ async def test_chat_succeeds_first_attempt_no_sleep():
 
     assert result.content == "ok"
     assert not mock_sleep.called, "Should not sleep when first attempt succeeds"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_chat_json_requests_json_mode_and_extracts_payload():
+    """chat_json should request native JSON mode and tolerate wrapper text."""
+    client = LLMClient()
+
+    with patch.object(
+        client,
+        "chat",
+        new_callable=AsyncMock,
+        return_value=LLMResponse(
+            content='Here is the JSON:\n{"ok": true, "items": [1, 2]}\nDone.',
+            model="test-model",
+            usage={},
+            cost_usd=0.0,
+        ),
+    ) as mock_chat:
+        result = await client.chat_json(_MESSAGES)
+
+    assert result == {"ok": True, "items": [1, 2]}
+    assert mock_chat.call_args.kwargs["json_mode"] is True
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_openai_compat_json_mode_retries_without_response_format_on_400():
+    """Some compatible providers reject response_format; fall back once without it."""
+    client = LLMClient()
+    payloads = []
+
+    async def mock_post(*args, **kwargs):
+        payloads.append(dict(kwargs["json"]))
+        if len(payloads) == 1:
+            return _make_error_response(400)
+        return _make_ok_response()
+
+    http_mock = MagicMock()
+    http_mock.post = mock_post
+
+    with patch.object(client, "_get_http_client", return_value=http_mock):
+        result = await client._chat_openai_compat(
+            messages=_MESSAGES,
+            model="test-model",
+            temperature=0.7,
+            max_tokens=100,
+            cfg=_CFG,
+            json_mode=True,
+        )
+
+    assert result.content == "ok"
+    assert payloads[0]["response_format"] == {"type": "json_object"}
+    assert "response_format" not in payloads[1]

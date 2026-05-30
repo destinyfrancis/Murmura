@@ -80,7 +80,7 @@ onBeforeUnmount(() => {
         <span class="agent-icon">👤</span>
         <span class="agent-name">{{ agentProfile?.oasis_username || `Agent #${agentId}` }}</span>
       </div>
-      <button class="close-btn" @click="$emit('close')">✕</button>
+      <button class="close-btn" type="button" aria-label="關閉智能體詳情" @click="$emit('close')">✕</button>
     </div>
 
     <div class="panel-tabs">

@@ -606,17 +606,16 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Rate limiting (slowapi) — middleware disabled temporarily due to
-    # slowapi 0.1.9 / Starlette compatibility issue (AttributeError in sync_check_limits).
-    # Exception handler still registered so @limiter.limit decorators don't crash.
+    # Rate limiting (slowapi)
     from slowapi import _rate_limit_exceeded_handler
     from slowapi.errors import RateLimitExceeded
+    from slowapi.middleware import SlowAPIMiddleware
 
     from backend.app.api.auth import _limiter
 
     app.state.limiter = _limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-    # app.add_middleware(SlowAPIMiddleware)  # re-enable after upgrading slowapi
+    app.add_middleware(SlowAPIMiddleware)
 
     # Health check
     @app.get("/api/health")

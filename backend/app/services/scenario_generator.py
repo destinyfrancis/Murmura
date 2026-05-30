@@ -137,7 +137,7 @@ class ScenarioGenerator:
         try:
             raw = await self._llm.chat_json(
                 messages,
-                max_tokens=4096,
+                max_tokens=8192,
                 temperature=0.3,
             )
         except json.JSONDecodeError as exc:
@@ -452,6 +452,138 @@ def _parse_implied_actors(raw_list: list[Any]) -> list[ImpliedActor]:
         except Exception as exc:
             logger.warning("ScenarioGenerator: skipping malformed implied_actor: %s", exc)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Deterministic fallback
+# ---------------------------------------------------------------------------
+
+
+def build_fallback_scenario_config(
+    seed_text: str,
+    kg_nodes: list[dict[str, Any]],
+    agent_profiles: list[UniversalAgentProfile],
+) -> UniversalScenarioConfig:
+    """Build a compact scenario config when LLM generation is unavailable."""
+    entity_types = _fallback_entity_types(kg_nodes, agent_profiles)
+    description = sanitize_prompt_seed_text(seed_text)[:240] or "Scenario generated from user seed text."
+
+    decision_types = (
+        UniversalDecisionType(
+            id="pricing_strategy",
+            label="Pricing Strategy",
+            description="How actors adjust prices or costs in response to pressure.",
+            possible_actions=("raise_prices", "hold_prices", "discount_selectively", "bundle_value"),
+            applicable_entity_types=entity_types,
+        ),
+        UniversalDecisionType(
+            id="supply_chain_strategy",
+            label="Supply Chain Strategy",
+            description="How actors adapt supply, sourcing, and logistics choices.",
+            possible_actions=("switch_suppliers", "diversify_supply", "build_inventory", "delay_launch"),
+            applicable_entity_types=entity_types,
+        ),
+        UniversalDecisionType(
+            id="financial_response",
+            label="Financial Response",
+            description="How actors absorb, pass through, or hedge financial pressure.",
+            possible_actions=("absorb_margin_loss", "cut_costs", "hedge_costs", "seek_financing"),
+            applicable_entity_types=entity_types,
+        ),
+        UniversalDecisionType(
+            id="market_positioning",
+            label="Market Positioning",
+            description="How actors defend share against competitors and customer churn.",
+            possible_actions=("emphasize_reliability", "accelerate_marketing", "target_premium_segment", "pause_expansion"),
+            applicable_entity_types=entity_types,
+        ),
+        UniversalDecisionType(
+            id="stakeholder_communication",
+            label="Stakeholder Communication",
+            description="How actors communicate uncertainty, delays, and trade-offs.",
+            possible_actions=("transparent_update", "minimize_disclosure", "negotiate_terms", "coordinate_partners"),
+            applicable_entity_types=entity_types,
+        ),
+    )
+    metrics = (
+        UniversalMetric("market_share", "Market Share", "Relative ability to retain customers.", 50.0, "index"),
+        UniversalMetric("profit_margin", "Profit Margin", "Room to absorb cost pressure.", 50.0, "index"),
+        UniversalMetric("supply_resilience", "Supply Resilience", "Ability to continue production under disruption.", 50.0, "index"),
+        UniversalMetric("customer_confidence", "Customer Confidence", "Customer trust in availability and value.", 50.0, "index"),
+        UniversalMetric("competitive_pressure", "Competitive Pressure", "Intensity of rival moves and price pressure.", 50.0, "index"),
+    )
+    shock_types = (
+        UniversalShockType(
+            "cost_spike",
+            "Cost Spike",
+            "Input costs rise unexpectedly.",
+            ("profit_margin", "competitive_pressure"),
+            (0.5, 3.0),
+        ),
+        UniversalShockType(
+            "shipping_disruption",
+            "Shipping Disruption",
+            "Logistics capacity or routes are constrained.",
+            ("supply_resilience", "customer_confidence"),
+            (0.5, 3.0),
+        ),
+        UniversalShockType(
+            "competitor_move",
+            "Competitor Move",
+            "Rivals respond aggressively with pricing, supply, or messaging.",
+            ("market_share", "competitive_pressure"),
+            (0.5, 3.0),
+        ),
+        UniversalShockType(
+            "policy_escalation",
+            "Policy Escalation",
+            "Tariffs, sanctions, or compliance constraints intensify.",
+            ("profit_margin", "supply_resilience"),
+            (0.5, 3.0),
+        ),
+    )
+    impact_rules = (
+        UniversalImpactRule("pricing_strategy", "raise_prices", "profit_margin", 2.0, "Passing costs through protects margin."),
+        UniversalImpactRule("pricing_strategy", "raise_prices", "market_share", -2.0, "Higher prices can reduce demand."),
+        UniversalImpactRule("pricing_strategy", "hold_prices", "customer_confidence", 1.5, "Stable prices can reassure customers."),
+        UniversalImpactRule("supply_chain_strategy", "switch_suppliers", "supply_resilience", 2.5, "Alternative suppliers reduce disruption exposure."),
+        UniversalImpactRule("supply_chain_strategy", "delay_launch", "market_share", -1.5, "Delays create room for competitors."),
+        UniversalImpactRule("financial_response", "absorb_margin_loss", "market_share", 1.5, "Absorbing costs can protect customer demand."),
+        UniversalImpactRule("financial_response", "absorb_margin_loss", "profit_margin", -2.5, "Absorbing costs hurts margin."),
+        UniversalImpactRule("market_positioning", "emphasize_reliability", "customer_confidence", 2.0, "Reliability messaging can preserve trust."),
+        UniversalImpactRule("market_positioning", "accelerate_marketing", "competitive_pressure", 1.0, "Aggressive marketing can intensify rivalry."),
+        UniversalImpactRule("stakeholder_communication", "coordinate_partners", "supply_resilience", 1.5, "Coordination improves operational response."),
+    )
+    return UniversalScenarioConfig(
+        scenario_id=str(uuid.uuid4()),
+        scenario_name="Fallback Scenario",
+        scenario_description=description,
+        decision_types=decision_types,
+        metrics=metrics,
+        shock_types=shock_types,
+        impact_rules=impact_rules,
+        time_scale="rounds",
+        language_hint="auto",
+        stakeholder_entity_types=entity_types,
+    )
+
+
+def _fallback_entity_types(
+    kg_nodes: list[dict[str, Any]],
+    agent_profiles: list[UniversalAgentProfile],
+) -> tuple[str, ...]:
+    """Infer a small stakeholder entity-type list for fallback configs."""
+    values: list[str] = []
+    for node in kg_nodes:
+        value = str(node.get("entity_type") or node.get("type") or "").strip()
+        if value:
+            values.append(value)
+    for profile in agent_profiles:
+        value = str(profile.entity_type or "").strip()
+        if value:
+            values.append(value)
+    deduped = tuple(dict.fromkeys(values))[:8]
+    return deduped or ("Actor", "Company", "Organization")
 
 
 # ---------------------------------------------------------------------------

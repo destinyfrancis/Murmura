@@ -506,6 +506,34 @@ export default {
     consoleSignal: 'Clean-room UI · 5-step workflow',
     pipelineTitle: '5-Step Control Flow',
     examplesTitle: 'Example Scenarios',
+    betaTitle: 'Beta Workflows',
+    betaHint: 'Calibrated launch templates; stronger for public beta than arbitrary scenarios.',
+    beta: {
+      publicNarrative: {
+        label: 'Public Narrative',
+        desc: 'Opinion, faction split, message spread',
+        seed: 'A controversial public message spreads quickly across multiple social platforms, while supporters and opponents form competing narratives.',
+        question: 'Which narrative is most likely to dominate, and how will disagreement widen?'
+      },
+      supplyChain: {
+        label: 'B2B Supply Chain',
+        desc: 'Suppliers, buyers, logistics, price shocks',
+        seed: 'A key supplier raises prices and extends delivery times, forcing downstream customers, competitors, and logistics partners to adjust contracts.',
+        question: 'Which companies will switch suppliers, stockpile, or renegotiate?'
+      },
+      companyCompetition: {
+        label: 'Company Competition',
+        desc: 'New entrant, churn, channel response',
+        seed: 'A well-funded competitor enters the enterprise software market with aggressive pricing, and existing customers begin comparing alternatives.',
+        question: 'Which customer segments and channels need the strongest defense?'
+      },
+      policyShock: {
+        label: 'Policy Shock',
+        desc: 'Policy, stakeholders, behavioral feedback',
+        seed: 'A government announces a high-impact policy shift, forcing income groups, businesses, and community organizations to reassess their strategies.',
+        question: 'Which groups will support, oppose, or work around the policy?'
+      }
+    },
     sampleWar: 'Energy-market reaction after geopolitical escalation',
     sampleFiction: 'Collective choices across factions in a fictional world',
     sampleCompany: 'B2B supply-chain reaction after a new competitor enters',
@@ -515,6 +543,10 @@ export default {
     questionLabel: 'QUESTION',
     presetLabel: 'RUN PRESET',
     toolsTitle: 'Engineering Tools',
+    advancedTitle: 'Advanced',
+    advancedSubtitle: 'Domain packs, connectors, and God View stay available without crowding the launch path.',
+    advancedShow: 'Show advanced',
+    advancedHide: 'Hide advanced',
     domainPacks: 'domain packs',
     metrics: {
       zeroConfig: 'Zero Config',
@@ -657,6 +689,9 @@ export default {
     nodes: 'NODES',
     edges: 'EDGES',
     agentCount: 'AGENTS',
+    simStatus: 'SIM STATUS',
+    actions: 'ACTIONS',
+    failure: 'FAILURE',
     agent: 'Agent',
     waiting: 'Waiting for workflow events...'
   },
@@ -734,7 +769,8 @@ export default {
       reportFirst: 'Please generate report first',
       engineUnavailable: 'Simulation engine unavailable — use Docker for full features',
       engineUnavailableDetail: 'Simulation engine unavailable — use Docker for full features. The workflow will stop after Environment Setup.',
-      workflowPolling: 'Workflow polling failed'
+      workflowPolling: 'Workflow polling failed',
+      workflowFailed: 'Live simulation failed'
     }
   },
   step2: {

@@ -94,7 +94,9 @@ async def init_db() -> None:
 
     async with get_db() as db:
         await db.executescript(schema_sql)
-        await db.commit()
+        from backend.app.utils.migrations import apply_migrations_to_connection  # noqa: PLC0415
+
+        await apply_migrations_to_connection(db)
 
     logger.info("Database initialised successfully")
 
@@ -102,69 +104,13 @@ async def init_db() -> None:
 async def apply_migrations() -> None:
     """Apply ALTER TABLE migrations for columns added after initial schema.
 
-    Uses try/except to guard against 'duplicate column name' on existing DBs,
-    matching the existing pattern used for political_stance and other late columns.
-    Safe to call multiple times.
+    Safe to call multiple times. Delegates to the shared migration runner also
+    used by workspace databases.
     """
-    migrations = [
-        "ALTER TABLE agent_profiles ADD COLUMN tier INTEGER DEFAULT 2",
-        "ALTER TABLE agent_profiles ADD COLUMN political_stance REAL DEFAULT 0.5",
-        "ALTER TABLE kg_edges ADD COLUMN round_number INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE agent_decisions ADD COLUMN topic_tags TEXT",
-        "ALTER TABLE agent_decisions ADD COLUMN emotional_reaction TEXT",
-        "ALTER TABLE agent_memories ADD COLUMN importance_score REAL DEFAULT 0.5",
-        "ALTER TABLE agent_memories ADD COLUMN metadata TEXT DEFAULT NULL",
-        "ALTER TABLE simulation_actions ADD COLUMN parent_action_id INTEGER REFERENCES simulation_actions(id)",
-        "ALTER TABLE simulation_actions ADD COLUMN engagement_metrics TEXT DEFAULT '{}'",
-        # Phase 1: simulation_sessions missing columns
-        "ALTER TABLE simulation_sessions ADD COLUMN owner_id TEXT",
-        "ALTER TABLE simulation_sessions ADD COLUMN scenario_question TEXT DEFAULT ''",
-        "ALTER TABLE simulation_sessions ADD COLUMN domain_pack_id TEXT DEFAULT 'hk_city'",
-        "ALTER TABLE reports ADD COLUMN share_token TEXT",
-        "ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT 0",
-        # Phase 1: agent_profiles big5 aliases + goals + nationality
-        "ALTER TABLE agent_profiles ADD COLUMN big5_openness REAL",
-        "ALTER TABLE agent_profiles ADD COLUMN big5_conscientiousness REAL",
-        "ALTER TABLE agent_profiles ADD COLUMN big5_extraversion REAL",
-        "ALTER TABLE agent_profiles ADD COLUMN big5_agreeableness REAL",
-        "ALTER TABLE agent_profiles ADD COLUMN big5_neuroticism REAL",
-        "ALTER TABLE agent_profiles ADD COLUMN goals TEXT DEFAULT '[]'",
-        "ALTER TABLE agent_profiles ADD COLUMN nationality TEXT DEFAULT ''",
-        # Phase 2: Dual-layer graph (Truth vs Belief)
-        "ALTER TABLE kg_nodes ADD COLUMN layer_type TEXT NOT NULL DEFAULT 'truth'",
-        "ALTER TABLE kg_nodes ADD COLUMN confidence_score REAL NOT NULL DEFAULT 1.0",
-        "ALTER TABLE kg_nodes ADD COLUMN source_agent_id TEXT DEFAULT NULL",
-        "ALTER TABLE kg_edges ADD COLUMN layer_type TEXT NOT NULL DEFAULT 'truth'",
-        "ALTER TABLE kg_edges ADD COLUMN confidence_score REAL NOT NULL DEFAULT 1.0",
-        "ALTER TABLE kg_edges ADD COLUMN source_agent_id TEXT DEFAULT NULL",
-        "ALTER TABLE kg_edges ADD COLUMN source_text TEXT",
-        "ALTER TABLE kg_edges ADD COLUMN evidence_span TEXT",
-    ]
-    # Idempotent index creation — CREATE INDEX IF NOT EXISTS is always safe
-    index_migrations = [
-        # Composite index for recursive CTE in get_relational_context()
-        "CREATE INDEX IF NOT EXISTS idx_triple_search ON memory_triples(session_id, agent_id, subject, object)",
-        "CREATE TABLE IF NOT EXISTS agent_interviews (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, agent_id TEXT NOT NULL, user_query TEXT NOT NULL, agent_response TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now')))",
-        "CREATE INDEX IF NOT EXISTS idx_interview_session_agent ON agent_interviews(session_id, agent_id)",
-    ]
+    from backend.app.utils.migrations import apply_migrations_to_connection  # noqa: PLC0415
+
     async with get_db() as db:
-        for sql in migrations:
-            try:
-                await db.execute(sql)
-                await db.commit()
-            except Exception as exc:
-                if "duplicate column name" not in str(exc).lower():
-                    logger.warning("Migration skipped with unexpected error: %s — sql: %s", exc, sql)
-        for sql in index_migrations:
-            try:
-                await db.execute(sql)
-                await db.commit()
-            except Exception as e:
-                err_msg = str(e).lower()
-                if "already exists" in err_msg:
-                    pass  # expected on repeated startup
-                else:
-                    logger.warning("Index migration warning: %s | SQL: %s", e, sql[:100])
+        await apply_migrations_to_connection(db)
     logger.info("DB migrations applied")
 
 
@@ -244,6 +190,13 @@ async def get_workspace_db(workspace_id: str | None) -> AsyncIterator[aiosqlite.
                     schema_file,
                     db_path,
                 )
+
+        try:
+            from backend.app.utils.migrations import apply_migrations_to_connection  # noqa: PLC0415
+
+            await apply_migrations_to_connection(db)
+        except Exception:
+            logger.warning("Workspace DB migrations failed for workspace %s", workspace_id, exc_info=True)
 
         yield db
     finally:

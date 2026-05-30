@@ -30,6 +30,7 @@ from backend.app.models.platform_identity import (
 from backend.app.models.universal_agent_profile import UniversalAgentProfile
 from backend.app.utils.llm_client import LLMClient, get_step_provider_model
 from backend.app.utils.logger import get_logger
+from backend.app.utils.prompt_security import sanitize_prompt_seed_text
 from backend.prompts.agent_generation_prompts import (
     AGENT_ELIGIBLE_FILTER_SYSTEM,
     AGENT_ELIGIBLE_FILTER_USER,
@@ -356,11 +357,14 @@ class KGAgentFactory:
 
         # Stage 1 — eligibility filter
         try:
+            eligibility_timeout_s = float(os.environ.get("KG_AGENT_ELIGIBILITY_TIMEOUT_S", "30"))
             eligible_nodes = await asyncio.wait_for(
                 self._filter_agent_eligible_nodes(nodes),
-                timeout=30,
+                timeout=max(1.0, eligibility_timeout_s),
             )
         except Exception as exc:  # noqa: BLE001
+            if os.environ.get("MURMURA_STRICT_LIVE") == "1":
+                raise RuntimeError(f"oasis_runtime_error: kg_agent_eligibility_failed:{exc.__class__.__name__}") from exc
             logger.warning(
                 "KGAgentFactory eligibility stage timed out/failed (%s); using deterministic fallback",
                 exc,
@@ -376,8 +380,23 @@ class KGAgentFactory:
 
         resolved_target = target_count if target_count is not None else len(eligible_nodes)
 
+        if os.environ.get("KG_AGENT_STRICT_TEMPLATE_PROFILES") == "1":
+            profiles = self._build_fallback_profiles(
+                eligible_nodes=eligible_nodes,
+                edges=edges,
+                seed_text=seed_text,
+                target_count=resolved_target,
+            )
+            if resolved_target > 0 and len(profiles) != resolved_target:
+                raise RuntimeError(
+                    f"kg_agent_profile_count_mismatch: produced {len(profiles)} for target {resolved_target}"
+                )
+            logger.info("generate_from_kg strict template mode complete: produced %d profiles", len(profiles))
+            return profiles
+
         # Stage 2 — profile generation
         try:
+            profile_timeout_s = float(os.environ.get("KG_AGENT_PROFILE_TIMEOUT_S", "60"))
             profiles = await asyncio.wait_for(
                 self._generate_profiles(
                     eligible_nodes=eligible_nodes,
@@ -386,9 +405,11 @@ class KGAgentFactory:
                     target_count=resolved_target,
                     is_cold_start=is_cold_start,
                 ),
-                timeout=60,
+                timeout=max(1.0, profile_timeout_s),
             )
         except Exception as exc:  # noqa: BLE001
+            if os.environ.get("MURMURA_STRICT_LIVE") == "1":
+                raise RuntimeError(f"oasis_runtime_error: kg_agent_profile_failed:{exc.__class__.__name__}") from exc
             logger.warning(
                 "KGAgentFactory profile stage timed out/failed (%s); using deterministic fallback",
                 exc,
@@ -400,6 +421,10 @@ class KGAgentFactory:
                 target_count=resolved_target,
             )
         if resolved_target > 0 and len(profiles) != resolved_target:
+            if os.environ.get("MURMURA_STRICT_LIVE") == "1":
+                raise RuntimeError(
+                    f"kg_agent_profile_count_mismatch: produced {len(profiles)} for target {resolved_target}"
+                )
             logger.warning(
                 "KGAgentFactory produced %d profiles for target %d; normalising with fallback profiles",
                 len(profiles),
@@ -538,22 +563,25 @@ class KGAgentFactory:
         Returns:
             Filtered list of node dicts (eligible agents only).
         """
-        nodes_json = json.dumps(nodes, ensure_ascii=False, indent=2)
+        nodes_json = json.dumps(nodes, ensure_ascii=False, separators=(",", ":"))
+        user_content = AGENT_ELIGIBLE_FILTER_USER.format(nodes_json=nodes_json)
+        user_content += (
+            "\n\nSTRICT COMPACT OUTPUT: The caller only consumes `eligible`. "
+            "Keep `reason` under 12 words and set `excluded` to [] to preserve valid JSON."
+        )
 
         _s2_provider, _s2_model = get_step_provider_model(2)
         try:
+            max_tokens = max(2048, int(os.environ.get("KG_AGENT_ELIGIBILITY_MAX_TOKENS", "8192")))
             result = await self._llm.chat_json(
                 messages=[
                     {"role": "system", "content": AGENT_ELIGIBLE_FILTER_SYSTEM},
-                    {
-                        "role": "user",
-                        "content": AGENT_ELIGIBLE_FILTER_USER.format(nodes_json=nodes_json),
-                    },
+                    {"role": "user", "content": user_content},
                 ],
                 provider=_s2_provider,
                 model=_s2_model,
-                temperature=0.2,
-                max_tokens=4096,
+                temperature=0.1,
+                max_tokens=max_tokens,
             )
             eligible_ids: set[str] = {
                 str(entry["node_id"]) for entry in result.get("eligible", []) if "node_id" in entry
@@ -561,12 +589,16 @@ class KGAgentFactory:
             eligible = [n for n in nodes if str(n.get("id", "")) in eligible_ids and _node_included_for_simulation(n)]
 
             if not eligible:
+                if os.environ.get("MURMURA_STRICT_LIVE") == "1":
+                    raise RuntimeError("LLM eligibility filter returned zero eligible nodes")
                 logger.warning("LLM filter returned 0 eligible nodes; using heuristic fallback")
                 return self._heuristic_filter(nodes)
 
             return eligible
 
         except Exception as exc:  # noqa: BLE001
+            if os.environ.get("MURMURA_STRICT_LIVE") == "1":
+                raise
             logger.warning(
                 "LLM eligibility filter failed (%s); using heuristic fallback",
                 exc,
@@ -737,8 +769,128 @@ class KGAgentFactory:
         - If is_cold_start=True: LLM is permitted to invent plausible agents (conf=0.1).
         - If is_cold_start=False: LLM MUST strictly use evidence from KG.
         """
-        eligible_json = json.dumps(eligible_nodes, ensure_ascii=False, indent=2)
-        edges_json = json.dumps(edges, ensure_ascii=False, indent=2)
+        batch_size = max(1, int(os.environ.get("KG_AGENT_PROFILE_BATCH_SIZE", "25")))
+        if target_count > batch_size:
+            return await self._generate_profiles_batched(
+                eligible_nodes=eligible_nodes,
+                edges=edges,
+                seed_text=seed_text,
+                target_count=target_count,
+                is_cold_start=is_cold_start,
+                batch_size=batch_size,
+            )
+
+        return await self._generate_profiles_batch(
+            eligible_nodes=eligible_nodes,
+            edges=edges,
+            seed_text=seed_text,
+            target_count=target_count,
+            is_cold_start=is_cold_start,
+            existing_agent_ids=frozenset(),
+            batch_index=1,
+            batch_total=1,
+        )
+
+    async def _generate_profiles_batched(
+        self,
+        eligible_nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+        seed_text: str,
+        target_count: int,
+        is_cold_start: bool,
+        batch_size: int,
+    ) -> list[UniversalAgentProfile]:
+        profiles: list[UniversalAgentProfile] = []
+        seen_ids: set[str] = set()
+        batch_total = (target_count + batch_size - 1) // batch_size
+
+        for batch_index in range(1, batch_total + 1):
+            remaining = target_count - len(profiles)
+            if remaining <= 0:
+                break
+
+            current_target = min(batch_size, remaining)
+            logger.info(
+                "KGAgentFactory profile generation batch %d/%d target=%d remaining=%d",
+                batch_index,
+                batch_total,
+                current_target,
+                remaining,
+            )
+            start = ((batch_index - 1) * batch_size) % max(1, len(eligible_nodes))
+            node_window = eligible_nodes[start:start + batch_size] or eligible_nodes[:batch_size] or eligible_nodes
+            batch_profiles = await self._generate_profiles_batch(
+                eligible_nodes=node_window,
+                edges=edges,
+                seed_text=seed_text,
+                target_count=current_target,
+                is_cold_start=is_cold_start,
+                existing_agent_ids=frozenset(seen_ids),
+                batch_index=batch_index,
+                batch_total=batch_total,
+            )
+
+            unique_batch: list[UniversalAgentProfile] = []
+            duplicates: list[str] = []
+            for profile in batch_profiles:
+                if profile.id in seen_ids:
+                    duplicates.append(profile.id)
+                    continue
+                seen_ids.add(profile.id)
+                unique_batch.append(profile)
+
+            if duplicates:
+                message = f"KGAgentFactory profile batch {batch_index} returned duplicate ids: {duplicates[:5]}"
+                if os.environ.get("MURMURA_STRICT_LIVE") == "1":
+                    raise RuntimeError(message)
+                logger.warning(message)
+
+            profiles.extend(unique_batch)
+
+        if len(profiles) != target_count and os.environ.get("MURMURA_STRICT_LIVE") == "1":
+            raise RuntimeError(
+                f"KGAgentFactory batched profile generation produced {len(profiles)} profiles for target {target_count}"
+            )
+
+        return _merge_graph_relationships(profiles[:target_count], edges)
+
+    async def _generate_profiles_batch(
+        self,
+        eligible_nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+        seed_text: str,
+        target_count: int,
+        is_cold_start: bool = False,
+        existing_agent_ids: frozenset[str] = frozenset(),
+        batch_index: int = 1,
+        batch_total: int = 1,
+    ) -> list[UniversalAgentProfile]:
+        """Call LLM to generate one compact batch of agent profiles."""
+        strict_live = os.environ.get("MURMURA_STRICT_LIVE") == "1"
+        if strict_live:
+            compact_nodes = [
+                {
+                    "id": node.get("id"),
+                    "type": node.get("entity_type") or node.get("type"),
+                    "title": node.get("title") or node.get("label") or node.get("name"),
+                    "description": str(node.get("description") or "")[:140],
+                }
+                for node in eligible_nodes
+            ]
+            compact_edges = [
+                {
+                    "source": edge.get("source_id") or edge.get("source"),
+                    "target": edge.get("target_id") or edge.get("target"),
+                    "relation": edge.get("relation_type") or edge.get("relation") or edge.get("label"),
+                }
+                for edge in edges[:80]
+            ]
+            eligible_json = json.dumps(compact_nodes, ensure_ascii=False, separators=(",", ":"))
+            edges_json = json.dumps(compact_edges, ensure_ascii=False, separators=(",", ":"))
+        else:
+            eligible_json = json.dumps(eligible_nodes, ensure_ascii=False, indent=2)
+            edges_json = json.dumps(edges, ensure_ascii=False, indent=2)
+        safe_seed_text = sanitize_prompt_seed_text(seed_text)
 
         if is_cold_start:
             cold_start_instruction = (
@@ -754,12 +906,42 @@ class KGAgentFactory:
                 "supported by explicit KG nodes or very direct evidence. Do NOT invent new characters."
             )
 
-        user_message = AGENT_GENERATION_USER.format(
-            seed_text=seed_text,
-            eligible_nodes_json=eligible_json,
-            edges_json=edges_json,
-            target_count=target_count,
-        ) + cold_start_instruction + _build_role_template_instruction(seed_text)
+        if strict_live:
+            user_message = (
+                f"Scenario seed:\n{safe_seed_text}\n\n"
+                f"Candidate KG nodes:\n{eligible_json}\n\n"
+                f"KG edges sample:\n{edges_json}\n\n"
+                f"Generate exactly {target_count} simulation agents. "
+                "Use KG candidates where useful and infer additional seed-grounded actors if needed. "
+                "Return compact valid JSON only. Keep persona <= 2 short sentences, memory_seed <= 1 sentence, "
+                "2 goals, 2 capabilities, 1-2 constraints, 3 beliefs, and 3 shared stance_axes.\n"
+                'Schema: {"agents":[{"id":"slug","name":"name","role":"one sentence",'
+                '"entity_type":"Person|Country|Military|Organization|MediaOutlet|PoliticalFigure|Company|NGO|Institution|Inferred",'
+                '"persona":"short","goals":["a","b"],"capabilities":["a","b"],"constraints":["a"],'
+                '"beliefs":{"deescalation_possible":0.5,"domestic_pressure":0.5,"shipping_risk":0.5},'
+                '"memory_seed":"short","stance_axes":{"escalation_tolerance":0.5,'
+                '"diplomatic_flexibility":0.5,"economic_risk_sensitivity":0.5},'
+                '"relationships":{},"openness":0.5,"conscientiousness":0.5,"extraversion":0.5,'
+                '"agreeableness":0.5,"neuroticism":0.5,"kg_node_id":"id",'
+                '"activity_level":0.7,"influence_weight":1.0}]}'
+            ) + cold_start_instruction
+        else:
+            user_message = AGENT_GENERATION_USER.format(
+                seed_text=safe_seed_text,
+                eligible_nodes_json=eligible_json,
+                edges_json=edges_json,
+                target_count=target_count,
+            ) + cold_start_instruction + _build_role_template_instruction(safe_seed_text)
+
+        if batch_total > 1:
+            existing_hint = ", ".join(sorted(existing_agent_ids)) if existing_agent_ids else "(none yet)"
+            user_message += (
+                f"\n\nBATCHING INSTRUCTION: This is batch {batch_index} of {batch_total}. "
+                f"Generate exactly {target_count} agents for this batch only. "
+                "Do not repeat any agent id from earlier batches. "
+                f"Existing agent ids: {existing_hint}. "
+                "Keep persona and memory_seed concise enough to preserve valid JSON."
+            )
 
         # If persona keys are available, constrain agent type assignment
         if self._persona_keys:
@@ -772,34 +954,53 @@ class KGAgentFactory:
 
         _s2_provider, _s2_model = get_step_provider_model(2)
         try:
-            result = await self._llm.chat_json(
-                messages=[
-                    {"role": "system", "content": AGENT_GENERATION_SYSTEM},
-                    {
-                        "role": "user",
-                        "content": user_message,
-                    },
-                ],
-                provider=_s2_provider,
-                model=_s2_model,
-                temperature=0.7,
-                max_tokens=8192,
+            batch_timeout_s = max(1.0, float(os.environ.get("KG_AGENT_PROFILE_BATCH_TIMEOUT_S", "180")))
+            system_content = (
+                "You create compact multi-agent simulation profiles. "
+                "Return valid JSON only, no markdown, no trailing commas."
+                if strict_live
+                else AGENT_GENERATION_SYSTEM
+            )
+            result = await asyncio.wait_for(
+                self._llm.chat_json(
+                    messages=[
+                        {"role": "system", "content": system_content},
+                        {
+                            "role": "user",
+                            "content": user_message,
+                        },
+                    ],
+                    provider=_s2_provider,
+                    model=_s2_model,
+                    temperature=0.7,
+                    max_tokens=8192,
+                ),
+                timeout=batch_timeout_s,
             )
         except Exception as exc:  # noqa: BLE001
-            raise RuntimeError(f"LLM profile generation failed: {exc}") from exc
+            raise RuntimeError(
+                f"LLM profile generation failed in batch {batch_index}/{batch_total}: {exc}"
+            ) from exc
 
         raw_agents: list[dict[str, Any]] = result.get("agents", [])
         if not raw_agents:
             raise RuntimeError("LLM returned no agents in profile generation response")
 
         profiles: list[UniversalAgentProfile] = []
+        duplicate_ids: list[str] = []
         for raw in raw_agents:
             profile = self._parse_agent_dict(raw)
             if profile is not None:
+                if profile.id in existing_agent_ids:
+                    duplicate_ids.append(profile.id)
+                    continue
                 profiles.append(profile)
 
         if not profiles:
             raise RuntimeError("No valid agent profiles could be parsed from LLM response")
+
+        if duplicate_ids and os.environ.get("MURMURA_STRICT_LIVE") == "1":
+            raise RuntimeError(f"LLM profile generation repeated existing agent ids: {duplicate_ids[:5]}")
 
         return _merge_graph_relationships(profiles, edges)
 
@@ -829,10 +1030,11 @@ class KGAgentFactory:
 
         if not profiles:
             return []
+        safe_seed_text = sanitize_prompt_seed_text(seed_text)
 
         summaries = [{"agent_id": p.id, "name": p.name, "role": p.role, "entity_type": p.entity_type} for p in profiles]
         prompt_user = (
-            f"Scenario: {seed_text[:400]}\n"
+            f"Scenario: {safe_seed_text[:400]}\n"
             f"Active metrics: {list(active_metrics)}\n\n"
             "For each agent below, generate a CognitiveFingerprint JSON with fields:\n"
             "- agent_id (string, must match input)\n"
@@ -919,10 +1121,11 @@ class KGAgentFactory:
 
         if not profiles:
             return []
+        safe_seed_text = sanitize_prompt_seed_text(seed_text)
 
         summaries = [{"agent_id": p.id, "name": p.name, "role": p.role, "entity_type": p.entity_type} for p in profiles]
         prompt_user = (
-            f"Scenario: {seed_text[:400]}\n\n"
+            f"Scenario: {safe_seed_text[:400]}\n\n"
             "For each agent below, generate a voice profile JSON with fields:\n"
             "- agent_id (string, must match input)\n"
             '- communication_style: one of "formal_academic", "casual_gen_z",'

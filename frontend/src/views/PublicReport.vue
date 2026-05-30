@@ -1,7 +1,8 @@
 <script setup>
-import { ref, onMounted } from 'vue'
-import { marked } from 'marked'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { getPublicReport } from '../api/report.js'
+import { unwrapApi } from '../api/utils.js'
+import { renderSafeMarkdown } from '../utils/safeMarkdown.js'
 
 const props = defineProps({
   token: { type: String, required: true },
@@ -11,21 +12,10 @@ const report = ref(null)
 const loading = ref(true)
 const error = ref(null)
 const copied = ref(false)
-
-const sanitize = (html) => {
-  return html
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-    .replace(/\son\w+\s*=/gi, ' data-removed=')
-    .replace(/<iframe[\s\S]*?<\/iframe>/gi, '')
-    .replace(/<object[\s\S]*?<\/object>/gi, '')
-    .replace(/<embed[^>]*>/gi, '')
-    .replace(/javascript\s*:/gi, 'data-blocked:')
-    .replace(/<base[^>]*>/gi, '')
-}
+let copyTimer = null
 
 function renderMarkdown(text) {
-  if (!text) return ''
-  return sanitize(marked.parse(text))
+  return renderSafeMarkdown(text)
 }
 
 async function fetchReport() {
@@ -33,7 +23,7 @@ async function fetchReport() {
   error.value = null
   try {
     const res = await getPublicReport(props.token)
-    report.value = res.data?.data || res.data
+    report.value = unwrapApi(res)
   } catch (e) {
     if (e.response?.status === 404) {
       error.value = '報告未找到或連結已失效'
@@ -48,10 +38,14 @@ async function fetchReport() {
 function copyUrl() {
   navigator.clipboard.writeText(window.location.href)
   copied.value = true
-  setTimeout(() => { copied.value = false }, 2000)
+  if (copyTimer) clearTimeout(copyTimer)
+  copyTimer = setTimeout(() => { copied.value = false }, 2000)
 }
 
 onMounted(fetchReport)
+onUnmounted(() => {
+  if (copyTimer) clearTimeout(copyTimer)
+})
 </script>
 
 <template>

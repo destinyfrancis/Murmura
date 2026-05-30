@@ -1,4 +1,4 @@
-.PHONY: quickstart start stop test test-unit test-int test-all test-changed test-file test-cov test-cov-full benchmark-upgrade dev backend frontend clean docker-up docker-down docker-dev docker-logs docker-clean
+.PHONY: quickstart start stop smoke-live smoke-live-twitter smoke-live-reddit test test-unit test-int test-all test-changed test-file test-cov test-cov-full benchmark-upgrade dev backend frontend clean docker-up docker-down docker-dev docker-logs docker-clean
 
 VENV   = .venv311
 PYTEST = $(VENV)/bin/python -m pytest
@@ -10,6 +10,16 @@ quickstart:
 # ── Launch both backend + frontend (assumes deps already installed) ───────────
 start:
 	@export VENV_DIR=$(CURDIR)/$(VENV) && npm run dev
+
+# Required live launch gate: 10 agents x 1 round x Twitter+Reddit
+smoke-live:
+	$(VENV)/bin/python scripts/smoke_live.py
+
+smoke-live-twitter:
+	SMOKE_LIVE_PLATFORMS=twitter $(VENV)/bin/python scripts/smoke_live.py
+
+smoke-live-reddit:
+	SMOKE_LIVE_PLATFORMS=reddit $(VENV)/bin/python scripts/smoke_live.py
 
 # ── Quick unit tests only (no DB, no HTTP client) ──────────────────
 test-unit:
@@ -77,7 +87,7 @@ stop:
 dev: start
 
 backend:
-	$(VENV)/bin/uvicorn backend.app:create_app --factory --reload --port 5001
+	$(VENV)/bin/python -m uvicorn backend.app:create_app --factory --reload --port 5001
 
 frontend:
 	cd frontend && npm run dev

@@ -1,7 +1,8 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
-import { marked } from 'marked'
 import { getReport } from '../api/report.js'
+import { unwrapApi } from '../api/utils.js'
+import { renderSafeMarkdown } from '../utils/safeMarkdown.js'
 
 const props = defineProps({
   reportId: { type: String, required: true },
@@ -11,26 +12,15 @@ const report = ref(null)
 const loading = ref(true)
 const error = ref(null)
 
-const sanitize = (html) => {
-  return html
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-    .replace(/\son\w+\s*=/gi, ' data-removed=')
-    .replace(/<iframe[\s\S]*?<\/iframe>/gi, '')
-    .replace(/<object[\s\S]*?<\/object>/gi, '')
-    .replace(/<embed[^>]*>/gi, '')
-    .replace(/javascript\s*:/gi, 'data-blocked:')
-    .replace(/<base[^>]*>/gi, '')
-}
-
 const renderedMarkdown = computed(() => {
-  if (!report.value?.content) return ''
-  return sanitize(marked.parse(report.value.content))
+  const content = report.value?.content_markdown || report.value?.content
+  return renderSafeMarkdown(content)
 })
 
 onMounted(async () => {
   try {
     const res = await getReport(props.reportId)
-    report.value = res.data?.data || res.data
+    report.value = unwrapApi(res)
   } catch (err) {
     error.value = '無法載入報告'
     console.error(err)

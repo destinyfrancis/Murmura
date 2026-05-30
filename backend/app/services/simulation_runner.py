@@ -357,8 +357,8 @@ class SimulationRunner(
         Group 3 (periodic, fire-and-forget): all interval-driven hooks
 
         The entire method is wrapped in a per-round timeout (ROUND_TIMEOUT_S env var,
-        default 600 s). If a round exceeds the timeout, it is cancelled and logged
-        as a warning so the simulation can continue with the next round.
+        default 600 s). If a round exceeds the timeout, fail the simulation
+        rather than silently skipping hooks and reporting a degraded success.
         """
         round_timeout_s = float(os.environ.get("ROUND_TIMEOUT_S", "600"))
         try:
@@ -367,12 +367,13 @@ class SimulationRunner(
                 timeout=round_timeout_s,
             )
         except asyncio.TimeoutError:
-            logger.warning(
-                "ROUND TIMEOUT: session=%s round=%d exceeded %.0fs — skipping to next round",
+            logger.error(
+                "ROUND TIMEOUT: session=%s round=%d exceeded %.0fs",
                 session_id,
                 round_num,
                 round_timeout_s,
             )
+            raise RuntimeError(f"round_timeout: round {round_num} exceeded {round_timeout_s:.0f}s") from None
 
     async def _execute_round_hooks_inner(self, session_id: str, round_num: int) -> None:
         """Internal implementation of round hooks (called by _execute_round_hooks).

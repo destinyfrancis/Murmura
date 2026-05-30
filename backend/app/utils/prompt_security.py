@@ -18,6 +18,7 @@ MAX_SEED_TEXT = 800
 MAX_SOURCE_SEED_TEXT = 500_000
 MAX_PROMPT_SEED_TEXT = 12_000
 MAX_SCENARIO_DESC = 400
+MAX_USER_QUERY = 1_000
 MAX_AGENT_FIELD = 200
 
 # ---------------------------------------------------------------------------
@@ -100,6 +101,11 @@ def sanitize_scenario_description(text: str) -> str:
         Sanitized string capped at ``MAX_SCENARIO_DESC`` characters.
     """
     return sanitize_seed_text(text, max_len=MAX_SCENARIO_DESC)
+
+
+def sanitize_user_query(text: str) -> str:
+    """Sanitize a user chat/interview query before LLM prompt inclusion."""
+    return sanitize_seed_text(text, max_len=MAX_USER_QUERY)
 
 
 def sanitize_agent_field(text: str) -> str:

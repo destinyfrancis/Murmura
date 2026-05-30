@@ -46,6 +46,7 @@ from backend.app.utils.llm_client import (
     get_step_provider_model,
 )
 from backend.app.utils.logger import get_logger
+from backend.app.utils.prompt_security import sanitize_scenario_description, sanitize_user_query
 
 logger = get_logger("report_agent")
 
@@ -167,13 +168,14 @@ class ReportAgent:
             key_findings, charts_data, agent_log.
         """
         grounded_modes = {"grounded", "social_forecast", "relationship_forecast", "market_launch_forecast"}
+        safe_scenario_question = sanitize_scenario_description(scenario_question) if scenario_question else None
         if report_type in grounded_modes:
             from backend.app.services.grounded_report import GroundedReportBuilder  # noqa: PLC0415
 
             bundle = await GroundedReportBuilder().build(
                 session_id=session_id,
                 report_mode=report_type,
-                question=scenario_question,
+                question=safe_scenario_question,
             )
             report = bundle.to_report_dict()
             await _persist_report(session_id, report, report_type, [])
@@ -183,7 +185,7 @@ class ReportAgent:
         # Only engage when caller explicitly provides a scenario_question.
         # report_type=="full" without a question still uses the legacy ReACT loop
         # to preserve backward compatibility with existing callers.
-        if scenario_question is not None:
+        if safe_scenario_question is not None:
             from backend.app.services.report_orchestrator import ReportOrchestrator  # noqa: PLC0415
 
             orchestrator = ReportOrchestrator(llm_client=_get_llm_client())
@@ -193,7 +195,7 @@ class ReportAgent:
 
             content_md = await orchestrator.generate(
                 session_id=session_id,
-                scenario_question=scenario_question,
+                scenario_question=safe_scenario_question,
                 report_type=report_type,
                 tool_handler=_tool_handler,
                 tool_names=list(TOOLS.keys()),
@@ -354,6 +356,7 @@ class ReportAgent:
         """
         if not message or not message.strip():
             raise ValueError("Message cannot be empty")
+        safe_message = sanitize_user_query(message)
 
         report_context = await _load_report_context(session_id)
 
@@ -376,7 +379,7 @@ class ReportAgent:
         if history:
             messages.extend(history)
 
-        messages.append({"role": "user", "content": message})
+        messages.append({"role": "user", "content": safe_message})
 
         response = await _call_llm(messages, _CHAT_SYSTEM_PROMPT)
         return response

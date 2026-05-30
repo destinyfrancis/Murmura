@@ -63,9 +63,19 @@ def load_from_rows(rows: list) -> None:
     Each row must be indexable as row["key"] and row["value"]
     (aiosqlite Row objects support this with row_factory=sqlite3.Row).
     """
+    from backend.app.utils.secret_settings import decrypt_setting_value, is_secret_setting  # noqa: PLC0415
+
     _store.clear()
     for row in rows:
-        _store[row["key"]] = row["value"]
+        key = row["key"]
+        value = row["value"]
+        try:
+            _store[key] = decrypt_setting_value(key, value)
+        except Exception:
+            if is_secret_setting(key):
+                logger.warning("RuntimeSettings: skipped undecryptable secret setting %s", key)
+                continue
+            raise
     logger.info("RuntimeSettings: loaded %d setting(s) from DB", len(rows))
 
 

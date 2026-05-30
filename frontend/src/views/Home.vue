@@ -10,7 +10,7 @@ import { generateRealitySeed } from '../api/realitySeed.js'
 import { useOnboarding } from '../composables/useOnboarding.js'
 
 const router = useRouter()
-const { t } = useI18n()
+const { t, tm } = useI18n()
 const { steps: onboardingSteps, currentStep, dismissed: onboardingDismissed, nextStep: onboardingNext, dismiss: onboardingDismiss } = useOnboarding()
 const quickStartText = ref('')
 const quickStartLoading = ref(false)
@@ -31,6 +31,7 @@ const domainPacks = ref([])
 const selectedDomain = ref('hk_city')
 const showDomainBuilder = ref(false)
 const showDataConnector = ref(false)
+const showAdvancedTools = ref(false)
 const customDomainPack = ref(null)
 
 const PRESETS = computed(() => [
@@ -53,9 +54,23 @@ const EXAMPLE_SEEDS = computed(() => [
   t('home.sampleCompany'),
 ])
 
+const BETA_WORKFLOWS = computed(() => [
+  { key: 'public_narrative', preset: 'fast', ...tm('home.beta.publicNarrative') },
+  { key: 'supply_chain', preset: 'standard', ...tm('home.beta.supplyChain') },
+  { key: 'company_competition', preset: 'standard', ...tm('home.beta.companyCompetition') },
+  { key: 'policy_shock', preset: 'fast', ...tm('home.beta.policyShock') },
+])
+
 function useExampleSeed(seed) {
   quickStartFile.value = null
   quickStartText.value = seed
+}
+
+function useBetaWorkflow(workflow) {
+  quickStartFile.value = null
+  quickStartText.value = workflow.seed
+  quickStartQuestion.value = workflow.question
+  quickStartPreset.value = workflow.preset
 }
 
 const QS_MAX_BYTES = 10 * 1024 * 1024
@@ -240,6 +255,22 @@ async function handleQuickStart() {
             {{ seed }}
           </button>
         </div>
+
+        <div class="beta-panel">
+          <div class="beta-panel-head">
+            <span class="workbench-label">{{ t('home.betaTitle') }}</span>
+            <small>{{ t('home.betaHint') }}</small>
+          </div>
+          <button
+            v-for="workflow in BETA_WORKFLOWS"
+            :key="workflow.key"
+            class="beta-card"
+            @click="useBetaWorkflow(workflow)"
+          >
+            <span>{{ workflow.label }}</span>
+            <small>{{ workflow.desc }}</small>
+          </button>
+        </div>
       </div>
 
       <div class="prediction-console workbench-panel" v-if="!showDomainBuilder && !showDataConnector">
@@ -392,13 +423,19 @@ async function handleQuickStart() {
       </div>
     </section>
 
-    <section class="home-tools workbench-panel">
+    <section class="home-tools workbench-panel advanced-tools">
       <div class="tools-header">
-        <span class="workbench-label">{{ t('home.toolsTitle') }}</span>
-        <span>{{ domainPacks.length }} {{ t('home.domainPacks') }}</span>
+        <div>
+          <span class="workbench-label">{{ t('home.advancedTitle') }}</span>
+          <p>{{ t('home.advancedSubtitle') }}</p>
+        </div>
+        <button class="advanced-toggle" @click="showAdvancedTools = !showAdvancedTools">
+          {{ showAdvancedTools ? t('home.advancedHide') : t('home.advancedShow') }}
+        </button>
       </div>
 
-      <div v-if="domainPacks.length > 0" class="domain-tabs-wrap">
+      <div v-if="showAdvancedTools && domainPacks.length > 0" class="domain-tabs-wrap">
+        <div class="tools-count">{{ domainPacks.length }} {{ t('home.domainPacks') }}</div>
         <div class="domain-tabs">
           <button
             v-for="pack in domainPacks"
@@ -411,7 +448,7 @@ async function handleQuickStart() {
         </div>
       </div>
 
-      <div class="tools-row">
+      <div v-if="showAdvancedTools" class="tools-row">
         <button class="tool-toggle" @click="showDomainBuilder = !showDomainBuilder">
           <span class="toggle-icon">{{ showDomainBuilder ? '▾' : '▸' }}</span>
           {{ t('home.customDomain') }}
@@ -427,11 +464,11 @@ async function handleQuickStart() {
       </div>
     </section>
 
-    <div v-if="showDomainBuilder" class="tool-panel workbench-panel">
+    <div v-if="showAdvancedTools && showDomainBuilder" class="tool-panel workbench-panel">
       <DomainBuilder v-model="customDomainPack" />
     </div>
 
-    <div v-if="showDataConnector" class="tool-panel workbench-panel">
+    <div v-if="showAdvancedTools && showDataConnector" class="tool-panel workbench-panel">
       <DataConnectorPanel />
     </div>
 
@@ -532,7 +569,8 @@ async function handleQuickStart() {
 }
 
 .workflow-panel,
-.examples-panel {
+.examples-panel,
+.beta-panel {
   border-top: 1px solid var(--border);
   padding-top: 16px;
 }
@@ -599,6 +637,58 @@ async function handleQuickStart() {
 .example-seed:hover {
   border-color: var(--accent);
   color: var(--text-primary);
+}
+
+.beta-panel {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.beta-panel-head {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.beta-panel-head small {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.beta-card {
+  min-height: 82px;
+  padding: 11px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  text-align: left;
+  transition: var(--transition);
+}
+
+.beta-card span {
+  display: block;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.beta-card small {
+  display: block;
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.beta-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
 }
 
 .prediction-console {
@@ -845,16 +935,48 @@ async function handleQuickStart() {
 }
 
 .tools-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--border);
   color: var(--text-muted);
   font-size: 12px;
 }
 
+.tools-header p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+}
+
+.advanced-toggle {
+  border: 1px solid var(--border-hover);
+  background: var(--text-primary);
+  color: var(--text-inverse);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.tools-count {
+  align-self: center;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+}
+
 /* Domain tabs */
 .domain-tabs-wrap {
   display: flex;
+  gap: 12px;
   justify-content: flex-start;
+  flex-wrap: wrap;
 }
 
 .domain-tabs {
@@ -960,6 +1082,10 @@ async function handleQuickStart() {
 
   .workflow-desc {
     grid-column: 2;
+  }
+
+  .beta-panel {
+    grid-template-columns: 1fr;
   }
 }
 </style>

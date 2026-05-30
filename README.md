@@ -6,7 +6,7 @@
 
 **將任何文字變成一個可模擬的世界：人物、動機、反應、風險同可能未來。**
 
-[![License](https://img.shields.io/badge/license-Prosperity%20Public%202.0-orange)](LICENSE)
+[![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-orange)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11-blue)](https://www.python.org/)
 [![Vue](https://img.shields.io/badge/vue-3-brightgreen)](https://vuejs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-async-009688)](https://fastapi.tiangolo.com/)
@@ -273,9 +273,9 @@ Good simulations need good input. Include context, time horizon, actors, uncerta
 
 ### License
 
-Prosperity Public License 2.0.0.
+PolyForm Noncommercial License 1.0.0.
 
-Non-commercial personal, academic, and non-profit use is permitted. Commercial or revenue-generating use requires a separate commercial license.
+Personal, academic, research, educational, and non-profit use is permitted for noncommercial purposes. Commercial use, revenue-generating use, hosted SaaS offerings, managed services, resale, or selling substantially similar clones requires a separate commercial license from the author.
 
 Copyright © 2026 destinyfrancis. All rights reserved.
 
@@ -535,8 +535,8 @@ Murmura 適合探索、研究和情景壓力測試。它不是專業判斷的替
 
 ### License
 
-Prosperity Public License 2.0.0.
+PolyForm Noncommercial License 1.0.0.
 
-非商業個人、學術和非牟利用途可以免費使用。商業或營利用途需要另外取得商業授權。
+非商業個人、學術、研究、教育和非牟利用途可以免費使用。商業用途、營利用途、託管 SaaS、managed service、轉售，或銷售實質相似的 clone，均需要先向作者取得另外的商業授權。
 
 Copyright © 2026 destinyfrancis. All rights reserved.

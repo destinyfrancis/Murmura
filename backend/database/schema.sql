@@ -188,6 +188,7 @@ CREATE TABLE IF NOT EXISTS agent_profiles (
     activity_level REAL DEFAULT 0.5,
     influence_weight REAL DEFAULT 1.0,
     is_stakeholder INTEGER DEFAULT 0,
+    properties TEXT DEFAULT '{}',
     big5_openness REAL,
     big5_conscientiousness REAL,
     big5_extraversion REAL,

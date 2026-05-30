@@ -126,8 +126,9 @@ class TestAssignPoliticalStance:
         assert _EDUCATION_LEAN["學位或以上"] > 0
         assert _EDUCATION_LEAN["小學或以下"] < 0
 
-    def test_personality_contribution_small_for_moderate_traits(self, model: PoliticalModel) -> None:
+    def test_personality_contribution_small_for_moderate_traits(self, model: PoliticalModel, monkeypatch) -> None:
         """H5: personality multipliers should be small to avoid double-counting with belief bias."""
+        monkeypatch.setattr("backend.app.services.political_model.random.gauss", lambda _mu, _sigma: 0.0)
         # Moderate personality: openness=0.7, neuroticism=0.6
         # Personality contribution = (0.7-0.5)*multiplier + (0.6-0.5)*multiplier
         # With reduced multipliers (0.05 and 0.02), total ≈ 0.012

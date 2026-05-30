@@ -29,7 +29,6 @@ References:
 
 from __future__ import annotations
 
-import re
 import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -170,16 +169,10 @@ class DuckDBAnalytics:
             if not HAS_DUCKDB:
                 raise RuntimeError("duckdb is not installed")
 
-            # Validate path: only allow safe filesystem characters to prevent
-            # SQL injection via the ATTACH statement.
-            if not re.match(r"^[\w./\-]+$", self._sqlite_path):
-                raise ValueError(f"Invalid database path: {self._sqlite_path!r}")
-
             conn = duckdb.connect(":memory:")
             conn.execute("INSTALL sqlite; LOAD sqlite;")
-            # Path is safe to interpolate: validated by regex above to contain
-            # only word chars, dots, slashes, and hyphens — no SQL metacharacters.
-            conn.execute(f"ATTACH '{self._sqlite_path}' AS sqlite_db (TYPE SQLITE, READ_ONLY)")
+            escaped_path = self._sqlite_path.replace("'", "''")
+            conn.execute(f"ATTACH '{escaped_path}' AS sqlite_db (TYPE SQLITE, READ_ONLY)")
             # Set default schema so queries can reference tables directly
             conn.execute("USE sqlite_db")
             self._conn = conn

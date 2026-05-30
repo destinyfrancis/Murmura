@@ -764,7 +764,7 @@ class TestKGDrivenPipeline:
         svc = ZeroConfigService()
         with patch.object(svc, "_llm_detect_mode", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = "kg_driven"
-            result = await svc.detect_mode_async(_KG_SEED)
+            result = await svc.detect_mode_async("A fictional academy changes its curriculum and rituals")
         mock_llm.assert_called_once()
         assert result == "kg_driven"
 

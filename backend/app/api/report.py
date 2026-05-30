@@ -1,11 +1,12 @@
 """Step 4-5: Report generation and chat endpoints."""
 
 import json
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel as _BaseModel
 
-from backend.app.api.auth import _limiter
+from backend.app.api.auth import UserProfile, _limiter, get_current_user
 from backend.app.models.request import (
     AgentInterviewRequest,
     ReportChatRequest,
@@ -17,7 +18,8 @@ from backend.app.services.narrative_analyst import NarrativeAnalyst
 from backend.app.services.simulation_manager import get_simulation_manager
 from backend.app.utils.db import get_db
 from backend.app.utils.logger import get_logger
-from backend.app.utils.prompt_security import sanitize_scenario_description
+from backend.app.utils.ownership import require_report_access, require_session_access
+from backend.app.utils.prompt_security import sanitize_scenario_description, sanitize_user_query
 
 
 async def _release_subprocess(session_id: str) -> None:
@@ -74,9 +76,14 @@ async def get_public_report(token: str) -> APIResponse:
 
 @router.post("/generate", response_model=APIResponse)
 @_limiter.limit("5/minute")
-async def generate_report(request: Request, req: ReportGenerateRequest) -> APIResponse:
+async def generate_report(
+    request: Request,
+    req: ReportGenerateRequest,
+    user: Annotated[UserProfile, Depends(get_current_user)],
+) -> APIResponse:
     """Generate an analysis report from a completed simulation."""
     try:
+        await require_session_access(req.session_id, user)
         agent = ReportAgent()
         safe_question = sanitize_scenario_description(req.scenario_question) if req.scenario_question else None
         report = await agent.generate_report(
@@ -96,29 +103,41 @@ async def generate_report(request: Request, req: ReportGenerateRequest) -> APIRe
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Bad request") from exc
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("generate_report failed for session %s", req.session_id)
         raise HTTPException(status_code=500, detail="Internal server error") from exc
 
 
 @router.get("/{session_id}/narrative", response_model=APIResponse)
-async def get_narrative_report(session_id: str) -> APIResponse:
+async def get_narrative_report(
+    session_id: str,
+    user: Annotated[UserProfile, Depends(get_current_user)],
+) -> APIResponse:
     """Generate or retrieve a narrative-driven dossier for a simulation."""
     try:
+        await require_session_access(session_id, user)
         analyst = NarrativeAnalyst()
         dossier = await analyst.generate_dossier(session_id)
         return APIResponse(success=True, data=dossier)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("get_narrative_report failed for session %s", session_id)
         raise HTTPException(status_code=500, detail="Internal server error") from exc
 
 
 @router.get("/{report_id}", response_model=APIResponse)
-async def get_report(report_id: str) -> APIResponse:
+async def get_report(
+    report_id: str,
+    user: Annotated[UserProfile, Depends(get_current_user)],
+) -> APIResponse:
     """Retrieve a previously generated report."""
     try:
+        await require_report_access(report_id, user)
         async with get_db() as db:
             cursor = await db.execute("SELECT * FROM reports WHERE id = ?", (report_id,))
             row = await cursor.fetchone()
@@ -149,9 +168,13 @@ async def get_report(report_id: str) -> APIResponse:
 
 
 @router.post("/chat", response_model=APIResponse)
-async def chat_with_report(req: ReportChatRequest) -> APIResponse:
+async def chat_with_report(
+    req: ReportChatRequest,
+    user: Annotated[UserProfile, Depends(get_current_user)],
+) -> APIResponse:
     """Chat with the report agent for follow-up analysis."""
     try:
+        await require_session_access(req.session_id, user)
         agent = ReportAgent()
         reply = await agent.chat(
             session_id=req.session_id,
@@ -168,26 +191,36 @@ async def chat_with_report(req: ReportChatRequest) -> APIResponse:
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Bad request") from exc
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("chat_with_report failed for session %s", req.session_id)
         raise HTTPException(status_code=500, detail="Internal server error") from exc
 
 
 @router.post("/interview", response_model=APIResponse)
-async def interview_agent(req: AgentInterviewRequest) -> APIResponse:
+async def interview_agent(
+    req: AgentInterviewRequest,
+    user: Annotated[UserProfile, Depends(get_current_user)],
+) -> APIResponse:
     """Interview a specific agent about their decisions.
 
     Enriches the prompt with agent memories and recent actions for realism.
     """
     try:
+        await require_session_access(req.session_id, user)
+        safe_question = sanitize_user_query(req.question)
         # Load agent profile — string IDs (kg_driven) look up by oasis_username,
         # integer IDs (hk_demographic) look up by primary key.
         async with get_db() as db:
             if isinstance(req.agent_id, str):
                 profile_row = await (
                     await db.execute(
-                        "SELECT * FROM agent_profiles WHERE session_id = ? AND oasis_username = ? LIMIT 1",
-                        (req.session_id, req.agent_id),
+                        """SELECT * FROM agent_profiles
+                           WHERE session_id = ?
+                             AND (CAST(id AS TEXT) = ? OR oasis_username = ?)
+                           LIMIT 1""",
+                        (req.session_id, req.agent_id, req.agent_id),
                     )
                 ).fetchone()
             else:
@@ -202,11 +235,11 @@ async def interview_agent(req: AgentInterviewRequest) -> APIResponse:
         if profile_row:
             _profile = dict(profile_row)
             profile_ctx = (
-                f"姓名：{_profile.get('username', '未知')}\n"
+                f"姓名：{_profile.get('oasis_username') or _profile.get('id') or '未知'}\n"
                 f"年齡：{_profile.get('age', '?')} 歲\n"
                 f"職業：{_profile.get('occupation', '?')}\n"
                 f"地區：{_profile.get('district', '?')}\n"
-                f"性格：{_profile.get('user_char', '')[:200]}\n"
+                f"角色設定：{str(_profile.get('oasis_persona') or _profile.get('backstory') or '')[:500]}\n"
             )
 
         # Load recent memories
@@ -255,7 +288,7 @@ async def interview_agent(req: AgentInterviewRequest) -> APIResponse:
         # Call LLM with enriched context
         from backend.app.services.report_agent import _call_llm  # noqa: PLC0415
 
-        messages = [{"role": "user", "content": req.question}]
+        messages = [{"role": "user", "content": safe_question}]
         answer = await _call_llm(messages, enriched_system)
 
         return APIResponse(
@@ -263,13 +296,15 @@ async def interview_agent(req: AgentInterviewRequest) -> APIResponse:
             data={
                 "session_id": req.session_id,
                 "agent_id": req.agent_id,
-                "question": req.question,
+                "question": safe_question,
                 "answer": answer,
                 "response": answer,
             },
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Bad request") from exc
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception(
             "interview_agent failed for agent %s session %s",
@@ -281,8 +316,12 @@ async def interview_agent(req: AgentInterviewRequest) -> APIResponse:
 
 
 @router.get("/{report_id}/pdf")
-async def export_report_pdf(report_id: str):
+async def export_report_pdf(
+    report_id: str,
+    user: Annotated[UserProfile, Depends(get_current_user)],
+):
     """Export report as PDF"""
+    import html as html_lib
     import re
 
     try:
@@ -291,6 +330,7 @@ async def export_report_pdf(report_id: str):
         raise HTTPException(status_code=500, detail="weasyprint not installed")
 
     try:
+        await require_report_access(report_id, user)
         async with get_db() as db:
             cursor = await db.execute("SELECT * FROM reports WHERE id = ?", (report_id,))
             row = await cursor.fetchone()
@@ -302,16 +342,24 @@ async def export_report_pdf(report_id: str):
         title = report.get("title", f"Report {report_id}")
         created_at = report.get("created_at", "")
 
-        # Convert markdown to basic HTML
-        html_content = content.replace("\n\n", "</p><p>").replace("\n", "<br>")
+        safe_title = html_lib.escape(str(title), quote=True)
+        safe_created_at = html_lib.escape(str(created_at), quote=True)
+        safe_report_id = html_lib.escape(str(report_id), quote=True)
+        safe_content = html_lib.escape(str(content), quote=True)
+
+        # Convert escaped markdown to basic HTML without allowing raw HTML through.
+        html_content = safe_content.replace("\n\n", "</p><p>").replace("\n", "<br>")
         html_content = re.sub(r"\*\*(.*?)\*\*", r"<strong>\1</strong>", html_content)
         html_content = re.sub(r"#{1,3} (.+)", r"<h2>\1</h2>", html_content)
+
+        def _deny_remote_url_fetcher(url: str, *args, **kwargs) -> dict:
+            raise ValueError("Remote URL fetch is disabled for report PDF export")
 
         html = f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>{title}</title>
+<title>{safe_title}</title>
 <style>
   body {{ font-family: 'Noto Sans TC', sans-serif; margin: 40px; color: #333; }}
   h1 {{ color: #1a1a2e; border-bottom: 2px solid #e94560; padding-bottom: 10px; }}
@@ -321,13 +369,13 @@ async def export_report_pdf(report_id: str):
 </style>
 </head>
 <body>
-<h1>{title}</h1>
-<div class="meta">生成時間：{created_at} | Session: {report_id}</div>
+<h1>{safe_title}</h1>
+<div class="meta">生成時間：{safe_created_at} | Session: {safe_report_id}</div>
 <p>{html_content}</p>
 </body>
 </html>"""
 
-        pdf_bytes = HTML(string=html).write_pdf()
+        pdf_bytes = HTML(string=html, url_fetcher=_deny_remote_url_fetcher).write_pdf()
 
         # PDF export is a terminal action — release the OASIS subprocess.
         sid = report.get("session_id")
@@ -349,11 +397,15 @@ async def export_report_pdf(report_id: str):
 
 
 @router.post("/{report_id}/share", response_model=APIResponse)
-async def share_report(report_id: str) -> APIResponse:
+async def share_report(
+    report_id: str,
+    user: Annotated[UserProfile, Depends(get_current_user)],
+) -> APIResponse:
     """Generate a share token for public access to a report."""
     import secrets
 
     try:
+        await require_report_access(report_id, user)
         token = secrets.token_urlsafe(16)
         async with get_db() as db:
             row = await (await db.execute("SELECT id, session_id FROM reports WHERE id = ?", (report_id,))).fetchone()
@@ -389,12 +441,16 @@ async def share_report(report_id: str) -> APIResponse:
 
 
 @router.post("/{session_id}/release", response_model=APIResponse)
-async def release_session_subprocess(session_id: str) -> APIResponse:
+async def release_session_subprocess(
+    session_id: str,
+    user: Annotated[UserProfile, Depends(get_current_user)],
+) -> APIResponse:
     """Explicitly release the OASIS subprocess for a session.
 
     Frontend should call this when user navigates away from Step 4/5,
     or when agent interaction is complete.
     """
+    await require_session_access(session_id, user)
     await _release_subprocess(session_id)
     return APIResponse(success=True, data={"session_id": session_id, "released": True})
 
@@ -410,7 +466,11 @@ class XAIToolRequest(_BaseModel):
 
 
 @router.post("/{session_id}/xai-tool", response_model=APIResponse)
-async def invoke_xai_tool(session_id: str, req: XAIToolRequest) -> APIResponse:
+async def invoke_xai_tool(
+    session_id: str,
+    req: XAIToolRequest,
+    user: Annotated[UserProfile, Depends(get_current_user)],
+) -> APIResponse:
     """Invoke a single named XAI tool and return its output."""
     from backend.app.services.report_agent import _TOOL_HANDLERS, TOOLS
 
@@ -426,6 +486,7 @@ async def invoke_xai_tool(session_id: str, req: XAIToolRequest) -> APIResponse:
             detail=f"No handler registered for tool {req.tool_name!r}",
         )
     try:
+        await require_session_access(session_id, user)
         result = await handler(session_id, **req.params)
         return APIResponse(success=True, data={"tool": req.tool_name, "result": result})
     except HTTPException:

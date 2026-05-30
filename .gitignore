@@ -27,6 +27,8 @@ data/benchmarks/*_[0-9]*T*.json
 
 # Logs
 log/
+logs/
+reports/
 *.log
 firebase-debug.log
 

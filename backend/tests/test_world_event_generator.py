@@ -79,6 +79,22 @@ async def test_generate_filters_unknown_metric_keys():
 
 
 @pytest.mark.asyncio
+async def test_generate_accepts_bare_event_list():
+    gen = WorldEventGenerator()
+    with patch.object(gen._llm, "chat_json", new_callable=AsyncMock) as mock_llm:
+        mock_llm.return_value = _MOCK_LLM_RESPONSE["events"]
+        events = await gen.generate(
+            scenario_description="test",
+            round_number=1,
+            active_metrics=("escalation_index",),
+            prev_dominant_stance={},
+            event_history=[],
+        )
+    assert len(events) == 2
+    assert events[0].impact_vector == {"escalation_index": 0.15}
+
+
+@pytest.mark.asyncio
 async def test_generate_returns_empty_on_llm_failure():
     gen = WorldEventGenerator()
     with patch.object(gen._llm, "chat_json", side_effect=RuntimeError("LLM down")):

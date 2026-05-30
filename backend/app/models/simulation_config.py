@@ -178,7 +178,9 @@ def resolve_preset(
     if not preset_name:
         return PRESET_STANDARD
 
-    if preset_name == "custom":
+    preset_key = str(preset_name).strip().lower()
+
+    if preset_key == "custom":
         if not agent_count or not round_count:
             raise ValueError("custom preset requires agent_count and round_count")
         if agent_count > 50_000:
@@ -191,7 +193,7 @@ def resolve_preset(
             mc_trials=mc_trials or 100,
         )
 
-    preset = PRESETS.get(preset_name)
+    preset = PRESETS.get(preset_key)
     if preset is None:
         raise ValueError(f"Unknown preset '{preset_name}'. Available: {sorted(PRESETS)}, 'custom'")
     return preset

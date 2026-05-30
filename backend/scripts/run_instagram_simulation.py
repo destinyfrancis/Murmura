@@ -249,6 +249,27 @@ LLM_ENV_KEYS: dict[str, str] = {
 }
 
 
+def _model_max_tokens(config: dict[str, Any]) -> int:
+    try:
+        return max(1, int(os.environ.get("OASIS_MODEL_MAX_TOKENS") or config.get("oasis_model_max_tokens") or 1024))
+    except (TypeError, ValueError):
+        return 1024
+
+
+def _round_timeout_s(config: dict[str, Any]) -> float:
+    try:
+        return max(1.0, float(os.environ.get("OASIS_ROUND_TIMEOUT_S") or config.get("oasis_round_timeout_s") or 180))
+    except (TypeError, ValueError):
+        return 180.0
+
+
+def _llm_timeout_s(config: dict[str, Any]) -> float:
+    try:
+        return max(1.0, float(os.environ.get("OASIS_LLM_TIMEOUT_S") or config.get("oasis_llm_timeout_s") or 30))
+    except (TypeError, ValueError):
+        return 30.0
+
+
 def build_model(config: dict[str, Any]) -> Any:
     """Create a CAMEL ModelFactory model from config."""
     provider = config.get("llm_provider", "openrouter")
@@ -268,8 +289,10 @@ def build_model(config: dict[str, Any]) -> Any:
         model_platform=ModelPlatformType.OPENAI_COMPATIBLE_MODEL,
         model_type=model_name,
         url=base_url,
-        model_config_dict={"temperature": 0.7, "max_tokens": 4096},
+        model_config_dict={"temperature": 0.7, "max_tokens": _model_max_tokens(config)},
         api_key=api_key,
+        timeout=_llm_timeout_s(config),
+        max_retries=1,
     )
 
 
@@ -448,6 +471,7 @@ async def run_instagram_simulation(config: dict[str, Any]) -> None:
     last_round = 0
     last_post_id = 0
     last_trace_ts = ""
+    round_timeout_s = _round_timeout_s(config)
 
     for round_num in range(1, round_count + 1):
         last_round = round_num
@@ -464,7 +488,7 @@ async def run_instagram_simulation(config: dict[str, Any]) -> None:
         # Normal LLM round
         try:
             before_actions = _effective_action_count(db_path)
-            await env.step(llm_actions)
+            await asyncio.wait_for(env.step(llm_actions), timeout=round_timeout_s)
             round_action_count = _effective_action_count(db_path) - before_actions
             if round_action_count <= 0:
                 raise RuntimeError("No effective LLM actions were recorded; model call likely failed")

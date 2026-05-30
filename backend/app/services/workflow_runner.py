@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -115,15 +116,18 @@ class WorkflowRunner:
             graph_seed_id = str(uuid.uuid4())
             graph_builder = GraphBuilderService()
             try:
+                graph_timeout_s = float(os.environ.get("WORKFLOW_GRAPH_TIMEOUT_S", "90"))
                 graph_result = await asyncio.wait_for(
                     graph_builder.build_graph_from_seed(
                         graph_id=graph_seed_id,
                         scenario_type=config.domain_pack_id,
                         seed_text=seed_text,
                     ),
-                    timeout=90,
+                    timeout=max(1.0, graph_timeout_s),
                 )
             except Exception as exc:  # noqa: BLE001
+                if os.environ.get("MURMURA_STRICT_LIVE") == "1":
+                    raise RuntimeError(f"oasis_runtime_error: graph_build_failed:{exc.__class__.__name__}") from exc
                 logger.warning("Graph build degraded for workflow %s: %s", workflow_id, exc)
                 graph_result = await self._build_fallback_graph(
                     graph_builder=graph_builder,
@@ -170,6 +174,32 @@ class WorkflowRunner:
             )
             session_id = session_data["session_id"]
             await self._update(workflow_id, session_id=session_id)
+            preflight_report: dict[str, Any] = {}
+            try:
+                from backend.app.services.simulation_preflight import SimulationPreflightService  # noqa: PLC0415
+
+                preflight_report = await SimulationPreflightService().run_for_session(session_id)
+                await self._update(
+                    workflow_id,
+                    artifacts={
+                        "time_config": preflight_report.get("time_config"),
+                        "model_check": preflight_report.get("model_check"),
+                        "cost_estimate": preflight_report.get("cost_estimate"),
+                        "simulation_readiness": preflight_report.get("simulation_readiness"),
+                    },
+                )
+                await self._event(
+                    workflow_id,
+                    "preflight_ready" if preflight_report.get("ready") else "preflight_blocked",
+                    "env",
+                    "Simulation preflight completed",
+                    {
+                        "ready": bool(preflight_report.get("ready")),
+                        "blocking_errors": preflight_report.get("blocking_errors", []),
+                    },
+                )
+            except Exception:
+                logger.warning("Workflow preflight failed for %s", workflow_id, exc_info=True)
             await self._event(
                 workflow_id,
                 "session_created",
@@ -179,10 +209,14 @@ class WorkflowRunner:
             )
 
             if is_kg:
-                profiles, csv_path = await generate_agents(
-                    session_id=session_id,
-                    request={"graph_id": graph_id, "seed_text": seed_text, "agent_count": resolved.agents},
-                    mode="kg_driven",
+                agent_timeout_s = float(os.environ.get("WORKFLOW_AGENT_TIMEOUT_S", "900"))
+                profiles, csv_path = await asyncio.wait_for(
+                    generate_agents(
+                        session_id=session_id,
+                        request={"graph_id": graph_id, "seed_text": seed_text, "agent_count": resolved.agents},
+                        mode="kg_driven",
+                    ),
+                    timeout=max(1.0, agent_timeout_s),
                 )
                 try:
                     await store_universal_agent_profiles(session_id, profiles)
@@ -225,20 +259,36 @@ class WorkflowRunner:
 
             capabilities = get_capabilities()
             simulation_available = bool(capabilities.get("simulation_available", capabilities.get("simulation")))
-            simulation_skipped = not simulation_available
+            simulation_skipped = False
             if simulation_available:
                 await self._update(workflow_id, step="simulation", step_index=3, message="Simulation queued")
                 await manager.start_session(session_id)
+                session_dir = f"data/sessions/{session_id}"
                 await self._event(
                     workflow_id,
                     "simulation_started",
                     "simulation",
                     "Simulation queued",
-                    {"session_id": session_id},
+                    {
+                        "session_id": session_id,
+                        "sim_config": f"{session_dir}/sim_config.json",
+                        "agents_csv": f"{session_dir}/agents.csv",
+                        "sim_log": f"{session_dir}/sim.log",
+                    },
                 )
                 await self._monitor_simulation(workflow_id, session_id)
             else:
                 reason = str(capabilities.get("reason") or "unknown")
+                if not _allow_internal_degraded():
+                    await self._event(
+                        workflow_id,
+                        "simulation_failed",
+                        "simulation",
+                        "Simulation engine unavailable",
+                        {"session_id": session_id, "failure_reason": reason},
+                    )
+                    raise RuntimeError(f"simulation_engine_unavailable:{reason}")
+                simulation_skipped = True
                 await self._update(
                     workflow_id,
                     step="report",
@@ -248,9 +298,9 @@ class WorkflowRunner:
                 )
                 await self._event(
                     workflow_id,
-                    "simulation_skipped",
+                    "internal_degraded",
                     "simulation",
-                    "Simulation engine unavailable; graph forecast mode active",
+                    "Internal degraded mode: simulation engine unavailable",
                     {"session_id": session_id, "reason": reason},
                 )
 
@@ -306,18 +356,22 @@ class WorkflowRunner:
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("Workflow %s failed", workflow_id)
+            from backend.app.services.simulation_artifacts import classify_failure  # noqa: PLC0415
+
+            failure_reason = classify_failure(str(exc))
             await self._update(
                 workflow_id,
                 status="failed",
                 message="Workflow failed",
                 error_message=str(exc.__class__.__name__),
+                artifacts={"failure_reason": failure_reason},
             )
             await self._event(
                 workflow_id,
                 "failed",
                 "error",
                 "Workflow failed",
-                {"error": exc.__class__.__name__},
+                {"error": exc.__class__.__name__, "failure_reason": failure_reason},
             )
 
     async def get_workflow(self, workflow_id: str) -> dict[str, Any] | None:
@@ -348,26 +402,59 @@ class WorkflowRunner:
     async def _monitor_simulation(self, workflow_id: str, session_id: str) -> None:
         manager = get_simulation_manager()
         last_status = ""
-        for _ in range(240):
+        timeout_s = float(os.environ.get("WORKFLOW_SIM_MONITOR_TIMEOUT_S", "480"))
+        deadline = asyncio.get_running_loop().time() + max(1.0, timeout_s)
+        while asyncio.get_running_loop().time() < deadline:
             session = await manager.get_session(session_id)
             status = str(session.get("status") or "")
             current_round = int(session.get("current_round") or 0)
             total_rounds = int(session.get("round_count") or 0)
             if status != last_status or current_round:
+                from backend.app.services.simulation_artifacts import collect_simulation_artifacts  # noqa: PLC0415
+
+                artifact_summary: dict[str, Any] = {}
+                try:
+                    artifacts = await collect_simulation_artifacts(session_id)
+                    artifact_summary = {
+                        "action_count": artifacts["counts"]["actions"],
+                        "failure_reason": artifacts.get("failure_reason", ""),
+                    }
+                    await self._update(
+                        workflow_id,
+                        artifacts={
+                            "action_count": artifacts["counts"]["actions"],
+                            "sim_config": artifacts["artifacts"]["sim_config"],
+                            "agents_csv": artifacts["artifacts"]["agents_csv"],
+                            "sim_log": artifacts["artifacts"]["sim_log"],
+                            "sim_stdout": artifacts["artifacts"].get("sim_stdout"),
+                            "twitter_stdout": artifacts["artifacts"].get("twitter_stdout"),
+                            "twitter_stderr": artifacts["artifacts"].get("twitter_stderr"),
+                            "reddit_stdout": artifacts["artifacts"].get("reddit_stdout"),
+                            "reddit_stderr": artifacts["artifacts"].get("reddit_stderr"),
+                            "failure_reason": artifact_summary["failure_reason"],
+                        },
+                    )
+                except Exception:
+                    artifact_summary = {}
                 await self._event(
                     workflow_id,
                     "simulation_status",
                     "simulation",
                     f"Simulation {status or 'pending'}",
-                    {"status": status, "current_round": current_round, "total_rounds": total_rounds},
+                    {
+                        "status": status,
+                        "current_round": current_round,
+                        "total_rounds": total_rounds,
+                        **artifact_summary,
+                    },
                 )
                 last_status = status
             if status in {"completed", "failed"}:
                 if status == "failed":
-                    raise RuntimeError("simulation_failed")
+                    raise RuntimeError(session.get("error_message") or "simulation_failed")
                 return
             await asyncio.sleep(2)
-        raise TimeoutError("simulation monitor timed out")
+        raise TimeoutError("round_timeout: simulation monitor timed out")
 
     async def _build_fallback_graph(
         self,
@@ -562,39 +649,73 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _allow_internal_degraded() -> bool:
+    return os.environ.get("MURMURA_INTERNAL_DEGRADED", "").lower() in {"1", "true", "yes"}
+
+
 def _fallback_actor_specs(seed_text: str) -> list[tuple[str, str, str]]:
+    """Return conservative actors grounded in broad seed cues."""
     text = seed_text.lower()
     specs: list[tuple[str, str, str]] = []
+
+    if any(term in text for term in ("wearable", "pendant", "device", "product", "startup", "competitor", "customer")):
+        specs.extend(
+            [
+                ("Company", "Launching startup", "Core company deciding positioning, trust strategy, pricing, and rollout cadence."),
+                ("Product", "Smart wearable product", "The product whose adoption depends on usefulness, privacy perception, and reliability."),
+                ("CustomerSegment", "Early consumer customers", "Demand-side users weighing convenience, identity, privacy, and price."),
+                ("AdvocacyGroup", "Privacy advocates", "Civil-society actors scrutinizing surveillance risk, consent, and data governance."),
+                ("MediaOutlet", "Technology reviewers", "Review and creator ecosystem shaping credibility, skepticism, and social proof."),
+                ("EnterpriseBuyer", "Enterprise buyers", "Organizational customers evaluating procurement risk, compliance, and employee acceptance."),
+                ("Investor", "Startup investors", "Capital providers reacting to traction, category risk, and competitive pressure."),
+                ("Competitor", "Copycat competitors", "Rival firms responding through price, distribution, and feature imitation."),
+            ]
+        )
+
+    if "company" in text or "competitor" in text or "market" in text or "市場" in seed_text or "競爭" in seed_text:
+        specs.extend(
+            [
+                ("Company", "Core company", "Organization making strategic decisions under market uncertainty."),
+                ("Competitor", "Major competitors", "Rivals responding to pricing, positioning, and resource shifts."),
+                ("CustomerSegment", "Customer segments", "Demand-side actors changing adoption, trust, and purchase timing."),
+                ("Investor", "Investors and analysts", "Financial stakeholders repricing growth, risk, and execution quality."),
+                ("Regulator", "Regulators and standards bodies", "Public or quasi-public actors setting compliance expectations."),
+            ]
+        )
+
+    if any(term in seed_text for term in ("香港", "樓市", "按揭", "銀行", "租客", "業主")):
+        specs.extend(
+            [
+                ("Government", "政府政策制定者", "Public policy actor balancing market stability and affordability."),
+                ("FinancialInstitution", "銀行與按揭機構", "Credit providers repricing mortgage risk and liquidity constraints."),
+                ("Household", "年輕家庭與首次置業者", "Demand-side households reassessing affordability and expectations."),
+                ("PropertyOwner", "業主與投資者", "Asset holders reacting to price pressure, rental yield, and leverage."),
+                ("Tenant", "租客群體", "Residents affected by rental spillovers and housing insecurity."),
+                ("Developer", "地產商", "Supply-side firms adjusting launches, pricing, and financing plans."),
+            ]
+        )
+
     if "iran" in text or "伊朗" in seed_text:
-        specs.extend(
-            [
-                ("Country", "Iran", "State actor balancing deterrence, regime legitimacy, and economic pressure."),
-                ("Government", "Iranian leadership", "Decision-making circle around escalation, negotiation, and domestic consent."),
-            ]
-        )
+        specs.append(("Country", "Iran", "State actor balancing deterrence, legitimacy, and economic pressure."))
     if "united states" in text or "u.s." in text or " us " in f" {text} " or "美國" in seed_text:
-        specs.extend(
-            [
-                ("Country", "United States", "State actor balancing coercive diplomacy, alliance commitments, and domestic politics."),
-                ("Government", "US administration", "Executive decision-makers shaping sanctions, force posture, and negotiation terms."),
-            ]
-        )
+        specs.append(("Country", "United States", "State actor balancing diplomacy, alliances, and domestic constraints."))
     if "israel" in text or "以色列" in seed_text:
-        specs.append(("Country", "Israel", "Regional state actor affected by deterrence, threat perception, and alliance signals."))
-    if "oil" in text or "荷爾木茲" in seed_text or "hormuz" in text:
-        specs.append(("EconomicActor", "Energy and shipping markets", "Market actor repricing supply disruption, insurance, and transport risk."))
+        specs.append(("Country", "Israel", "Regional actor affected by threat perception and alliance signals."))
+    if "oil" in text or "hormuz" in text or "荷爾木茲" in seed_text:
+        specs.append(("Market", "Energy and shipping markets", "Market actor repricing supply disruption, insurance, and transport risk."))
+
     specs.extend(
         [
-            ("InternationalOrganization", "International mediators", "Diplomatic actors attempting to reduce escalation and preserve channels."),
-            ("MediaOutlet", "Global media ecosystem", "Narrative actor amplifying casualty claims, threats, leaks, and public opinion frames."),
-            ("CivilSociety", "Regional civilians and diaspora publics", "Non-state public actor reacting to insecurity, nationalism, and humanitarian costs."),
-            ("NonStateActor", "Regional armed non-state actors", "Proxy or aligned armed groups able to alter escalation dynamics."),
+            ("MediaOutlet", "Media and information platforms", "Narrative actor amplifying uncertainty and public interpretation."),
+            ("CivilSociety", "Affected publics", "Collective public actor reacting through trust, fear, adaptation, and pressure."),
+            ("Institution", "Coordinating institutions", "Institutional actor attempting to stabilize expectations and reduce systemic risk."),
         ]
     )
     deduped: list[tuple[str, str, str]] = []
     seen: set[str] = set()
     for spec in specs:
-        if spec[1] not in seen:
-            seen.add(spec[1])
-            deduped.append(spec)
+        if spec[1] in seen:
+            continue
+        seen.add(spec[1])
+        deduped.append(spec)
     return deduped[:18]

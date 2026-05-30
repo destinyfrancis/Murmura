@@ -109,7 +109,7 @@ class CognitiveAgentEngine:
             {"role": "user", "content": user_content},
         ]
 
-        llm_kwargs: dict[str, Any] = {"max_tokens": 1024, "temperature": 0.5}
+        llm_kwargs: dict[str, Any] = {"max_tokens": 4096, "temperature": 0.35}
         if provider is not None:
             llm_kwargs["provider"] = provider
         if model is not None:

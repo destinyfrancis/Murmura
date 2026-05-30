@@ -1,7 +1,7 @@
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { createSimulation, suggestConfig } from '../api/simulation.js'
+import { createSimulation, runSimulationPreflight, suggestConfig } from '../api/simulation.js'
 import PresetSelector from './PresetSelector.vue'
 
 const props = defineProps({
@@ -36,6 +36,7 @@ onMounted(async () => {
   }
   // Normal mode: load pack details
   await loadPackDetails(props.session.domainPackId)
+  await runPreflight()
 })
 watch(() => props.session.domainPackId, (id) => loadPackDetails(id))
 
@@ -66,6 +67,11 @@ const config = reactive({
 const submitting = ref(false)
 const error = ref(null)
 const mode = ref('beginner')
+const preflight = ref(null)
+const preflightLoading = ref(false)
+const preflightError = ref('')
+let preflightTimer = null
+let preflightSeq = 0
 
 const showAiAssistant = ref(false)
 const aiQuery = ref('')
@@ -84,6 +90,7 @@ function onPresetChange(preset) {
   presetConfig.value = { ...preset }
   config.agentCount = preset.agents
   config.roundCount = preset.rounds
+  schedulePreflight()
 }
 
 const newShock = reactive({
@@ -113,6 +120,7 @@ function togglePlatform(platform) {
   } else {
     config.platforms = [...config.platforms, platform]
   }
+  schedulePreflight()
 }
 
 function addShock() {
@@ -160,13 +168,100 @@ function applyAiSuggestion() {
   showAiAssistant.value = false
   aiSuggestion.value = null
   aiQuery.value = ''
+  schedulePreflight()
 }
+
+const preflightBlocking = computed(() => preflight.value?.blocking_errors || [])
+const preflightWarnings = computed(() => preflight.value?.warnings || [])
+const preflightReady = computed(() => preflight.value?.ready === true)
+const preflightCost = computed(() => preflight.value?.cost_estimate?.estimated_cost_usd)
+const timeScaleLabel = computed(() => {
+  const tc = preflight.value?.time_config
+  if (!tc) return '--'
+  const unit = tc.round_label_unit || 'day'
+  return `${tc.minutes_per_round} min / round · ${unit}`
+})
+const readinessLabel = computed(() => {
+  if (preflightLoading.value) return 'CHECKING'
+  if (preflightReady.value) return 'READY'
+  if (preflightBlocking.value.length) return 'BLOCKED'
+  if (preflightError.value) return 'UNKNOWN'
+  return 'PENDING'
+})
+
+function buildPreflightPayload() {
+  return {
+    graph_id: props.session.graphId,
+    seed_text: props.session.seedText || '',
+    scenario_type: props.session.scenarioType,
+    domain_pack_id: props.session.domainPackId || 'hk_city',
+    agent_count: config.agentCount,
+    round_count: config.roundCount,
+    macro_scenario_id: config.macroScenario,
+    platforms: Object.fromEntries(config.platforms.map((p) => [p, true])),
+    shocks: config.shocks.map((s) => ({
+      round_number: s.round,
+      shock_type: 'manual',
+      description: s.description,
+      post_content: s.description,
+    })),
+  }
+}
+
+async function runPreflight() {
+  if (!props.session.graphId) return null
+  const seq = ++preflightSeq
+  preflightLoading.value = true
+  preflightError.value = ''
+  try {
+    const res = await runSimulationPreflight(buildPreflightPayload())
+    if (seq !== preflightSeq) return null
+    preflight.value = res.data?.data || res.data
+    emit('update:session', {
+      ...props.session,
+      preflight: preflight.value,
+      timeConfig: preflight.value?.time_config,
+    })
+    return preflight.value
+  } catch (err) {
+    if (seq !== preflightSeq) return null
+    preflightError.value = err.response?.data?.detail || err.message || 'Preflight failed'
+    return null
+  } finally {
+    if (seq === preflightSeq) preflightLoading.value = false
+  }
+}
+
+function schedulePreflight() {
+  if (preflightTimer) clearTimeout(preflightTimer)
+  preflightTimer = setTimeout(() => {
+    preflightTimer = null
+    runPreflight()
+  }, 450)
+}
+
+watch(
+  () => [config.agentCount, config.roundCount, config.macroScenario, config.shocks.length],
+  () => schedulePreflight(),
+)
+
+onUnmounted(() => {
+  if (preflightTimer) {
+    clearTimeout(preflightTimer)
+    preflightTimer = null
+  }
+})
 
 async function startSimulation() {
   submitting.value = true
   error.value = null
 
   try {
+    const readiness = await runPreflight()
+    if (readiness && readiness.ready === false) {
+      error.value = readiness.blocking_errors?.[0]?.message || 'Preflight blocked this simulation'
+      return
+    }
     const res = await createSimulation({
       graph_id: props.session.graphId,
       scenario_type: props.session.scenarioType,
@@ -183,7 +278,12 @@ async function startSimulation() {
       })),
     })
 
-    emit('update:session', { ...props.session, config: { ...props.session?.config, ...config } })
+    emit('update:session', {
+      ...props.session,
+      config: { ...props.session?.config, ...config },
+      preflight: preflight.value,
+      timeConfig: preflight.value?.time_config,
+    })
 
     const sessionId = res.data?.data?.session_id || res.data?.session_id
     emit('simulation-created', {
@@ -219,7 +319,7 @@ async function startSimulation() {
       <div v-if="showAiAssistant" class="ai-panel">
         <div class="ai-panel-header">
           <span>AI 配置助手</span>
-          <button class="close-ai" @click="showAiAssistant = false">✕</button>
+          <button class="close-ai" type="button" aria-label="關閉 AI 建議" @click="showAiAssistant = false">✕</button>
         </div>
         <textarea
           v-model="aiQuery"
@@ -269,6 +369,39 @@ async function startSimulation() {
           </button>
         </div>
       </div>
+
+    <div class="preflight-panel" :class="{ ready: preflightReady, blocked: preflightBlocking.length }">
+      <div class="preflight-header">
+        <span class="preflight-title">SIMULATION PREFLIGHT</span>
+        <span class="preflight-status">{{ readinessLabel }}</span>
+      </div>
+      <div class="preflight-metrics">
+        <div class="preflight-metric">
+          <span>TIME SCALE</span>
+          <strong>{{ timeScaleLabel }}</strong>
+        </div>
+        <div class="preflight-metric">
+          <span>EST. COST</span>
+          <strong>{{ preflightCost != null ? `$${Number(preflightCost).toFixed(4)}` : '--' }}</strong>
+        </div>
+        <div class="preflight-metric">
+          <span>MODEL</span>
+          <strong>{{ preflight?.model_check?.model || '--' }}</strong>
+        </div>
+      </div>
+      <p v-if="preflightError" class="preflight-error">{{ preflightError }}</p>
+      <div v-if="preflightBlocking.length" class="preflight-issues">
+        <div v-for="issue in preflightBlocking" :key="issue.code" class="preflight-issue">
+          <strong>{{ issue.code }}</strong>
+          <span>{{ issue.message }}</span>
+        </div>
+      </div>
+      <div v-else-if="preflightWarnings.length" class="preflight-warnings">
+        <span v-for="issue in preflightWarnings.slice(0, 2)" :key="issue.code">
+          {{ issue.message }}
+        </span>
+      </div>
+    </div>
 
     <!-- Preset selector (primary configuration method) -->
     <div class="config-card preset-card-wrapper">
@@ -412,10 +545,10 @@ async function startSimulation() {
     <div class="action-bar">
       <button
         class="start-btn"
-        :disabled="submitting"
+        :disabled="submitting || preflightLoading || preflightBlocking.length > 0 || !!preflightError"
         @click="startSimulation"
       >
-        {{ submitting ? t('step2.actions.creating') : t('step2.actions.start') }}
+        {{ submitting ? t('step2.actions.creating') : preflightLoading ? 'CHECKING...' : t('step2.actions.start') }}
       </button>
     </div>
   </div>
@@ -443,6 +576,102 @@ async function startSimulation() {
   border-radius: var(--radius-lg);
   padding: 20px;
   box-shadow: var(--shadow-card);
+}
+
+.preflight-panel {
+  margin-bottom: 16px;
+  padding: 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.preflight-panel.ready {
+  border-color: rgba(4, 120, 87, 0.42);
+}
+
+.preflight-panel.blocked {
+  border-color: rgba(220, 38, 38, 0.5);
+}
+
+.preflight-header,
+.preflight-metrics {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.preflight-header {
+  margin-bottom: 10px;
+}
+
+.preflight-title,
+.preflight-status,
+.preflight-metric span,
+.preflight-issue strong {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.preflight-status {
+  padding: 3px 8px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-xs);
+  color: var(--text-primary);
+}
+
+.preflight-metric {
+  flex: 1;
+  min-width: 0;
+  padding: 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.preflight-metric span {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--text-muted);
+}
+
+.preflight-metric strong {
+  display: block;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preflight-error,
+.preflight-issue {
+  margin-top: 10px;
+  color: var(--accent-red);
+  font-size: 13px;
+}
+
+.preflight-issues,
+.preflight-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.preflight-issue {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.preflight-warnings span {
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .card-heading {
@@ -899,6 +1128,11 @@ async function startSimulation() {
 @media (max-width: 900px) {
   .config-grid {
     grid-template-columns: 1fr;
+  }
+
+  .preflight-metrics {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .platform-toggles,

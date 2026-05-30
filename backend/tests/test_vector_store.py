@@ -145,6 +145,36 @@ class TestVectorStore:
             assert r.memory_id == 4
 
     @pytest.mark.asyncio
+    async def test_string_agent_id_roundtrip(self, tmp_store):
+        session_id = "test-session-string-agent"
+        await tmp_store.add_memories(
+            session_id,
+            [
+                {
+                    "memory_id": 101,
+                    "agent_id": "kg_agent_alpha",
+                    "round_number": 1,
+                    "memory_text": "Agent alpha remembers a supply shock",
+                    "memory_type": "observation",
+                    "salience_score": 0.9,
+                },
+                {
+                    "memory_id": 102,
+                    "agent_id": "kg_agent_beta",
+                    "round_number": 1,
+                    "memory_text": "Agent beta remembers unrelated news",
+                    "memory_type": "observation",
+                    "salience_score": 0.8,
+                },
+            ],
+        )
+
+        results = await tmp_store.search(session_id, "supply shock", agent_id="kg_agent_alpha", top_k=10)
+
+        assert results
+        assert {r.memory_id for r in results} == {101}
+
+    @pytest.mark.asyncio
     async def test_semantic_relevance(self, tmp_store, sample_memories):
         """Financial query should rank financial memories higher."""
         session_id = "test-session-003"

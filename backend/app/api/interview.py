@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from typing import Any
-from fastapi import APIRouter, HTTPException, Path, Body
 
+from fastapi import APIRouter, Body, Depends, HTTPException, Path
+
+from backend.app.api.auth import UserProfile, get_current_user
 from backend.app.models.response import APIResponse
 from backend.app.services.interview_engine import InterviewEngine
 from backend.app.utils.logger import get_logger
+from backend.app.utils.ownership import require_session_access
 
 router = APIRouter(prefix="/simulation", tags=["simulation-interview"])
 logger = get_logger("api.interview")
@@ -17,9 +20,11 @@ async def interview_agent(
     session_id: str = Path(..., pattern=r"^[a-f0-9\-]{8,36}$"),
     agent_id: str = Path(...),
     query: str = Body(..., embed=True),
+    user: UserProfile = Depends(get_current_user),
 ) -> APIResponse:
     """Send a query to an agent and get an in-character response."""
     try:
+        await require_session_access(session_id, user)
         engine = InterviewEngine()
         response = await engine.generate_response(session_id, agent_id, query)
         return APIResponse(
@@ -29,6 +34,8 @@ async def interview_agent(
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("interview_agent failed for session %s agent %s", session_id, agent_id)
         raise HTTPException(status_code=500, detail="Internal server error") from exc
@@ -37,9 +44,11 @@ async def interview_agent(
 async def get_interview_history(
     session_id: str = Path(..., pattern=r"^[a-f0-9\-]{8,36}$"),
     agent_id: str = Path(...),
+    user: UserProfile = Depends(get_current_user),
 ) -> APIResponse:
     """Retrieve the conversation history for a specific agent interview."""
     try:
+        await require_session_access(session_id, user)
         engine = InterviewEngine()
         history = await engine.get_history(session_id, agent_id)
         return APIResponse(
@@ -47,6 +56,8 @@ async def get_interview_history(
             data={"history": history},
             meta={"session_id": session_id, "agent_id": agent_id, "count": len(history)}
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("get_interview_history failed for session %s agent %s", session_id, agent_id)
         raise HTTPException(status_code=500, detail="Internal server error") from exc

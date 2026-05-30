@@ -91,6 +91,20 @@ if grep -q "^AUTH_SECRET_KEY=your-secret-key-here" .env 2>/dev/null; then
     fi
 fi
 
+# Generate DATA_ENCRYPTION_KEY if missing or still placeholder
+if ! grep -q "^DATA_ENCRYPTION_KEY=" .env 2>/dev/null || grep -q "^DATA_ENCRYPTION_KEY=your-32-byte-base64url-key" .env 2>/dev/null; then
+    DATA_KEY=$(python3 -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())")
+    tmp=$(mktemp)
+    if grep -q "^DATA_ENCRYPTION_KEY=" .env 2>/dev/null; then
+        sed "s|^DATA_ENCRYPTION_KEY=.*|DATA_ENCRYPTION_KEY=${DATA_KEY}|" .env > "$tmp"
+    else
+        cp .env "$tmp"
+        printf "\nDATA_ENCRYPTION_KEY=%s\n" "$DATA_KEY" >> "$tmp"
+    fi
+    mv "$tmp" .env
+    ok "Generated DATA_ENCRYPTION_KEY (for encrypted settings)"
+fi
+
 # Enable DEBUG mode for local dev (safe default; server won't reject missing key)
 if grep -q "^DEBUG=false" .env 2>/dev/null; then
     tmp=$(mktemp)
@@ -189,12 +203,11 @@ ok "data/ and logs/ directories ready"
 # =============================================================================
 hdr "Step 4/4 — Starting Murmura"
 
-UVICORN="${VENV_DIR}/bin/uvicorn"
 mkdir -p "${PROJECT_ROOT}/logs"
 
 # ── Start backend in background ───────────────────────────────────────────────
 echo "  Starting backend..."
-"$UVICORN" backend.app:create_app --factory --reload --port 5001 \
+"$VENV_PYTHON" -m uvicorn backend.app:create_app --factory --reload --port 5001 \
     > "${PROJECT_ROOT}/logs/backend.log" 2>&1 &
 BACKEND_PID=$!
 

@@ -114,13 +114,15 @@ class AgentMemoryService:
                 continue
 
             agent_id = (username_to_agent_id or {}).get(username)
+            if agent_id is None:
+                logger.debug("Skipping memory summary for unmapped username=%s session=%s", username, session_id)
+                continue
+
             memories = await self._summarize_posts(username, posts, round_number)
 
             if memories:
                 rows = []
                 for m in memories[:_MAX_MEMORIES_PER_AGENT_PER_ROUND]:
-                    if agent_id is None:
-                        continue
                     importance_raw = float(m.get("importance_score", 5))
                     importance = max(0.0, min(1.0, importance_raw / 10.0))
                     rows.append(

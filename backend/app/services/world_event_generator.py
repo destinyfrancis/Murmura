@@ -99,11 +99,11 @@ class WorldEventGenerator:
 
 
 def _parse_events(
-    raw: dict[str, Any],
+    raw: dict[str, Any] | list[Any],
     round_number: int,
     active_metrics: tuple[str, ...],
 ) -> list[WorldEvent]:
-    events_raw = raw.get("events", [])
+    events_raw = raw if isinstance(raw, list) else raw.get("events", [])
     if not isinstance(events_raw, list):
         return []
 

@@ -56,7 +56,7 @@ function stanceLabel(stance) {
         <span class="cp-title">社群 #{{ clusterId }}</span>
         <span class="cp-count">{{ summary.member_count || clusterAgents.length }} 人</span>
       </div>
-      <button class="cp-close" @click="emit('close')">✕</button>
+      <button class="cp-close" type="button" aria-label="關閉社群面板" @click="emit('close')">✕</button>
     </div>
 
     <div class="cp-body">

@@ -1,9 +1,10 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { marked } from 'marked'
 import { generateReport, getReportStatus, invokeXaiTool, shareReport } from '../api/report.js'
-import { getConfidenceScore } from '../api/simulation.js'
+import { unwrapApi } from '../api/utils.js'
+import { getConfidenceReport, getConfidenceScore, getSimulationArtifacts } from '../api/simulation.js'
 import ConfidenceBadge from './ConfidenceBadge.vue'
+import { escapeHtmlAttr, renderSafeMarkdown, sanitizeHtml } from '../utils/safeMarkdown.js'
 
 const props = defineProps({
   session: { type: Object, required: true },
@@ -11,16 +12,6 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['report-generated', 'update:session', 'switch-step'])
-
-// Sanitize HTML to prevent XSS from LLM-generated markdown.
-// Strips <script>, <iframe>, javascript: URIs, and inline event handlers.
-function sanitize(html) {
-  return html
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-    .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
-    .replace(/javascript:/gi, '')
-    .replace(/on\w+\s*=/gi, '')
-}
 
 const sharing = ref(false)
 const shareStatus = ref('')
@@ -31,7 +22,7 @@ async function handleShare() {
   shareStatus.value = ''
   try {
     const res = await shareReport(reportId)
-    const token = res.data?.data?.token || res.data?.token
+    const token = unwrapApi(res, {})?.token
     if (token) {
       const url = `${window.location.origin}/public/report/${token}`
       await navigator.clipboard.writeText(url)
@@ -114,20 +105,19 @@ const renderedDisplayReport = computed(() => {
   
   // Replace [[N:node_id]] with evidence tag
   html = html.replace(/\[\[N:([^\]]+)\]\]/g, (match, id) => {
-    return `<span class="evidence-tag node-tag" data-id="${id}">🔍 核心節點</span>`
+    return `<span class="evidence-tag node-tag" data-id="${escapeHtmlAttr(id)}">🔍 核心節點</span>`
   })
   
   // Replace [[E:edge_id]] with evidence tag
   html = html.replace(/\[\[E:([^\]]+)\]\]/g, (match, id) => {
-    return `<span class="evidence-tag edge-tag" data-id="${id}">🔍 關聯證據</span>`
+    return `<span class="evidence-tag edge-tag" data-id="${escapeHtmlAttr(id)}">🔍 關聯證據</span>`
   })
   
-  return html
+  return sanitizeHtml(html)
 })
 
 const renderedMarkdown = computed(() => {
-  if (!displayedReport.value) return ''
-  return sanitize(marked.parse(displayedReport.value))
+  return renderSafeMarkdown(displayedReport.value)
 })
 
 function handleReportClick(e) {
@@ -243,7 +233,7 @@ function mergeReactSteps(incoming) {
 async function pollReportStatus(reportId) {
   try {
     const res = await getReportStatus(reportId)
-    const data = res.data?.data || res.data
+    const data = unwrapApi(res)
 
     if (data.react_logs) {
       mergeReactSteps(data.react_logs)
@@ -297,7 +287,7 @@ async function startGeneration() {
       scenario_question: questionInput.value || undefined,
     })
 
-    const resData = res.data?.data || res.data
+    const resData = unwrapApi(res)
     const reportId = resData.report_id
     emit('update:session', { ...props.session, reportId: reportId })
 
@@ -372,16 +362,31 @@ const XAI_TOOLS = [
 ]
 
 const confidenceScore = ref(null)
+const confidenceReport = ref(null)
+const artifactsSummary = ref(null)
 
 async function fetchConfidenceScore() {
   const sessionId = props.session?.sessionId
   if (!sessionId) return
-  try {
-    const res = await getConfidenceScore(sessionId)
-    const score = res.data?.data?.score ?? res.data?.score ?? null
-    confidenceScore.value = score
-  } catch {
+  const [scoreRes, reportRes, artifactRes] = await Promise.allSettled([
+    getConfidenceScore(sessionId),
+    getConfidenceReport(sessionId),
+    getSimulationArtifacts(sessionId),
+  ])
+  if (scoreRes.status === 'fulfilled') {
+    confidenceScore.value = unwrapApi(scoreRes.value, {})?.score ?? null
+  } else {
     confidenceScore.value = null
+  }
+  if (reportRes.status === 'fulfilled') {
+    confidenceReport.value = unwrapApi(reportRes.value, null)
+  } else {
+    confidenceReport.value = null
+  }
+  if (artifactRes.status === 'fulfilled') {
+    artifactsSummary.value = unwrapApi(artifactRes.value, null)
+  } else {
+    artifactsSummary.value = null
   }
 }
 
@@ -523,6 +528,30 @@ async function runXaiTool(toolName) {
           <span v-if="shareStatus" class="share-status">{{ shareStatus }}</span>
         </div>
 
+        <div v-if="completed" class="confidence-panel">
+          <div class="confidence-cell">
+            <span>CONFIDENCE</span>
+            <strong>
+              {{ confidenceReport?.overall_score != null ? Math.round(confidenceReport.overall_score * 100) + '%' : '--' }}
+            </strong>
+          </div>
+          <div class="confidence-cell">
+            <span>DATA RECORDS</span>
+            <strong>{{ confidenceReport?.total_data_records ?? '--' }}</strong>
+          </div>
+          <div class="confidence-cell">
+            <span>ACTIONS</span>
+            <strong>{{ artifactsSummary?.counts?.actions ?? '--' }}</strong>
+          </div>
+          <div class="confidence-cell">
+            <span>FAILURE</span>
+            <strong>{{ artifactsSummary?.failure_reason || 'none' }}</strong>
+          </div>
+          <p v-if="artifactsSummary?.recommended_action && artifactsSummary?.failure_reason" class="artifact-guidance">
+            {{ artifactsSummary.recommended_action }}
+          </p>
+        </div>
+
         <div v-if="!completed && !error" class="report-loading">
           <div class="spinner" />
           <p>報告生成中，請稍候...</p>
@@ -619,6 +648,48 @@ async function runXaiTool(toolName) {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   margin: 0;
+}
+
+.confidence-panel {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.confidence-cell {
+  min-width: 0;
+  padding: 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.confidence-cell span {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.confidence-cell strong {
+  display: block;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-guidance {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .header-right {
@@ -1104,6 +1175,10 @@ async function runXaiTool(toolName) {
 @media (max-width: 820px) {
   .step4 {
     grid-template-columns: 1fr;
+  }
+
+  .confidence-panel {
+    grid-template-columns: 1fr 1fr;
   }
 }
 </style>

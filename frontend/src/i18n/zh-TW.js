@@ -481,6 +481,34 @@ export default {
     consoleSignal: 'Clean-room UI · 5-step workflow',
     pipelineTitle: '五步控制流',
     examplesTitle: '示例場景',
+    betaTitle: 'Beta 工作流',
+    betaHint: '已校準的首發模板，比任意場景更適合作公開測試。',
+    beta: {
+      publicNarrative: {
+        label: '公共敘事',
+        desc: '輿論、社群分裂、訊息擴散',
+        seed: '一段具爭議的公共訊息在多個社群平台快速擴散，支持者與反對者開始形成各自敘事。',
+        question: '哪個敘事最可能取得主導，分歧會如何擴大？'
+      },
+      supplyChain: {
+        label: 'B2B 供應鏈',
+        desc: '供應商、買家、物流、價格衝擊',
+        seed: '主要供應商突然加價並延長交付時間，下游客戶、競爭者與物流夥伴需要重新調整合約。',
+        question: '哪些公司會轉單、囤貨或重新議價？'
+      },
+      companyCompetition: {
+        label: '公司競爭',
+        desc: '新進入者、客戶流失、渠道反應',
+        seed: '一家資金充足的新競爭者以低價方案進入企業軟件市場，現有客戶開始比較替代方案。',
+        question: '既有玩家最需要防守哪類客戶與渠道？'
+      },
+      policyShock: {
+        label: '政策衝擊',
+        desc: '政策、利益相關者、行為回饋',
+        seed: '政府宣布一項高影響政策調整，不同收入群體、企業與社區組織需要重新評估自身策略。',
+        question: '哪些群體會支持、反對或採取規避行為？'
+      }
+    },
     sampleWar: '地緣衝突升級後的能源市場反應',
     sampleFiction: '小說世界中主要陣營的集體選擇',
     sampleCompany: '新競爭者進入後的 B2B 供應鏈反應',
@@ -490,6 +518,10 @@ export default {
     questionLabel: 'QUESTION',
     presetLabel: 'RUN PRESET',
     toolsTitle: '工程工具',
+    advancedTitle: 'Advanced',
+    advancedSubtitle: '領域包、數據連接器同 God View 仍可用，但不佔用首發主流程。',
+    advancedShow: '顯示進階',
+    advancedHide: '收起進階',
     domainPacks: '領域包',
     metrics: {
       zeroConfig: '零配置',
@@ -632,6 +664,9 @@ export default {
     nodes: 'NODES',
     edges: 'EDGES',
     agentCount: 'AGENTS',
+    simStatus: 'SIM STATUS',
+    actions: 'ACTIONS',
+    failure: 'FAILURE',
     agent: 'Agent',
     waiting: '等待工作流事件...'
   },
@@ -709,7 +744,8 @@ export default {
       reportFirst: '請先生成報告',
       engineUnavailable: '模擬引擎不可用 — 請使用 Docker 以獲得完整功能',
       engineUnavailableDetail: '模擬引擎不可用 — 請使用 Docker 以獲得完整功能。流程將在環境設定後停止。',
-      workflowPolling: '工作流輪詢失敗'
+      workflowPolling: '工作流輪詢失敗',
+      workflowFailed: 'Live 模擬失敗'
     }
   },
   step2: {

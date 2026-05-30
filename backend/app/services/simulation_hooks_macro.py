@@ -478,7 +478,7 @@ class MacroHooksMixin:
                         "CREATE_POST",
                         "news_injection",
                         shock_content,
-                        headline.get("sentiment", "neutral"),
+                        headline.get("sentiment") or "neutral",
                         category,
                     ),
                 )
@@ -640,6 +640,14 @@ class MacroHooksMixin:
 
                 mc = MacroController()
                 macro_state = await mc.get_baseline()
+            if not all(hasattr(macro_state, attr) for attr in ("gdp_growth", "interest_rate", "inflation_rate")):
+                logger.debug(
+                    "Skipping B2B company decisions for session=%s round=%d: incompatible macro state %s",
+                    session_id,
+                    round_number,
+                    type(macro_state).__name__,
+                )
+                return
 
             all_decisions: list[CompanyDecision] = []
             for dt in CompanyDecisionType:

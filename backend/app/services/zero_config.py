@@ -6,6 +6,7 @@ and returns a ready-to-run simulation configuration.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -376,7 +377,7 @@ class ZeroConfigService:
             raise ValueError("seed_text must not be empty")
 
         domain = self.infer_domain(seed_text)
-        mode = self.detect_mode(seed_text)
+        mode = await self.detect_mode_async(seed_text)
 
         # Try entity extraction via existing TextProcessor -----------------
         entities: list[str] = []
@@ -458,23 +459,29 @@ class ZeroConfigService:
         )
 
         try:
-            import json
-
             from backend.app.utils.llm_client import get_step_provider_model
 
             provider, model = get_step_provider_model(2)
-            resp = await llm.chat(
+            data = await llm.chat_json(
                 [{"role": "user", "content": prompt}],
                 provider=provider,
                 model=model,
+                temperature=0.1,
+                max_tokens=512,
             )
-            data = json.loads(resp.content)
+            if not isinstance(data, dict):
+                raise ValueError("time_config_response_not_dict")
+            unit = str(data["round_label_unit"])
+            if unit not in {"hour", "day", "week", "month"}:
+                raise ValueError("invalid_round_label_unit")
             return TimeConfig(
                 total_simulated_hours=int(data["total_simulated_hours"]),
                 minutes_per_round=int(data["minutes_per_round"]),
-                round_label_unit=str(data["round_label_unit"]),
+                round_label_unit=unit,
                 rationale=str(data.get("rationale", "")),
             )
-        except Exception:
+        except Exception as exc:
+            if os.environ.get("MURMURA_STRICT_LIVE") == "1":
+                raise RuntimeError(f"oasis_runtime_error: time_config_inference_failed:{exc.__class__.__name__}") from exc
             logger.warning("Time config inference failed — using default (1 day/round)")
             return _DEFAULT
