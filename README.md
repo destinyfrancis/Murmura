@@ -36,6 +36,21 @@ It is built for questions like:
 
 Murmura is not a crystal ball. It is a structured way to stress-test stories about complex systems.
 
+## Why This Matters
+
+Open-source teams have strong tools for code, data, dashboards, and individual LLM reasoning, but fewer reproducible tools for turning an arbitrary scenario into a full simulated system: actors, incentives, hidden stakeholders, belief shifts, shocks, timelines, and explainable reports.
+
+Murmura is an early-stage project, so adoption is still growing. The repository is structured to make the work inspectable and maintainable from the start:
+
+- public AGPL-3.0-or-later license
+- local quickstart, Docker setup, and demo mode
+- CI for backend tests, integration tests, and frontend build
+- public benchmark fixtures and regression tests
+- contribution, maintainer, security, support, issue, and pull request workflows
+- bilingual English/Traditional Chinese interface and documentation
+
+The goal is to give researchers, civic technologists, builders, and open-source contributors a transparent workbench for scenario reasoning instead of a closed one-shot forecast.
+
 ## Demo Inputs
 
 ```text
@@ -312,6 +327,12 @@ Good simulations need good input. Provide context, time horizon, actors, uncerta
 Murmura 是一個通用預測引擎。你輸入一段文字，它會自動推斷角色、持份者、信念、決策、衝擊、指標和可能結果，然後用多代理人模擬去探索「接下來可能會發生什麼」。
 
 適合用於政策、公司策略、市場衝擊、公共敘事、地緣政治、研究和 fiction worldbuilding。它可以幫你做情景推演和壓力測試，但不應作為金融、法律、醫療或安全關鍵決策的唯一依據。
+
+### 為什麼這個專案重要？
+
+開源社群有很多 code、data、dashboard 和單次 LLM 分析工具，但較少有可重現、可檢查的工具，可以把任意場景文字轉成一個完整模擬系統：角色、誘因、隱含持份者、信念變化、衝擊、時間線和可解釋報告。
+
+Murmura 仍是早期專案，使用量正在建立中；因此 repo 先把可維護性、可貢獻性和安全回報流程補齊，包括 AGPL 開源授權、quickstart、Docker demo、CI、測試、benchmark fixtures、contribution/security/support 文件和 issue/PR workflows。
 
 ### 快速開始
 
