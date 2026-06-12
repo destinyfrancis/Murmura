@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Universal prediction engine for multi-agent scenario simulation"
 readme = "README.md"
 requires-python = ">=3.10,<3.12"
-license = { file = "LICENSE" }
+license = "AGPL-3.0-or-later"
 
 dependencies = [
     "fastapi>=0.115.0",

@@ -2,6 +2,7 @@
   "name": "murmura",
   "version": "0.1.0",
   "private": true,
+  "license": "AGPL-3.0-or-later",
   "description": "Murmura — Universal Prediction Engine (dev launcher)",
   "scripts": {
     "quickstart": "bash scripts/quickstart.sh",

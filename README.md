@@ -6,7 +6,7 @@
 
 將任何文字變成可模擬的世界：人物、動機、集體反應、風險和可能未來。
 
-[![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-orange)](LICENSE)
+[![License](https://img.shields.io/badge/license-AGPL--3.0--or--later-orange)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11-blue)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-async-009688)](https://fastapi.tiangolo.com/)
 [![Vue](https://img.shields.io/badge/Vue-3-42b883)](https://vuejs.org/)
@@ -14,7 +14,7 @@
 
 **Language / 語言:** [English](#english) · [中文](#中文)
 
-[Quick Start](#quick-start) · [How It Works](#how-it-works) · [Features](#features) · [Configuration](#configuration) · [License](#license)
+[Quick Start](#quick-start) · [How It Works](#how-it-works) · [Features](#features) · [Maintainers](#maintainers) · [Contributing](#contributing) · [License](#license)
 
 </div>
 
@@ -178,6 +178,20 @@ data/
   benchmarks/       public benchmark fixtures
 ```
 
+## Maintainers
+
+Murmura is maintained by `destinyfrancis`.
+
+Maintainer responsibilities include:
+
+- reviewing issues and pull requests
+- keeping the local quickstart, Docker setup, and CI workflows working
+- triaging security reports and dependency risks
+- maintaining public benchmark fixtures and regression tests
+- preparing releases and documenting breaking changes
+
+See [MAINTAINERS.md](MAINTAINERS.md) for the current maintainer list and project stewardship notes.
+
 ## Tech Stack
 
 | Layer | Stack |
@@ -245,6 +259,12 @@ cd frontend
 npm run build
 npm run dev
 ```
+
+## Contributing
+
+Contributions are welcome for bug fixes, documentation, tests, domain packs, provider integrations, and simulation reliability work.
+
+Start with [CONTRIBUTING.md](CONTRIBUTING.md). For security issues, please do not open a public issue; follow [SECURITY.md](SECURITY.md).
 
 ## Public Repo Hygiene
 
@@ -422,10 +442,12 @@ Murmura 適合探索、研究和情景壓力測試，不是專業判斷的替代
 
 ## License
 
-Murmura is licensed under the **PolyForm Noncommercial License 1.0.0**.
+Murmura is licensed under the **GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)**.
 
-Personal, academic, research, educational, and non-profit use is permitted for noncommercial purposes. Commercial use, revenue-generating use, hosted SaaS offerings, managed services, resale, or selling substantially similar clones requires a separate commercial license from the author.
+Commercial use is allowed under the AGPL. If you modify Murmura and distribute it, or run a modified version as a network service, you must provide the corresponding source code under the same license terms.
 
-非商業個人、學術、研究、教育和非牟利用途可以免費使用。商業用途、營利用途、託管 SaaS、managed service、轉售，或銷售實質相似的 clone，均需要先向作者取得另外的商業授權。
+AGPL 允許商業使用。若你修改 Murmura 並分發，或把修改版作為網絡服務提供，通常需要按同一授權條款公開相應源碼。
+
+This license is OSI-approved and is intended to keep improvements to network-hosted versions available to the community.
 
 Copyright (c) 2026 destinyfrancis. All rights reserved.
