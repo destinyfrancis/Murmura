@@ -21,6 +21,7 @@ RUN apt-get update && \
 
 # Install Python dependencies
 COPY pyproject.toml ./
+COPY README.md ./
 COPY backend/ ./backend/
 RUN pip install --upgrade pip && pip install ".[simulation]"
 
