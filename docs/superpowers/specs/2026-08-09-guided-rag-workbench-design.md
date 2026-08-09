@@ -10,7 +10,7 @@
 
 1. 不採用八字，亦不把任何玄學分類放入核心架構。
 2. 吸收 MiroFish 的五步 guided workflow、持續可見世界模型、漸進式揭露、可理解進度與完成後互動等產品原則。
-3. 採 clean-room 實作；不複製 MiroFish 的 code、CSS、assets、screenshots、名稱、文案或大型 component 結構。
+3. MiroFish 與 Murmura 同屬 AGPL v3 系列，允許在逐檔授權及技術審核後直接重用合適 code。重用內容必須保留原 copyright／license notices、標示修改日期與 upstream commit，並確保整個發佈及網絡服務繼續提供相應源碼。不得直接取用未確認授權的 assets、screenshots、商標或品牌文案。
 4. 一般用戶預設不需要理解模型選擇、replicas、random seeds、backtest 或 sensitivity settings。
 5. 進階用戶可在同一工作流程展開 Expert 路徑，選擇最完整的實驗與科學驗證設定。
 6. 科學可信度不是視覺標籤：沒有真實 evidence 時必須 fail closed，顯示「未驗證」，不可用假預設值合成信心分數。
@@ -61,7 +61,7 @@ Murmura 已有 GraphRAG、五步流程、temporal graph、node evidence、simula
 - `frontend/src/api/simulation.js` 呼叫不存在的 `/confidence-score` route。
 - ReportAgent 的 validation summary 使用全域 calibration hit rate，沒有證明該數字與目前 session、claim、domain、metric、horizon 相符。
 - `WorkflowRunner` 在 runtime 自行建立 workflow tables，而 `Process.vue` 同時用本地 `nextStep()` 與 server `step_index` 推進，形成兩套 workflow truth。
-- `Process.vue`、Step 1–4 components 已超過 project 的 800-line 上限；新增能力前要沿責任邊界拆細，避免繼續形成單檔工作台。
+- `Process.vue`、Step 1–4 components 已超過 project 的 800-line 上限；MiroFish 對應 components 亦是大型單檔。即使直接重用其中 interaction code，仍要沿 Murmura 責任邊界拆細，避免移植 monolith。
 - 部分 graph labels 與 confidence UI strings 仍然 hardcode，違反 i18n 規則。
 
 ## 4. 體驗架構
@@ -265,6 +265,7 @@ type TrendSignal = Readonly<{
 - Probability forecast 使用 Brier／log score；continuous forecast 使用 CRPS／interval coverage；directional accuracy 只可作輔助證據。
 - Workflow state 由 backend 成為唯一 source of truth。`workflow_runs`／`workflow_events` 進入正式 schema/migration；event 有遞增 ID，client 只拉取 `after_event_id` 之後的 events。
 - Guided／Expert 使用同一 workflow、manifest、session 與 claim contract，不建立第二套 backend path。
+- 在實作 UI 前建立 MiroFish reuse ledger，以 pinned upstream commit、source path、destination path、reuse mode（verbatim／modified／inspired）、copyright、modification date、適配理由及驗證命令記錄每項引入。
 - 不重寫現有 forecasters、ensemble 或 simulation runner。
 
 ## 8. 狀態、錯誤與安全
@@ -291,6 +292,10 @@ type TrendSignal = Readonly<{
 - 不引入 cyan glow、glass panels、紫藍漸層或 marketing hero 風格。
 
 ## 10. 實作階段
+
+### Phase 0 — Upstream reuse and license gate
+
+固定 MiroFish upstream commit，逐檔比較兩邊 implementation，建立 reuse ledger、third-party attribution 與 Appropriate Legal Notices。只批准有明確功能／時間價值且不降低 Murmura graph、i18n、accessibility、state management 或測試能力的 code reuse。
 
 ### Phase A — Scientific truth gate
 
@@ -340,10 +345,13 @@ type TrendSignal = Readonly<{
 - Refresh 或重新進入 workflow 後由 server state 恢復同一步驟及 artifacts；不會因 local `nextStep()` 漂移。
 - `npm run typecheck`、`npm run build`、focused Playwright journeys 通過。
 
-### Clean-room review
+### Upstream reuse review
 
-- 沒有 MiroFish source code、CSS、assets、screenshots、tool names 或原文文案進入 repo。
-- 相似性只限於一般產品原則：五步流程、持續世界視圖、progressive disclosure、可理解進度及完成後互動。
+- 直接重用只限於 MiroFish AGPL-covered source，並固定記錄 upstream commit；不可只由 demo bundle、screenshots 或影片反向複製。
+- 每個直接重用或修改的檔案都有來源、copyright、license、修改日期及 attribution 紀錄；Murmura `NOTICE`／third-party notices 可追溯所有引入內容。
+- 先比較現有 Murmura implementation。若 Murmura graph、state management、accessibility、i18n 或測試能力較成熟，就保留現有 code，只移植較小且有明確價值的 interaction pattern。
+- 不直接取用 MiroFish logo、品牌名、screenshots、demo data、未確認授權 assets 或原文產品文案。
+- 發佈版保留 AGPL source offer／network-source availability 及 Appropriate Legal Notices。
 
 ## 12. 非目標
 
@@ -353,6 +361,7 @@ type TrendSignal = Readonly<{
 - 不把所有 God View 功能塞入 Guided UI。
 - 不以大量動畫、3D、glow 或裝飾取代 evidence clarity。
 - 不在本升級加入八字或其他玄學人格來源。
+- 不為「看起來更像 MiroFish」而整檔取代 Murmura 已有且功能更完整的 GraphRAG、validation、simulation 或 accessibility implementation。
 
 ## 13. 執行與獨立檢視
 
@@ -360,4 +369,4 @@ type TrendSignal = Readonly<{
 - 實作遵守 test-first、逐 phase、逐 task review；目前 agent runtime 沒有可選的 `luna 5.6` model，因此不可虛報使用 Luna。實作 agent 使用當前可用執行模型，並在交付紀錄寫明實際 model。
 - 每個 phase 完成後由 `gpt-5.6-terra` 做獨立 correctness、scope、scientific-claim、UI regression review；executor self-review 不代替 Terra review。
 - 全部 phase 完成後再由 `gpt-5.6-sol` 做 whole-branch final inspection。
-- Critical／Important findings 未清零、測試未有 fresh evidence 或 clean-room review 未通過，都不得宣稱完成。
+- Critical／Important findings 未清零、測試未有 fresh evidence、license/provenance gate 未通過或 upstream reuse review 未完成，都不得宣稱完成。
