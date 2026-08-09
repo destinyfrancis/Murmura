@@ -2,7 +2,7 @@
 
 **日期：** 2026-08-09
 
-**狀態：** 已按用戶方向收斂，等待書面規格確認後進入 implementation plan
+**狀態：** 已按用戶方向確認；完整 implementation plan 已建立，尚未開始產品 code
 
 **產品定位：** 預設零研究門檻、主畫面持續顯示互動式 RAG graph；進階用戶可展開完整而科學化的實驗與驗證路徑。
 
@@ -63,6 +63,10 @@ Murmura 已有 GraphRAG、五步流程、temporal graph、node evidence、simula
 - `WorkflowRunner` 在 runtime 自行建立 workflow tables，而 `Process.vue` 同時用本地 `nextStep()` 與 server `step_index` 推進，形成兩套 workflow truth。
 - `Process.vue`、Step 1–4 components 已超過 project 的 800-line 上限；MiroFish 對應 components 亦是大型單檔。即使直接重用其中 interaction code，仍要沿 Murmura 責任邊界拆細，避免移植 monolith。
 - 部分 graph labels 與 confidence UI strings 仍然 hardcode，違反 i18n 規則。
+
+### 3.1 影片與 upstream UI 對產品決策的影響
+
+指定影片以三條策略線展示 MiroFish：系統自動建立角色關係與 persona，agents 因累積記憶自主改變立場，外部監管事件可以逆轉原有走勢，而 entity/persona quality 仍是已知弱點。Murmura 吸收的精髓因此不是「人格標籤」本身，而是：低門檻 scenario setup、可見的關係世界、並行分支比較、具記憶的 emergent behaviour、外部 shock 與結果後互動。對應防線是 knowledge firewall、persona provenance、branch manifest、counter-signal 顯示及 fail-closed credibility；任何戲劇性 emergence 都只可先標示為 `scenario_exploration`。
 
 ## 4. 體驗架構
 
@@ -125,13 +129,15 @@ Guided：顯示自動生成的角色數、主要群體、時間範圍、rounds�
 
 Expert：agent distribution、platforms、shocks、preset/custom counts、replica strategy、models、cost cap，以及 experiment manifest preview。
 
+Guided 與 Expert 編輯同一份 versioned manifest。Manifest 內含由 server 讀取並寫入 canonical hash 的 `graph_id`／`graph_revision`，以及完整 immutable simulation snapshot：agent/distribution、platforms、shocks、rounds/preset、resolved hooks、model routing、dataset pins、cost cap、random seeds及版本。Draft 可以修改；開始模擬前必須 freeze。Frozen manifest 不可覆寫，任何其後變更都建立帶 `parent_manifest_id` 的新 revision，並要求重新運行；simulation 只可由 snapshot adapter 建立，adapter 必須 fail-closed 核對 workflow graph ID/revision，不能讀未 pin 的 runtime defaults或信任 request override。
+
 Graph overlay：把 KG nodes 與 generated agents／platform identities 的對應關係可視化。
 
 主要產物：`session_id`、frozen experiment manifest、agent/profile summary。
 
 ### Step 3 — Live simulation
 
-Guided：graph、事件流、round progress、主要趨勢、暫時性不確定範圍與停止／恢復控制。
+Guided：graph、事件流、round progress、主要趨勢、暫時性不確定範圍與取消控制。一般流程不新增 pause；只有既有 cost-cap pause 發生時，才顯示現有 `/resume` recovery。
 
 Expert：hooks、factions、belief propagation、ensemble／fork status、stability diagnostics、raw tool events 與 resource usage。
 
@@ -148,6 +154,8 @@ Expert：backtest、baseline comparison、calibration、sensitivity、provenance
 Graph overlay：報告引用的 nodes／edges、支持／反對 evidence、可點擊來源。
 
 主要產物：`report_id`、claim-level evidence、PDF/share、validation summary。
+
+Report generation 開始時建立 immutable report manifest，逐項 pin `claim_id + assessment_revision + validation_evidence_id`。同一 `report_id` 的 narrative、畫面、PDF、share 永遠使用該 snapshot；其後 validation 完成只可透過新 report revision 反映，不能靜默改寫舊報告。
 
 ### Step 5 — Explore & interact
 
@@ -169,12 +177,12 @@ Graph overlay：對話目標、相關群體、引用 evidence 與 branch differe
 {
   "credibility_tier": "scenario_exploration",
   "confidence_score": null,
-  "signals": {
-    "backtest": { "status": "missing", "value": null },
-    "ensemble": { "status": "missing", "value": null },
-    "consensus": { "status": "available", "value": 0.42 },
-    "provenance": { "status": "partial", "value": 0.61 }
-  },
+  "signals": [
+    { "name": "backtest", "status": "missing", "value": null },
+    { "name": "ensemble", "status": "missing", "value": null },
+    { "name": "consensus", "status": "available", "value": 0.42 },
+    { "name": "provenance", "status": "partial", "value": 0.61 }
+  ],
   "missing_evidence": ["backtest", "ensemble"],
   "limitations": ["此結果只可作情景探索"]
 }
@@ -183,6 +191,10 @@ Graph overlay：對話目標、相關群體、引用 evidence 與 branch differe
 - `agent_consensus` 只代表群體一致程度，不代表對真實世界的準確度。
 - 未完成 backtest 時 `model_fit` 必須是 `null`，不能使用 `0.7`。
 - `calibrated_forecast` 要求相同 domain／metric／horizon 的有效歷史驗證，且 beats-naive evidence 可查閱。
+- `model_estimate` 要求 frozen matching manifest、成功 replicas 達 manifest minimum、完成率至少 0.90、seed set 相符、stability 通過及 relative MCSE 不高於 `replica_strategy` threshold。
+- `calibrated_forecast` 再要求 claim-scoped domain／metric／horizon／manifest 完全一致、fold/observation/calibration sample 達 manifest thresholds、對應 forecast kind 的 proper score、beats-naive baseline 及可追溯 observation period/provenance。Continuous forecast 另須 interval level 已在 manifest 宣告，而且 observed coverage 誤差不超過 `coverage_tolerance`。
+- `ValidationEvidence` 係 append-only DB record，以 `evidence_id` 及 `(claim_id, evidence_revision)` 保留歷史；process restart 後仍可 exact/latest lookup，不能用 in-memory 結果代替。
+- 本版不產生 composite confidence percentage 或 high/medium/low label。Deprecated `confidence_score` 保持 `null`；UI 直接顯示 tier、estimate/interval、MCSE、proper loss、coverage、folds 及缺失 evidence。
 - 舊 client 所需欄位如要保留，必須標記 deprecated；不可把 `null` 轉成中信心。
 
 ### 6.2 Trend signal
@@ -194,18 +206,34 @@ type TrendClaim = Readonly<{
   claimId: string
   sessionId: string
   metric: string
+  forecastKind: 'probability' | 'continuous'
   horizon: string
   direction: 'up' | 'down' | 'flat' | 'uncertain'
-  estimate: number | null
-  interval: readonly [number, number] | null
-  credibilityTier: 'scenario_exploration' | 'model_estimate' | 'calibrated_forecast'
-  validationStatus: 'not_applicable' | 'pending' | 'passed' | 'failed' | 'insufficient_evidence'
   evidenceIds: readonly string[]
   counterSignals: readonly string[]
   methodVersion: string
   manifestId: string
+  createdAt: string
+}>
+
+type ClaimAssessment = Readonly<{
+  assessmentId: string
+  claimId: string
+  validationJobId: string | null
+  revision: number
+  estimate: number | null
+  interval: readonly [number, number] | null
+  credibilityTier: 'scenario_exploration' | 'model_estimate' | 'calibrated_forecast'
+  validationStatus: 'not_applicable' | 'pending' | 'passed' | 'failed' | 'cancelled' | 'insufficient_evidence'
+  validationEvidenceId: string | null
+  limitations: readonly string[]
+  createdAt: string
 }>
 ```
+
+`TrendClaim` 保存不可變事實；每次驗證只 append 新 `ClaimAssessment` revision。API／UI 使用 base claim 加最新 assessment 的 `TrendClaimView`，同時保留完整 assessment history，絕不覆寫舊 tier、estimate 或 interval。
+
+Session credibility API 以 `claim_id` 回傳每項結果；session summary 只採最弱 tier、missing-evidence union，而且 score 保持 null。任何 report 或 UI 都不可用較高 tier 的 claim 替另一個 claim 背書。
 
 工作台再把 claim 映射成單一 frontend display contract：
 
@@ -230,15 +258,14 @@ type TrendSignal = Readonly<{
 
 ### 7.1 新增 frontend units
 
-- `frontend/src/components/workbench/ProcessWorkbenchShell.vue`：純 layout slots，不持有 domain logic。
+- `frontend/src/components/workbench/WorkbenchShell.vue`：純 layout slots，不持有 domain logic。
 - `frontend/src/components/workbench/WorkbenchHeader.vue`：step、status、Guided/Expert、cost、credibility。
-- `frontend/src/components/workbench/PersistentGraphWorkspace.vue`：唯一 graph mount、toolbar、overlay mode、empty/loading/error state。
-- `frontend/src/components/workbench/StepTaskPanel.vue`：目前 step container、primary action 與 step progress。
-- `frontend/src/components/workbench/ExpertControlDrawer.vue`：按 step 顯示 expert sections。
+- `frontend/src/components/workbench/PersistentGraphPane.vue`：唯一 graph mount、toolbar、overlay mode、empty/loading/error state。
+- `frontend/src/components/workbench/ScientificLabDrawer.vue`：按 step 顯示 expert sections。
 - `frontend/src/components/workbench/ScientificEvidenceStrip.vue`：trend、tier、evidence completeness、limitations。
-- `frontend/src/components/workbench/GraphEvidenceDrawer.vue`：node／edge provenance 與引用。
-- `frontend/src/composables/useProcessWorkflow.js`：workflow/session state、navigation、express polling、cleanup。
-- `frontend/src/composables/useGraphWorkspace.js`：graph data、camera/selection/filter/round state。
+- `frontend/src/components/workbench/GraphEvidencePanel.vue`：node／edge provenance 與引用。
+- `frontend/src/composables/useWorkflowRun.js`：workflow/session state、navigation、express polling、cleanup。
+- `frontend/src/composables/usePersistentGraph.js`：graph data、camera/selection/filter/round state。
 - `frontend/src/composables/useWorkbenchMode.js`：Guided/Expert persistence 與 dirty-manifest guard。
 - `frontend/src/api/validation.ts`：typed credibility/trend contract。
 
@@ -258,12 +285,17 @@ type TrendSignal = Readonly<{
 - 修改 `backend/app/services/confidence_assessor.py`：model fit 來自真實 backtest；缺失時保持 unavailable。
 - 修改 `backend/app/api/simulation_macro.py`：confidence 不再由 query parameter 輸入，narrative 只讀已保存的 structured claim。
 - 新增 `backend/app/models/trend_claim.py`、`backend/app/services/trend_analysis.py` 與 `backend/app/services/scientific_validation.py`，產生 session/claim-scoped 結果。
+- 新增 append-only `ClaimAssessment` 與 `ValidationEvidence` persistence；驗證只新增 revision，絕不覆寫 base claim 或舊 evidence／assessment。
+- 新增 immutable `ExperimentManifest` model、正式 DB table 及 create/update/freeze/revise API；保存 population、domain、metrics、horizon、model/data/rule versions、random seeds、replica strategy、thresholds 與 revision lineage。
 - 新增薄 router `backend/app/api/analysis.py`：
   - `GET /api/analysis/{session_id}/claims`
   - `GET /api/analysis/{session_id}/credibility`
   - `POST /api/analysis/{session_id}/validate`
 - Probability forecast 使用 Brier／log score；continuous forecast 使用 CRPS／interval coverage；directional accuracy 只可作輔助證據。
 - Workflow state 由 backend 成為唯一 source of truth。`workflow_runs`／`workflow_events` 進入正式 schema/migration；event 有遞增 ID，client 只拉取 `after_event_id` 之後的 events。
+- Guided 預設採 server-gated workflow actions：`submit_seed`、`start_simulation`、`generate_report`、`enter_interaction`、`rerun_with_manifest`、`cancel_current_job`、`retry_current_step`。Blank Guided/Express run 先經 `POST /api/workflow/drafts` 建立；所有長工作 action 以 DB receipt + transactional outbox 持久化 idempotency ownership/result，具 canonical request hash、unique downstream correlation、crash reconciliation、allowed-transition check 及 retry/cancel semantics；Express autopilot 亦只可重用同一 action service，不能直接改 step。
+- Simulation finalization 必須原子化：base claims、initial assessments、simulation job/session completion、workflow revision/state 與 monotonic completion event 在同一個 SQLite transaction commit；任何一步失敗全部 rollback，避免「session 已完成但 workflow 永遠 running」的 crash gap。
+- Expert 在 frozen/completed manifest 上修改設定時建立有 lineage 的新 revision；manifest ownership 以 immutable `root_workflow_id` 為界，另存 `authored_from_workflow_id`。重新執行只可經 `rerun_with_manifest` 建立 child workflow/session；authorization、outbox 與 simulation adapter 一致驗證同 root、同 graph 及可追溯 parent-manifest lineage，並保留 parent graph、manifest、report 與結果不變。
 - Guided／Expert 使用同一 workflow、manifest、session 與 claim contract，不建立第二套 backend path。
 - 在實作 UI 前建立 MiroFish reuse ledger，以 pinned upstream commit、source path、destination path、reuse mode（verbatim／modified／inspired）、copyright、modification date、適配理由及驗證命令記錄每項引入。
 - 不重寫現有 forecasters、ensemble 或 simulation runner。
@@ -280,6 +312,7 @@ type TrendSignal = Readonly<{
 - Report markdown 維持 sanitize；evidence tag 只接受受控 IDs。
 - 不在 UI 或 report 暴露模型私有 chain-of-thought。
 - Workflow refresh／重新入頁以 server state 恢復；client 不可自行越過 server current step。
+- Workflow、manifest、session、claim、validation job、report manifest 全部繼承 owner/workspace scope；讀取及 mutation 經同一 authorization service。跨 workspace read 隱藏為 404，viewer mutation 為 403。Demo anonymous workflow 只靠一次性 capability token，token 不入 URL／localStorage／log；report share token 只可讀 pinned report。
 
 ## 9. Accessibility、i18n 與視覺約束
 
@@ -288,7 +321,7 @@ type TrendSignal = Readonly<{
 - 所有 controls 有 visible focus、pressed／selected state、accessible name。
 - 支援 Reduce Motion；graph animations 可暫停。
 - 顏色不是唯一狀態訊號，credibility tier 同時有文字與 icon／shape。
-- 保留 Murmura 黑、白、灰、橙、1px border、低 radius、mono metrics 的 clean-room workbench identity。
+- 保留 Murmura 黑、白、灰、橙、1px border、低 radius、mono metrics 的 workbench identity。
 - 不引入 cyan glow、glass panels、紫藍漸層或 marketing hero 風格。
 
 ## 10. 實作階段
@@ -365,8 +398,14 @@ type TrendSignal = Readonly<{
 
 ## 13. 執行與獨立檢視
 
-- Initial architecture 與每個 phase 的 acceptance criteria 由 `gpt-5.6-sol` 規劃。
-- 實作遵守 test-first、逐 phase、逐 task review；目前 agent runtime 沒有可選的 `luna 5.6` model，因此不可虛報使用 Luna。實作 agent 使用當前可用執行模型，並在交付紀錄寫明實際 model。
+- Initial architecture 由 `gpt-5.6-sol` 規劃；中途 acceptance 依已批准 plan 由 Luna 執行、Terra review，不重複召回 Sol。
+- 實作遵守 test-first、逐 phase、逐 task review。今次 planning task 的 agent override 只暴露 Sol／Terra，唔代表 Codex 其他新 task 沒有 Luna；正式實作要在新 task 明確選用 `luna 5.6`。如果該 task 實際無法選用，必須停低報告，不能虛報使用 Luna。
 - 每個 phase 完成後由 `gpt-5.6-terra` 做獨立 correctness、scope、scientific-claim、UI regression review；executor self-review 不代替 Terra review。
 - 全部 phase 完成後再由 `gpt-5.6-sol` 做 whole-branch final inspection。
 - Critical／Important findings 未清零、測試未有 fresh evidence、license/provenance gate 未通過或 upstream reuse review 未完成，都不得宣稱完成。
+
+## 14. 已核對參考來源
+
+- [MiroFish GitHub repository](https://github.com/666ghj/MiroFish)，code review 固定 commit `b5b53acc57189a4a42e44a23e149dc655c98fe82`。
+- [MiroFish GNU AGPL v3 licence](https://github.com/666ghj/MiroFish/blob/b5b53acc57189a4a42e44a23e149dc655c98fe82/LICENSE)。
+- [指定產品示範影片：200個AI能幫賈老闆挽救西貝嗎？](https://www.youtube.com/watch?v=Un4GWOnkEfY)。影片只用作產品流程、emergence、branch/shock 及可理解性研究；code reuse 只以 GitHub source audit 為準。
