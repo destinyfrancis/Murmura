@@ -257,6 +257,8 @@ class TestQuickStartEndpoint:
 
         mock_profile_gen = MagicMock()
         mock_profile_gen.to_oasis_csv = MagicMock(return_value="header\n")
+        mock_preflight = MagicMock()
+        mock_preflight.run_for_session = AsyncMock(return_value={"ready": True, "blocking_errors": [], "warnings": []})
 
         with (
             patch("backend.app.services.zero_config.ZeroConfigService", return_value=mock_zc),
@@ -265,6 +267,7 @@ class TestQuickStartEndpoint:
             patch("backend.app.api.simulation.AgentFactory", return_value=mock_factory),
             patch("backend.app.api.simulation.MacroController", return_value=mock_macro),
             patch("backend.app.api.simulation.ProfileGenerator", return_value=mock_profile_gen),
+            patch("backend.app.services.simulation_preflight.SimulationPreflightService", return_value=mock_preflight),
             patch("backend.app.api.simulation.store_agent_profiles", new_callable=AsyncMock),
             patch("backend.app.api.simulation.store_activity_profiles", new_callable=AsyncMock),
             patch("asyncio.to_thread", new_callable=AsyncMock),

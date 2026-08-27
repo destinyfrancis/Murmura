@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from backend.app.utils.llm_client import LLMClient
 
 
-def test_openai_compat_logs_latency_and_tokens(caplog):
+@pytest.mark.asyncio
+async def test_openai_compat_logs_latency_and_tokens(caplog):
     """_chat_openai_compat should log latency + tokens at INFO level."""
     fake_resp = MagicMock()
     fake_resp.json.return_value = {
@@ -38,7 +40,7 @@ def test_openai_compat_logs_latency_and_tokens(caplog):
                 )
         return result
 
-    result = asyncio.get_event_loop().run_until_complete(run())
+    result = await run()
     assert result.content == "hello"
     assert any("tokens" in r.message.lower() or "latency" in r.message.lower() for r in caplog.records), (
         "Expected latency/token log message"

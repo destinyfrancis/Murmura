@@ -567,7 +567,7 @@ class TestCreateSimulationB2BIntegration:
             patch("backend.app.api.simulation.CompanyFactory") as mock_cf,
             patch("backend.app.api.simulation.SupplyChainBuilder") as mock_scb,
             patch("asyncio.to_thread", new=AsyncMock()),
-            patch("backend.app.utils.db.get_db") as mock_get_db,
+            patch("backend.app.api.simulation.get_db") as mock_get_db,
         ):
             _wire_mocks(mock_af, mock_pg, mock_mc, mock_sm, mock_get_db)
             mock_request = Request(scope={"type": "http", "path": "/api/simulation"})
@@ -595,7 +595,7 @@ class TestCreateSimulationB2BIntegration:
             patch("backend.app.api.simulation.CompanyFactory") as mock_cf,
             patch("backend.app.api.simulation.SupplyChainBuilder") as mock_scb,
             patch("asyncio.to_thread", new=AsyncMock()),
-            patch("backend.app.utils.db.get_db") as mock_get_db,
+            patch("backend.app.api.simulation.get_db") as mock_get_db,
         ):
             _wire_mocks(mock_af, mock_pg, mock_mc, mock_sm, mock_get_db)
             _wire_b2b_mocks(mock_cf, mock_scb, mock_companies)
@@ -633,7 +633,7 @@ class TestCreateSimulationB2BIntegration:
             patch("backend.app.api.simulation.CompanyFactory") as mock_cf,
             patch("backend.app.api.simulation.SupplyChainBuilder") as mock_scb,
             patch("asyncio.to_thread", new=AsyncMock()),
-            patch("backend.app.utils.db.get_db") as mock_get_db,
+            patch("backend.app.api.simulation.get_db") as mock_get_db,
         ):
             _wire_mocks(mock_af, mock_pg, mock_mc, mock_sm, mock_get_db)
             _wire_b2b_mocks(mock_cf, mock_scb, mock_companies)
@@ -663,7 +663,7 @@ class TestCreateSimulationB2BIntegration:
             patch("backend.app.api.simulation.CompanyFactory") as mock_cf,
             patch("backend.app.api.simulation.SupplyChainBuilder"),
             patch("asyncio.to_thread", new=AsyncMock()),
-            patch("backend.app.utils.db.get_db") as mock_get_db,
+            patch("backend.app.api.simulation.get_db") as mock_get_db,
         ):
             _wire_mocks(mock_af, mock_pg, mock_mc, mock_sm, mock_get_db)
             # Make generate_companies raise an error
@@ -692,7 +692,7 @@ class TestCreateSimulationB2BIntegration:
             patch("backend.app.api.simulation.CompanyFactory") as mock_cf,
             patch("backend.app.api.simulation.SupplyChainBuilder") as mock_scb,
             patch("asyncio.to_thread", new=AsyncMock()),
-            patch("backend.app.utils.db.get_db") as mock_get_db,
+            patch("backend.app.api.simulation.get_db") as mock_get_db,
         ):
             _wire_mocks(mock_af, mock_pg, mock_mc, mock_sm, mock_get_db)
             _wire_b2b_mocks(mock_cf, mock_scb, mock_companies)
@@ -725,7 +725,7 @@ class TestCreateSimulationB2BIntegration:
             patch("backend.app.api.simulation.CompanyFactory") as mock_cf,
             patch("backend.app.api.simulation.SupplyChainBuilder") as mock_scb,
             patch("asyncio.to_thread", new=AsyncMock()),
-            patch("backend.app.utils.db.get_db") as mock_get_db,
+            patch("backend.app.api.simulation.get_db") as mock_get_db,
         ):
             _wire_mocks(mock_af, mock_pg, mock_mc, mock_sm, mock_get_db)
             _wire_b2b_mocks(mock_cf, mock_scb, mock_companies, edge_count=7)
@@ -755,7 +755,12 @@ class TestCreateSimulationB2BIntegration:
             patch("backend.app.api.simulation.store_universal_agent_relationships", new=AsyncMock()) as mock_store_relationships,
             patch("backend.app.api.simulation.get_simulation_manager") as mock_sm,
             patch("backend.app.services.zero_config.ZeroConfigService") as mock_zc,
-            patch("backend.app.utils.db.get_db") as mock_get_db,
+            patch("backend.app.api.simulation.get_db") as mock_get_db,
+            patch(
+                "backend.app.api.simulation._load_graph_seed_text",
+                new=AsyncMock(return_value="USA and Iran enter full military conflict"),
+            ),
+            patch("asyncio.to_thread", new=AsyncMock()),
         ):
             mock_zc.return_value.detect_mode_async = AsyncMock(return_value="kg_driven")
             _wire_kg_mocks(mock_sm, mock_get_db)
@@ -854,7 +859,6 @@ def _wire_kg_mocks(mock_sm, mock_get_db):
     )
 
     execute_calls = [
-        AsyncMock(fetchone=AsyncMock(return_value={"seed_text": "USA and Iran enter full military conflict"})),
         AsyncMock(fetchone=AsyncMock(return_value={"config_json": _json.dumps({"graph_holder": True})})),
         AsyncMock(),
     ]

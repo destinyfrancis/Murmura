@@ -287,12 +287,11 @@ class TestCrossDomainValidator:
         assert "us_markets" in ids
         assert "geopolitical" in ids
 
-    def test_validate_domain_unknown_raises(self) -> None:
+    @pytest.mark.asyncio
+    async def test_validate_domain_unknown_raises(self) -> None:
         v = CrossDomainValidator()
         with pytest.raises(ValueError, match="Unknown domain"):
-            import asyncio  # noqa: PLC0415
-
-            asyncio.get_event_loop().run_until_complete(v.validate_domain("unknown_domain", "2021-Q1", "2023-Q4"))
+            await v.validate_domain("unknown_domain", "2021-Q1", "2023-Q4")
 
     @pytest.mark.asyncio
     async def test_validate_all_returns_correct_keys(self) -> None:

@@ -7,7 +7,6 @@ using in-memory SQLite databases to avoid side effects.
 
 from __future__ import annotations
 
-import asyncio
 import random
 from unittest.mock import patch
 
@@ -17,14 +16,6 @@ import pytest
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def event_loop():
-    """Create a fresh event loop for each test."""
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
 
 
 @pytest.fixture

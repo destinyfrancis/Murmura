@@ -52,6 +52,9 @@ def _common_patches(preset_agents: int = 100, preset_rounds: int = 15):
     mock_prof = MagicMock()
     mock_prof.to_oasis_csv = MagicMock(return_value="header\n")
 
+    mock_preflight = MagicMock()
+    mock_preflight.run_for_session = AsyncMock(return_value={"ready": True, "blocking_errors": [], "warnings": []})
+
     from contextlib import ExitStack
     from unittest.mock import patch as _patch
 
@@ -64,6 +67,12 @@ def _common_patches(preset_agents: int = 100, preset_rounds: int = 15):
     stack.enter_context(_patch("backend.app.api.simulation.AgentFactory", return_value=mock_factory))
     stack.enter_context(_patch("backend.app.api.simulation.MacroController", return_value=mock_macro))
     stack.enter_context(_patch("backend.app.api.simulation.ProfileGenerator", return_value=mock_prof))
+    stack.enter_context(
+        _patch(
+            "backend.app.services.simulation_preflight.SimulationPreflightService",
+            return_value=mock_preflight,
+        )
+    )
     stack.enter_context(_patch("backend.app.api.simulation.store_agent_profiles", new_callable=AsyncMock))
     stack.enter_context(_patch("backend.app.api.simulation.store_activity_profiles", new_callable=AsyncMock))
     stack.enter_context(_patch("asyncio.to_thread", new_callable=AsyncMock))

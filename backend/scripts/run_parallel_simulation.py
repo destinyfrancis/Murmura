@@ -37,7 +37,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from failure_contract import classify_failure
+try:
+    from .failure_contract import classify_failure
+except ImportError:  # pragma: no cover - direct script execution
+    from failure_contract import classify_failure
 
 logging.basicConfig(
     level=logging.INFO,

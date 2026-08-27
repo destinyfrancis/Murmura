@@ -85,6 +85,7 @@ select = ["E", "F", "I", "N", "W", "UP"]
 asyncio_mode = "auto"
 testpaths = ["backend/tests"]
 markers = [
+    "unit: unit tests that do not require external services or integration fixtures",
     "integration: tests that use database or HTTP client fixtures (auto-applied)",
     "slow: tests that take >10s (manual marker)",
 ]
