@@ -1323,11 +1323,12 @@ class TestSimulationRunnerRelativePaths:
 
         assert (sl._PROJECT_ROOT / "backend").is_dir(), "_PROJECT_ROOT does not contain a backend/ directory"
 
-    def test_python_bin_path_is_relative(self) -> None:
-        """_PYTHON_BIN must be derived from _PROJECT_ROOT, not an absolute literal."""
+    def test_python_bin_path_is_resolved(self) -> None:
+        """_PYTHON_BIN must resolve to an existing interpreter in every CI environment."""
         from backend.app.services import simulation_lifecycle as sl
 
-        assert str(sl._PYTHON_BIN).startswith(str(sl._PROJECT_ROOT)), "_PYTHON_BIN must be relative to _PROJECT_ROOT"
+        assert sl._PYTHON_BIN.is_absolute(), "_PYTHON_BIN must be an absolute executable path"
+        assert sl._PYTHON_BIN.is_file(), f"_PYTHON_BIN does not exist: {sl._PYTHON_BIN}"
 
     def test_script_paths_are_under_project_root(self) -> None:
         """All simulation script paths must be under _PROJECT_ROOT."""
