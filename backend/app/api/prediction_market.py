@@ -1,6 +1,6 @@
 """Prediction Market API endpoints.
 
-Connects MurmuraScope agent simulation output to Polymarket contracts,
+Connects Murmura agent simulation output to Polymarket contracts,
 generating trading signals from agent consensus.
 """
 

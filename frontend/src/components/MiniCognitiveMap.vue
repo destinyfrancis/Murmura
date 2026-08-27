@@ -194,7 +194,7 @@ onBeforeUnmount(() => {
   >
     <div class="mini-header" @mousedown.prevent="onHeaderDown">
       <span class="mini-title">{{ agentUsername || 'Agent' }}</span>
-      <button class="mini-close" @click="emit('close')">&#10005;</button>
+      <button class="mini-close" type="button" aria-label="關閉認知地圖" @click="emit('close')">&#10005;</button>
     </div>
     <div ref="container" class="mini-canvas">
       <div v-if="!container?.querySelector?.('svg')" class="mini-empty">

@@ -35,6 +35,84 @@ DEFAULT_GENERIC_RELATION_TYPES: list[str] = [
     "DEPENDS_ON",
 ]
 
+DEFAULT_SOCIETY_ENTITY_TYPES: list[str] = [
+    "Person",
+    "Community",
+    "GovernmentAgency",
+    "Institution",
+    "MediaOutlet",
+    "Policy",
+    "Event",
+    "Location",
+    "Movement",
+    "Rumor",
+]
+
+DEFAULT_SOCIETY_RELATION_TYPES: list[str] = [
+    "SUPPORTS",
+    "OPPOSES",
+    "INFLUENCES",
+    "REGULATES",
+    "REPORTS_ON",
+    "MOBILIZES",
+    "AFFECTS",
+    "CONFLICTS_WITH",
+    "TRUSTS",
+    "DEPENDS_ON",
+]
+
+DEFAULT_RELATIONSHIP_ENTITY_TYPES: list[str] = [
+    "Person",
+    "Relationship",
+    "Event",
+    "Emotion",
+    "Boundary",
+    "Need",
+    "Conflict",
+    "CommunicationChannel",
+    "SupportNetwork",
+    "Commitment",
+]
+
+DEFAULT_RELATIONSHIP_RELATION_TYPES: list[str] = [
+    "TRUSTS",
+    "MISUNDERSTANDS",
+    "SUPPORTS",
+    "CONFLICTS_WITH",
+    "DEPENDS_ON",
+    "COMMUNICATES_WITH",
+    "AVOIDS",
+    "AFFECTS",
+    "REPAIRS",
+    "PRESSURES",
+]
+
+DEFAULT_MARKET_ENTITY_TYPES: list[str] = [
+    "Company",
+    "Product",
+    "CustomerSegment",
+    "Competitor",
+    "Channel",
+    "Regulator",
+    "Influencer",
+    "PricePoint",
+    "Campaign",
+    "Risk",
+]
+
+DEFAULT_MARKET_RELATION_TYPES: list[str] = [
+    "COMPETES_WITH",
+    "TARGETS",
+    "INFLUENCES",
+    "REGULATES",
+    "BUYS_FROM",
+    "DISTRIBUTES",
+    "OPPOSES",
+    "SUPPORTS",
+    "AFFECTS",
+    "DEPENDS_ON",
+]
+
 
 # ---------------------------------------------------------------------------
 # Default HK-specific types
@@ -128,6 +206,13 @@ Extract all entities and relationships. Return ONLY valid JSON:
       "entity_type": "TypeFromList",
       "title": "Display Name",
       "description": "Brief description of the entity",
+      "confidence": 0.0,
+      "source_span": {{
+        "source_ref": "seed_text",
+        "start_char": 0,
+        "end_char": 10,
+        "text": "exact supporting phrase"
+      }},
       "properties": {{}}
     }}
   ],
@@ -137,6 +222,13 @@ Extract all entities and relationships. Return ONLY valid JSON:
       "target_id": "node_id_2",
       "relation_type": "REL_FROM_LIST",
       "description": "How they are related",
+      "confidence": 0.0,
+      "source_span": {{
+        "source_ref": "seed_text",
+        "start_char": 0,
+        "end_char": 10,
+        "text": "exact supporting phrase"
+      }},
       "weight": 1.0
     }}
   ]
@@ -146,6 +238,8 @@ Guidelines:
 - Use the supplied entity and relation types only.
 - Generate a stable, unique ``id`` for each node (lowercase_with_underscores).
 - Weight edges from 0.1 (weak) to 1.0 (strong).
+- Confidence values must be between 0.0 and 1.0.
+- Source spans must point to exact phrases from the source text when available.
 - Include real-world entities where the data supports them.
 """
 

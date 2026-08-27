@@ -1,4 +1,4 @@
-"""US Markets DomainPack for MurmuraScope.
+"""US Markets DomainPack for Murmura.
 
 Bundles all US-specific constants (shocks, metrics, demographics, data sources,
 macro field specs, and prompt locale) into a single frozen DomainPack.

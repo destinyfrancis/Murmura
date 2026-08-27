@@ -120,7 +120,7 @@ def test_contradiction_condition_semantics():
     """Verify the contradiction condition: dampening should only fire when evidence
     REINFORCES an extreme (same direction as current stance), not when it pushes toward center.
 
-    Correct semantics per CLAUDE.md:
+    Correct semantics for contradiction dampening:
       - current > 0.5 (strong high stance) + delta > 0 (pushing higher) → IS contradicting (dampen)
       - current < 0.5 (strong low stance) + delta < 0 (pushing lower) → IS contradicting (dampen)
       - current < 0.5 (strong low stance) + delta > 0 (pushing toward 0.5) → NOT contradicting

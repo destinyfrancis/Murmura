@@ -1,7 +1,8 @@
 <script setup>
-import { ref, onMounted } from 'vue'
-import { marked } from 'marked'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { getPublicReport } from '../api/report.js'
+import { unwrapApi } from '../api/utils.js'
+import { renderSafeMarkdown } from '../utils/safeMarkdown.js'
 
 const props = defineProps({
   token: { type: String, required: true },
@@ -11,21 +12,10 @@ const report = ref(null)
 const loading = ref(true)
 const error = ref(null)
 const copied = ref(false)
-
-const sanitize = (html) => {
-  return html
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-    .replace(/\son\w+\s*=/gi, ' data-removed=')
-    .replace(/<iframe[\s\S]*?<\/iframe>/gi, '')
-    .replace(/<object[\s\S]*?<\/object>/gi, '')
-    .replace(/<embed[^>]*>/gi, '')
-    .replace(/javascript\s*:/gi, 'data-blocked:')
-    .replace(/<base[^>]*>/gi, '')
-}
+let copyTimer = null
 
 function renderMarkdown(text) {
-  if (!text) return ''
-  return sanitize(marked.parse(text))
+  return renderSafeMarkdown(text)
 }
 
 async function fetchReport() {
@@ -33,7 +23,7 @@ async function fetchReport() {
   error.value = null
   try {
     const res = await getPublicReport(props.token)
-    report.value = res.data?.data || res.data
+    report.value = unwrapApi(res)
   } catch (e) {
     if (e.response?.status === 404) {
       error.value = '報告未找到或連結已失效'
@@ -48,10 +38,14 @@ async function fetchReport() {
 function copyUrl() {
   navigator.clipboard.writeText(window.location.href)
   copied.value = true
-  setTimeout(() => { copied.value = false }, 2000)
+  if (copyTimer) clearTimeout(copyTimer)
+  copyTimer = setTimeout(() => { copied.value = false }, 2000)
 }
 
 onMounted(fetchReport)
+onUnmounted(() => {
+  if (copyTimer) clearTimeout(copyTimer)
+})
 </script>
 
 <template>
@@ -104,7 +98,7 @@ onMounted(fetchReport)
 
       <!-- Footer -->
       <div class="report-footer">
-        <span>MurmuraScope</span>
+        <span>Murmura</span>
         <span>Session: {{ report.session_id }}</span>
       </div>
     </div>
@@ -156,9 +150,9 @@ onMounted(fetchReport)
 
 .report-badge {
   padding: 2px 10px;
-  background: var(--accent-blue-light);
-  color: var(--accent-blue);
-  border-radius: var(--radius-pill);
+  background: var(--accent-subtle);
+  color: var(--accent);
+  border-radius: var(--radius-sm);
   font-size: 12px;
   font-weight: 600;
 }
@@ -179,7 +173,7 @@ onMounted(fetchReport)
   padding: 6px 14px;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   font-size: 13px;
   color: var(--text-secondary);
   cursor: pointer;
@@ -187,8 +181,8 @@ onMounted(fetchReport)
 }
 
 .btn-copy:hover {
-  border-color: var(--accent-blue);
-  color: var(--accent-blue);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .report-summary,
@@ -223,7 +217,7 @@ onMounted(fetchReport)
 
 .key-findings li::before {
   content: '▸ ';
-  color: var(--accent-blue);
+  color: var(--accent);
 }
 
 .report-body {

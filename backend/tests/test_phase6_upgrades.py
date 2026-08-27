@@ -17,6 +17,7 @@ from httpx import ASGITransport, AsyncClient
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from backend.app import create_app
+from backend.app.api.auth import UserProfile, get_current_user
 
 
 # ---------------------------------------------------------------------------
@@ -56,11 +57,17 @@ async def test_interview_endpoint():
                 mock_chat.return_value = mock_msg
 
                 app = create_app()
+                app.dependency_overrides[get_current_user] = lambda: UserProfile(
+                    id="test-user",
+                    email="test@example.com",
+                    is_admin=True,
+                )
                 async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-                    r = await client.post(
-                        f"/api/simulation/{session_id}/agents/1/interview",
-                        json={"query": "Who are you?"},
-                    )
+                    with patch("backend.app.api.interview.require_session_access", new_callable=AsyncMock):
+                        r = await client.post(
+                            f"/api/simulation/{session_id}/agents/1/interview",
+                            json={"query": "Who are you?"},
+                        )
 
     assert r.status_code == 200, f"Unexpected status {r.status_code}: {r.json()}"
     assert r.json()["success"] is True
@@ -79,8 +86,14 @@ async def test_narrative_endpoint():
         mock_gen.return_value = {"dossier": "Long Narrative Report"}
 
         app = create_app()
+        app.dependency_overrides[get_current_user] = lambda: UserProfile(
+            id="test-user",
+            email="test@example.com",
+            is_admin=True,
+        )
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            r = await client.get(f"/api/report/{session_id}/narrative")
+            with patch("backend.app.api.report.require_session_access", new_callable=AsyncMock):
+                r = await client.get(f"/api/report/{session_id}/narrative")
 
     assert r.status_code == 200
     assert r.json()["data"]["dossier"] == "Long Narrative Report"

@@ -211,7 +211,7 @@ async def process_group_formation(
             # Load latest echo chamber snapshot
             cursor = await db.execute(
                 """
-                SELECT cluster_id, agent_ids
+                SELECT cluster_data_json
                 FROM echo_chamber_snapshots
                 WHERE session_id = ?
                 ORDER BY round_number DESC
@@ -229,7 +229,7 @@ async def process_group_formation(
             import json as _json
 
             try:
-                cluster_data = _json.loads(snapshot_row[1]) if snapshot_row[1] else []
+                cluster_data = _json.loads(snapshot_row[0]) if snapshot_row[0] else []
             except Exception:
                 cluster_data = []
 

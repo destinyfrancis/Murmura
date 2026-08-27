@@ -89,7 +89,7 @@ class VectorStore:
                 {
                     "memory_id": int(mem["memory_id"]),
                     "session_id": session_id,
-                    "agent_id": int(mem["agent_id"]),
+                    "agent_id": str(mem["agent_id"]),
                     "round_number": int(mem["round_number"]),
                     "memory_text": mem["memory_text"],
                     "memory_type": mem.get("memory_type", "observation"),
@@ -122,7 +122,7 @@ class VectorStore:
         self,
         session_id: str,
         query_text: str,
-        agent_id: int | None = None,
+        agent_id: str | int | None = None,
         top_k: int = 10,
     ) -> list[VectorSearchResult]:
         """Semantic similarity search over a session's memory vectors.
@@ -163,7 +163,7 @@ class VectorStore:
 
             # Filter by agent_id if requested
             if agent_id is not None:
-                results_df = results_df[results_df["agent_id"] == agent_id]
+                results_df = results_df[results_df["agent_id"].astype(str) == str(agent_id)]
 
             # LanceDB returns _distance (L2) by default; convert to similarity
             if "_distance" in results_df.columns:

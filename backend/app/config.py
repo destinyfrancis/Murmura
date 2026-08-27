@@ -5,6 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 
 from pydantic_settings import BaseSettings
+from dotenv import load_dotenv
+
+
+load_dotenv(override=False)
+
+
+def _default_database_path() -> str:
+    """Prefer the new Murmura DB path while allowing legacy discovery later."""
+    return "data/murmura.db"
 
 
 class Settings(BaseSettings):
@@ -22,7 +31,7 @@ class Settings(BaseSettings):
     }
 
     # Database
-    DATABASE_PATH: str = "data/murmuroscope.db"
+    DATABASE_PATH: str = _default_database_path()
 
     # LLM API keys
     OPENROUTER_API_KEY: str = ""

@@ -15,7 +15,10 @@ import unicodedata
 # ---------------------------------------------------------------------------
 
 MAX_SEED_TEXT = 800
+MAX_SOURCE_SEED_TEXT = 500_000
+MAX_PROMPT_SEED_TEXT = 12_000
 MAX_SCENARIO_DESC = 400
+MAX_USER_QUERY = 1_000
 MAX_AGENT_FIELD = 200
 
 # ---------------------------------------------------------------------------
@@ -74,6 +77,20 @@ def sanitize_seed_text(text: str, max_len: int = MAX_SEED_TEXT) -> str:
     return text.strip()
 
 
+def sanitize_source_seed_text(text: str, max_len: int = MAX_SOURCE_SEED_TEXT) -> str:
+    """Sanitize a full source seed for ingestion/storage.
+
+    This preserves Murmura's large-seed ingestion contract while reusing the
+    same prompt-injection mitigations as ``sanitize_seed_text``.
+    """
+    return sanitize_seed_text(text, max_len=max_len)
+
+
+def sanitize_prompt_seed_text(text: str, max_len: int = MAX_PROMPT_SEED_TEXT) -> str:
+    """Sanitize seed text for a single LLM prompt budget."""
+    return sanitize_seed_text(text, max_len=max_len)
+
+
 def sanitize_scenario_description(text: str) -> str:
     """Sanitize a scenario description (shorter limit than full seed text).
 
@@ -84,6 +101,11 @@ def sanitize_scenario_description(text: str) -> str:
         Sanitized string capped at ``MAX_SCENARIO_DESC`` characters.
     """
     return sanitize_seed_text(text, max_len=MAX_SCENARIO_DESC)
+
+
+def sanitize_user_query(text: str) -> str:
+    """Sanitize a user chat/interview query before LLM prompt inclusion."""
+    return sanitize_seed_text(text, max_len=MAX_USER_QUERY)
 
 
 def sanitize_agent_field(text: str) -> str:

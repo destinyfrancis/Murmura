@@ -1,5 +1,5 @@
 """
-MurmuraScope OASIS Instagram Simulation Runner
+Murmura OASIS Instagram Simulation Runner
 
 Usage: python run_instagram_simulation.py --config /path/to/config.json
 
@@ -240,17 +240,48 @@ LLM_URLS: dict[str, str] = {
     "together": "https://api.together.xyz/v1",
     "openrouter": "https://openrouter.ai/api/v1",
 }
+LLM_ENV_KEYS: dict[str, str] = {
+    "fireworks": "FIREWORKS_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "together": "TOGETHER_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+}
+
+
+def _model_max_tokens(config: dict[str, Any]) -> int:
+    try:
+        return max(1, int(os.environ.get("OASIS_MODEL_MAX_TOKENS") or config.get("oasis_model_max_tokens") or 1024))
+    except (TypeError, ValueError):
+        return 1024
+
+
+def _round_timeout_s(config: dict[str, Any]) -> float:
+    try:
+        return max(1.0, float(os.environ.get("OASIS_ROUND_TIMEOUT_S") or config.get("oasis_round_timeout_s") or 180))
+    except (TypeError, ValueError):
+        return 180.0
+
+
+def _llm_timeout_s(config: dict[str, Any]) -> float:
+    try:
+        return max(1.0, float(os.environ.get("OASIS_LLM_TIMEOUT_S") or config.get("oasis_llm_timeout_s") or 30))
+    except (TypeError, ValueError):
+        return 30.0
 
 
 def build_model(config: dict[str, Any]) -> Any:
     """Create a CAMEL ModelFactory model from config."""
     provider = config.get("llm_provider", "openrouter")
     model_name = config.get("llm_model", "deepseek/deepseek-v3.2")
-    api_key = config.get("llm_api_key") or os.environ.get("OPENROUTER_API_KEY", "")
+    if provider == "fireworks" and model_name == "deepseek/deepseek-v3.2":
+        model_name = "accounts/fireworks/models/deepseek-v3p2"
+    env_key = LLM_ENV_KEYS.get(provider, "OPENROUTER_API_KEY")
+    api_key = config.get("llm_api_key") or os.environ.get(env_key, "") or os.environ.get("OPENROUTER_API_KEY", "")
     base_url = config.get("llm_base_url") or LLM_URLS.get(provider, "")
 
     if not api_key:
-        logger.warning("OPENROUTER_API_KEY not set — simulation will fail at LLM call")
+        raise ValueError(f"API key is required for provider '{provider}'")
     if not base_url:
         raise ValueError(f"No base_url for provider '{provider}'")
 
@@ -258,9 +289,39 @@ def build_model(config: dict[str, Any]) -> Any:
         model_platform=ModelPlatformType.OPENAI_COMPATIBLE_MODEL,
         model_type=model_name,
         url=base_url,
-        model_config_dict={"temperature": 0.7, "max_tokens": 4096},
+        model_config_dict={"temperature": 0.7, "max_tokens": _model_max_tokens(config)},
         api_key=api_key,
+        timeout=_llm_timeout_s(config),
+        max_retries=1,
     )
+
+
+def _max_post_id(db_path: str) -> int:
+    if not Path(db_path).exists():
+        return 0
+    try:
+        conn = sqlite3.connect(db_path, timeout=5)
+        row = conn.execute("SELECT COALESCE(MAX(post_id), 0) FROM post").fetchone()
+        conn.close()
+        return int(row[0] or 0)
+    except Exception as exc:
+        logger.warning("max_post_id failed: %s", exc)
+        return 0
+
+
+def _effective_action_count(db_path: str) -> int:
+    if not Path(db_path).exists():
+        return 0
+    try:
+        conn = sqlite3.connect(db_path, timeout=5)
+        row = conn.execute(
+            "SELECT COUNT(*) FROM trace WHERE action NOT IN ('sign_up', 'refresh')"
+        ).fetchone()
+        conn.close()
+        return int(row[0] or 0)
+    except Exception as exc:
+        logger.warning("effective_action_count failed: %s", exc)
+        return 0
 
 
 # ---------------------------------------------------------------------------
@@ -406,9 +467,11 @@ async def run_instagram_simulation(config: dict[str, Any]) -> None:
     llm_actions = {agent: LLMAction() for _, agent in all_agents_list}
 
     total_actions = 0
+    runtime_errors: list[str] = []
     last_round = 0
     last_post_id = 0
     last_trace_ts = ""
+    round_timeout_s = _round_timeout_s(config)
 
     for round_num in range(1, round_count + 1):
         last_round = round_num
@@ -420,11 +483,16 @@ async def run_instagram_simulation(config: dict[str, Any]) -> None:
         # Shocks first
         for shock in get_shocks_for_round(shocks, round_num):
             await inject_shock(env, agent_graph, shock)
+            last_post_id = max(last_post_id, _max_post_id(db_path))
 
         # Normal LLM round
         try:
-            await env.step(llm_actions)
-            total_actions += agent_count
+            before_actions = _effective_action_count(db_path)
+            await asyncio.wait_for(env.step(llm_actions), timeout=round_timeout_s)
+            round_action_count = _effective_action_count(db_path) - before_actions
+            if round_action_count <= 0:
+                raise RuntimeError("No effective LLM actions were recorded; model call likely failed")
+            total_actions += round_action_count
             # Emit new agent posts from OASIS DB (content capped to IG style)
             last_post_id = emit_new_posts(db_path, round_num, last_post_id)
             # Emit non-content actions from trace table
@@ -432,11 +500,12 @@ async def run_instagram_simulation(config: dict[str, Any]) -> None:
             emit_progress(
                 round_num,
                 round_count,
-                f"Round {round_num}/{round_count} done — {agent_count} actions",
+                f"Round {round_num}/{round_count} done — {round_action_count} actions",
             )
             logger.info("Round %d/%d complete", round_num, round_count)
         except Exception as exc:
             logger.error("Round %d error: %s", round_num, exc)
+            runtime_errors.append(f"round {round_num}: {exc}")
             emit(
                 "error",
                 {
@@ -445,6 +514,9 @@ async def run_instagram_simulation(config: dict[str, Any]) -> None:
                     "message": str(exc),
                 },
             )
+
+    if runtime_errors and total_actions == 0:
+        raise RuntimeError("; ".join(runtime_errors[:3]))
 
     emit(
         "complete",
@@ -471,7 +543,7 @@ async def run_instagram_simulation(config: dict[str, Any]) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="MurmuraScope Instagram Simulation (OASIS Twitter backend)")
+    parser = argparse.ArgumentParser(description="Murmura Instagram Simulation (OASIS Twitter backend)")
     parser.add_argument("--config", required=True, help="Config JSON path")
     args = parser.parse_args()
 

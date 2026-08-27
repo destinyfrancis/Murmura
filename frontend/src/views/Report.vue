@@ -1,7 +1,8 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
-import { marked } from 'marked'
 import { getReport } from '../api/report.js'
+import { unwrapApi } from '../api/utils.js'
+import { renderSafeMarkdown } from '../utils/safeMarkdown.js'
 
 const props = defineProps({
   reportId: { type: String, required: true },
@@ -11,26 +12,15 @@ const report = ref(null)
 const loading = ref(true)
 const error = ref(null)
 
-const sanitize = (html) => {
-  return html
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-    .replace(/\son\w+\s*=/gi, ' data-removed=')
-    .replace(/<iframe[\s\S]*?<\/iframe>/gi, '')
-    .replace(/<object[\s\S]*?<\/object>/gi, '')
-    .replace(/<embed[^>]*>/gi, '')
-    .replace(/javascript\s*:/gi, 'data-blocked:')
-    .replace(/<base[^>]*>/gi, '')
-}
-
 const renderedMarkdown = computed(() => {
-  if (!report.value?.content) return ''
-  return sanitize(marked.parse(report.value.content))
+  const content = report.value?.content_markdown || report.value?.content
+  return renderSafeMarkdown(content)
 })
 
 onMounted(async () => {
   try {
     const res = await getReport(props.reportId)
-    report.value = res.data?.data || res.data
+    report.value = unwrapApi(res)
   } catch (err) {
     error.value = '無法載入報告'
     console.error(err)
@@ -67,7 +57,7 @@ onMounted(async () => {
 .report-page {
   max-width: 900px;
   margin: 0 auto;
-  padding: 32px 24px;
+  padding: 28px 24px 72px;
 }
 
 .loading {
@@ -83,7 +73,7 @@ onMounted(async () => {
   width: 36px;
   height: 36px;
   border: 3px solid var(--border-color);
-  border-top-color: var(--accent-blue);
+  border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -105,8 +95,11 @@ onMounted(async () => {
 }
 
 .report-header h1 {
+  font-family: var(--font-mono);
   font-size: 28px;
-  font-weight: 700;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
   margin-bottom: 8px;
 }
 
@@ -117,7 +110,7 @@ onMounted(async () => {
 
 .markdown-body {
   background: var(--bg-card);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 32px;
   line-height: 1.8;
@@ -167,7 +160,7 @@ onMounted(async () => {
 }
 
 .markdown-body :deep(blockquote) {
-  border-left: 3px solid var(--accent-blue);
+  border-left: 3px solid var(--accent);
   padding-left: 16px;
   color: var(--text-secondary);
   margin-bottom: 12px;

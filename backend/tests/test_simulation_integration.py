@@ -1,4 +1,4 @@
-"""Integration tests for MurmuraScope simulation pipeline.
+"""Integration tests for Murmura simulation pipeline.
 
 Tasks covered:
   3.1  OASIS config building, CSV generation, platform-aware script selection.
@@ -9,6 +9,7 @@ Tasks covered:
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -165,7 +166,7 @@ class TestBuildFullConfig:
             "session_id": "sess-abc",
             "agent_csv_path": "/tmp/agents.csv",
             "round_count": 10,
-            "platforms": {"facebook": True},
+            "platforms": {"twitter": True, "reddit": True},
         }
         result = _build_full_config(config, "sess-abc")
 
@@ -240,6 +241,226 @@ class TestParallelScriptRequiredKeys:
             assert key in REQUIRED_CONFIG_KEYS, f"Expected '{key}' in REQUIRED_CONFIG_KEYS"
 
 
+class TestParallelScriptFailureSemantics:
+    """Parallel platform failures must be visible to the parent process."""
+
+    def test_platform_errors_return_nonzero(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from backend.scripts import run_parallel_simulation as parallel
+
+        def fake_run_platform_thread(
+            _script_name: str,
+            platform: str,
+            _config: dict[str, Any],
+            _results: dict[str, Any],
+            errors: dict[str, str],
+            _shutdown_event: Any,
+            _on_progress: Any = None,
+        ) -> None:
+            errors[platform] = "oasis missing"
+
+        monkeypatch.setattr(parallel, "_run_platform_thread", fake_run_platform_thread)
+
+        exit_code = parallel.run_parallel(
+            {
+                "session_id": "parallel_failure",
+                "agent_csv_path": "/tmp/agents.csv",
+                "round_count": 1,
+                "platforms": {"twitter": True, "reddit": True},
+                "llm_provider": "openrouter",
+                "llm_model": "test",
+                "oasis_db_path": "/tmp/oasis.db",
+            }
+        )
+
+        assert exit_code == 1
+
+    def test_platform_thread_sets_shutdown_event_on_error(self) -> None:
+        from threading import Event
+
+        from backend.scripts import run_parallel_simulation as parallel
+
+        def boom(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+            raise RuntimeError("platform exploded")
+
+        results: dict[str, Any] = {}
+        errors: dict[str, str] = {}
+        shutdown = Event()
+
+        with patch.object(parallel, "_run_platform_subprocess", side_effect=boom):
+            parallel._run_platform_thread(
+                "run_twitter_simulation.py",
+                "twitter",
+                {"oasis_db_path": "/tmp/oasis.db"},
+                results,
+                errors,
+                shutdown,
+            )
+
+        assert shutdown.is_set()
+        assert "twitter" in errors
+
+    def test_parallel_emits_aggregate_progress_after_all_platforms(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        from backend.scripts import run_parallel_simulation as parallel
+
+        def fake_run_platform_thread(
+            _script_name: str,
+            platform: str,
+            _config: dict[str, Any],
+            results: dict[str, Any],
+            _errors: dict[str, str],
+            _shutdown_event: Any,
+            on_progress: Any = None,
+        ) -> None:
+            if on_progress is not None:
+                on_progress(platform, 1, {"round": 1})
+            results[platform] = {"platform": platform, "rounds_completed": 1}
+
+        monkeypatch.setattr(parallel, "_run_platform_thread", fake_run_platform_thread)
+
+        exit_code = parallel.run_parallel(
+            {
+                "session_id": "parallel_progress",
+                "agent_csv_path": "/tmp/agents.csv",
+                "round_count": 1,
+                "platforms": {"twitter": True, "reddit": True},
+                "llm_provider": "openrouter",
+                "llm_model": "test",
+                "oasis_db_path": "/tmp/oasis.db",
+            }
+        )
+
+        assert exit_code == 0
+        messages = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.strip()]
+        aggregate_rounds = [
+            msg
+            for msg in messages
+            if msg.get("type") == "progress"
+            and msg.get("data", {}).get("platform") == "parallel"
+            and msg.get("data", {}).get("round") == 1
+        ]
+        assert len(aggregate_rounds) == 1
+
+    def test_platform_subprocess_uses_isolated_oasis_db(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        import io
+
+        from backend.scripts import run_parallel_simulation as parallel
+
+        agent_csv = tmp_path / "agents.csv"
+        agent_csv.write_text("username,description,user_char\nagent_1,A,A\n", encoding="utf-8")
+        script = Path(parallel.__file__).with_name("run_twitter_simulation.py")
+        captured: dict[str, Any] = {}
+
+        class FakeProc:
+            returncode = 0
+
+            def __init__(self, args: list[str], **_kwargs: Any) -> None:
+                config_path = Path(args[-1])
+                captured.update(json.loads(config_path.read_text(encoding="utf-8")))
+                self.stdout = io.StringIO('{"type":"complete","data":{"rounds_completed":1}}\n')
+                self.stderr = io.StringIO("")
+
+            def wait(self, timeout: int | None = None) -> None:
+                return None
+
+            def poll(self) -> int:
+                return self.returncode
+
+        monkeypatch.setattr(parallel.subprocess, "Popen", FakeProc)
+
+        summary = parallel._run_platform_subprocess(
+            script.name,
+            "twitter",
+            {
+                "session_id": "s",
+                "agent_csv_path": str(agent_csv),
+                "round_count": 1,
+                "platforms": {"twitter": True},
+                "llm_provider": "fireworks",
+                "llm_model": "model",
+                "oasis_db_path": str(tmp_path / "oasis.db"),
+            },
+            shutdown_event=parallel.threading.Event(),
+        )
+
+        assert summary["platform"] == "twitter"
+        assert captured["oasis_db_path"].endswith("oasis_twitter.db")
+
+
+class TestSimulationLifecycleProgressHooks:
+    """Round hooks should fire once per completed simulation round."""
+
+    def test_round_zero_progress_is_status_only(self) -> None:
+        from backend.app.services import simulation_lifecycle as sl
+
+        processed: set[int] = set()
+
+        assert (
+            sl._progress_round_for_hooks(
+                {"type": "progress", "data": {"platform": "parallel", "round": 0}},
+                multi_platform=True,
+                processed_rounds=processed,
+            )
+            is None
+        )
+        assert processed == set()
+
+    def test_multi_platform_waits_for_parallel_aggregate_progress(self) -> None:
+        from backend.app.services import simulation_lifecycle as sl
+
+        processed: set[int] = set()
+
+        assert (
+            sl._progress_round_for_hooks(
+                {"type": "progress", "data": {"platform": "twitter", "round": 1}},
+                multi_platform=True,
+                processed_rounds=processed,
+            )
+            is None
+        )
+        assert (
+            sl._progress_round_for_hooks(
+                {"type": "progress", "data": {"platform": "parallel", "round": 1}},
+                multi_platform=True,
+                processed_rounds=processed,
+            )
+            == 1
+        )
+        assert (
+            sl._progress_round_for_hooks(
+                {"type": "progress", "data": {"platform": "parallel", "round": 1}},
+                multi_platform=True,
+                processed_rounds=processed,
+            )
+            is None
+        )
+
+    def test_single_platform_progress_runs_hooks_once(self) -> None:
+        from backend.app.services import simulation_lifecycle as sl
+
+        processed: set[int] = set()
+
+        assert (
+            sl._progress_round_for_hooks(
+                {"type": "progress", "data": {"platform": "twitter", "round": 2}},
+                multi_platform=False,
+                processed_rounds=processed,
+            )
+            == 2
+        )
+        assert (
+            sl._progress_round_for_hooks(
+                {"type": "progress", "data": {"platform": "twitter", "round": 2}},
+                multi_platform=False,
+                processed_rounds=processed,
+            )
+            is None
+        )
+
+
 class TestPlatformScriptSelection:
     """Task 3.1 — platform-aware script selection logic in SimulationRunner.run()."""
 
@@ -286,6 +507,32 @@ class TestPlatformScriptSelection:
                     script = sl._SCRIPT_PATH
 
         assert "facebook" in str(script), f"Expected facebook script, got: {script}"
+
+    def test_reddit_only_uses_reddit_script(self) -> None:
+        """Single reddit platform should use the dedicated reddit script."""
+        from backend.app.services import simulation_lifecycle as sl
+
+        platforms = {"reddit": True}
+        enabled_count = sum(1 for v in platforms.values() if v)
+        facebook_on = platforms.get("facebook", False)
+        instagram_on = platforms.get("instagram", False)
+        twitter_on = platforms.get("twitter", False)
+        reddit_on = platforms.get("reddit", False)
+
+        if enabled_count > 1 and sl._PARALLEL_SCRIPT.exists():
+            script = sl._PARALLEL_SCRIPT
+        elif facebook_on:
+            script = sl._FACEBOOK_SCRIPT
+        elif instagram_on:
+            script = sl._INSTAGRAM_SCRIPT
+        elif twitter_on:
+            script = sl._SCRIPT_PATH
+        elif reddit_on:
+            script = sl._REDDIT_SCRIPT
+        else:
+            script = sl._SCRIPT_PATH
+
+        assert "reddit" in str(script)
 
     def test_instagram_only_uses_instagram_script(self) -> None:
         """Single instagram platform → run_instagram_simulation.py is selected."""
@@ -925,7 +1172,7 @@ class TestSimulationRunnerDryRun:
 
         config: dict[str, Any] = {
             "agent_csv_path": str(agent_csv),
-            "platforms": {"facebook": True},
+            "platforms": {"twitter": True, "reddit": True},
             "round_count": 3,
         }
 
@@ -959,7 +1206,7 @@ class TestSimulationRunnerDryRun:
 
         config: dict[str, Any] = {
             "agent_csv_path": str(agent_csv),
-            "platforms": {"facebook": True},
+            "platforms": {"twitter": True, "reddit": True},
             "round_count": 3,
         }
 
@@ -992,7 +1239,7 @@ class TestSimulationRunnerDryRun:
 
         config: dict[str, Any] = {
             "agent_csv_path": str(agent_csv),
-            "platforms": {"facebook": True},
+            "platforms": {"twitter": True, "reddit": True},
             "round_count": 3,
         }
 
@@ -1022,7 +1269,7 @@ class TestSimulationRunnerDryRun:
 
         config: dict[str, Any] = {
             "agent_csv_path": str(agent_csv),
-            "platforms": {"facebook": True},
+            "platforms": {"twitter": True, "reddit": True},
             "round_count": 3,
         }
 
@@ -1047,7 +1294,7 @@ class TestSimulationRunnerDryRun:
 
         config: dict[str, Any] = {
             "agent_csv_path": str(agent_csv),
-            "platforms": {"facebook": True},
+            "platforms": {"twitter": True, "reddit": True},
             "round_count": 3,
         }
 
@@ -1076,11 +1323,12 @@ class TestSimulationRunnerRelativePaths:
 
         assert (sl._PROJECT_ROOT / "backend").is_dir(), "_PROJECT_ROOT does not contain a backend/ directory"
 
-    def test_python_bin_path_is_relative(self) -> None:
-        """_PYTHON_BIN must be derived from _PROJECT_ROOT, not an absolute literal."""
+    def test_python_bin_path_is_resolved(self) -> None:
+        """_PYTHON_BIN must resolve to an existing interpreter in every CI environment."""
         from backend.app.services import simulation_lifecycle as sl
 
-        assert str(sl._PYTHON_BIN).startswith(str(sl._PROJECT_ROOT)), "_PYTHON_BIN must be relative to _PROJECT_ROOT"
+        assert sl._PYTHON_BIN.is_absolute(), "_PYTHON_BIN must be an absolute executable path"
+        assert sl._PYTHON_BIN.is_file(), f"_PYTHON_BIN does not exist: {sl._PYTHON_BIN}"
 
     def test_script_paths_are_under_project_root(self) -> None:
         """All simulation script paths must be under _PROJECT_ROOT."""

@@ -1,5 +1,7 @@
 # backend/tests/test_report_orchestrator.py
-from unittest.mock import AsyncMock, MagicMock
+import json
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -59,6 +61,53 @@ def test_orchestrator_outline_handles_trailing_prose():
     chapters = orch._parse_outline(raw)
     assert len(chapters) == 2
     assert chapters[1]["title"] == "B"
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_session_meta_uses_existing_schema(tmp_path):
+    """_get_session_meta must not query nonexistent simulation_sessions.preset."""
+    from contextlib import asynccontextmanager
+
+    import aiosqlite
+
+    from backend.app.services.report_orchestrator import ReportOrchestrator
+
+    db_path = tmp_path / "orchestrator.db"
+    schema_path = Path(__file__).parent.parent / "database" / "schema.sql"
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        await db.executescript(schema_path.read_text(encoding="utf-8"))
+        await db.execute(
+            """INSERT INTO simulation_sessions
+               (id, name, sim_mode, seed_text, agent_count, round_count, llm_provider, config_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "sess-meta",
+                "test-session",
+                "kg_driven",
+                "long seed",
+                12,
+                7,
+                "test",
+                json.dumps({"time_config": {"round_label_unit": "day"}}),
+            ),
+        )
+        await db.commit()
+
+    @asynccontextmanager
+    async def _patched_get_db():
+        async with aiosqlite.connect(db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            yield conn
+
+    orch = ReportOrchestrator.__new__(ReportOrchestrator)
+    with patch("backend.app.services.report_orchestrator.get_db", _patched_get_db):
+        meta = await orch._get_session_meta("sess-meta")
+
+    assert meta["sim_mode"] == "kg_driven"
+    assert meta["agent_count"] == 12
+    assert meta["round_count"] == 7
+    assert meta["time_config"] == {"round_label_unit": "day"}
 
 
 @pytest.mark.asyncio

@@ -179,7 +179,11 @@ class GraphRAGService:
         await self._ensure_table()
 
         # Filter out tiny clusters
-        valid_chambers = [c for c in echo_result.chambers if c.member_count >= _MIN_CLUSTER_SIZE]
+        valid_chambers = [
+            c
+            for c in echo_result.chambers
+            if int(getattr(c, "member_count", getattr(c, "size", len(getattr(c, "agent_ids", ()))))) >= _MIN_CLUSTER_SIZE
+        ]
         if not valid_chambers:
             logger.info(
                 "No clusters >= %d members, skipping community summaries session=%s",
@@ -956,4 +960,3 @@ class GraphRAGService:
                 contradictions.append(f"事實為 {pair[0]} -> {pair[1]} 是 {truth_rel}，但 {belief_str}")
 
         return contradictions[:limit]
-

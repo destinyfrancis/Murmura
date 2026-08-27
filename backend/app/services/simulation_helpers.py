@@ -85,11 +85,17 @@ def _build_full_config(config: dict[str, Any], session_id: str) -> dict[str, Any
 def _get_api_key() -> str:
     """Read OpenRouter API key from settings or OS env."""
     try:
-        from backend.app.config import get_settings as _get_settings  # noqa: PLC0415
+        from backend.app.services.runtime_settings import get_override  # noqa: PLC0415
 
-        key = getattr(_get_settings(), "OPENROUTER_API_KEY", "") or ""
+        key = get_override("api_key_openrouter") or ""
     except Exception:
         key = ""
+    try:
+        from backend.app.config import get_settings as _get_settings  # noqa: PLC0415
+
+        key = key or getattr(_get_settings(), "OPENROUTER_API_KEY", "") or ""
+    except Exception:
+        pass
     if not key:
         key = os.environ.get("OPENROUTER_API_KEY", "")
     if not key:

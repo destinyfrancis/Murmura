@@ -9,9 +9,10 @@ from typing import Any
 import aiosqlite
 
 from backend.app.utils.db import get_db
-from backend.app.utils.llm_client import LLMClient, get_step_provider_model
+from backend.app.utils.llm_client import LLMClient, get_agent_provider_model, get_step_provider_model
 from backend.app.utils.logger import get_logger
 from backend.app.services.agent_memory import AgentMemoryService
+from backend.app.utils.prompt_security import sanitize_user_query
 
 logger = get_logger("interview_engine")
 
@@ -30,22 +31,29 @@ class InterviewEngine:
         query: str,
     ) -> str:
         """Generate an in-character response from an agent."""
+        safe_query = sanitize_user_query(query)
         
         # 1. Fetch Agent Profile
         async with get_db() as db:
             cursor = await db.execute(
-                "SELECT * FROM agent_profiles WHERE session_id = ? AND id = ?",
-                (session_id, agent_id),
+                """SELECT * FROM agent_profiles
+                   WHERE session_id = ?
+                     AND (CAST(id AS TEXT) = ? OR oasis_username = ?)
+                   LIMIT 1""",
+                (session_id, str(agent_id), str(agent_id)),
             )
             profile = await cursor.fetchone()
             if not profile:
                 raise ValueError(f"Agent {agent_id} not found in session {session_id}")
             profile_dict = dict(profile)
+            profile_agent_id = str(profile_dict.get("id") or agent_id)
 
             # 2. Fetch Latest Round
             cursor = await db.execute(
-                "SELECT round_number FROM agent_memories WHERE session_id = ? AND agent_id = ? ORDER BY round_number DESC LIMIT 1",
-                (session_id, agent_id),
+                """SELECT round_number FROM agent_memories
+                   WHERE session_id = ? AND CAST(agent_id AS TEXT) = ?
+                   ORDER BY round_number DESC LIMIT 1""",
+                (session_id, profile_agent_id),
             )
             row = await cursor.fetchone()
             latest_round = row["round_number"] if row else 0
@@ -54,15 +62,15 @@ class InterviewEngine:
         # Using the memory service to get context
         # agent_id stays as str — HK mode uses int-as-str, kg_driven may be UUID
         try:
-            agent_id_typed: int | str = int(agent_id)
+            agent_id_typed: int | str = int(profile_agent_id)
         except (ValueError, TypeError):
-            agent_id_typed = agent_id
+            agent_id_typed = profile_agent_id
 
         context = await self._memory_service.get_agent_context(
             session_id=session_id,
             agent_id=agent_id_typed,
             current_round=latest_round,
-            context_query=query,
+            context_query=safe_query,
         )
 
         # 4. Construct Prompt
@@ -73,7 +81,7 @@ class InterviewEngine:
         response = await self._llm.chat(
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"我是模擬器的觀察者。我想問你：{query}"},
+                {"role": "user", "content": f"我是模擬器的觀察者。我想問你：{safe_query}"},
             ],
             provider=provider,
             model=model,
@@ -81,7 +89,7 @@ class InterviewEngine:
         )
 
         # 6. Persist Interview
-        await self._persist_interview(session_id, agent_id, query, response.content)
+        await self._persist_interview(session_id, agent_id, safe_query, response.content)
 
         return response.content
 

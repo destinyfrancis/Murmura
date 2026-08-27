@@ -1,4 +1,4 @@
-"""Community/Social Movement DomainPack for MurmuraScope.
+"""Community/Social Movement DomainPack for Murmura.
 
 Bundles all social-movement-specific constants (shocks, metrics,
 demographics, macro fields, scenarios) into a single frozen DomainPack

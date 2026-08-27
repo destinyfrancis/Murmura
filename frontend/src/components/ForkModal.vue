@@ -36,7 +36,7 @@ function handleSubmit() {
       <div class="fork-modal">
         <div class="fork-modal-header">
           <h4 class="fork-modal-title">建立分叉模擬</h4>
-          <button class="fork-modal-close" @click="emit('close')">&#x2715;</button>
+          <button class="fork-modal-close" type="button" aria-label="關閉分支設定" @click="emit('close')">&#x2715;</button>
         </div>
         <div class="fork-modal-body">
           <div class="fork-field">

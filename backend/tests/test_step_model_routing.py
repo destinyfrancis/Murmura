@@ -74,6 +74,12 @@ def test_get_agent_model_routing():
     assert provider == "openrouter"
     assert model == "anthropic/claude-3-opus"
 
+    # Known-bad lite models must fall back to the strong/validated agent route.
+    runtime_settings.set_override("agent_llm_model_lite", "accounts/fireworks/models/deepseek-v3p2")
+    provider, model = get_agent_model(is_stakeholder=False)
+    assert provider == "openrouter"
+    assert model == "anthropic/claude-3-opus"
+
 def test_get_report_provider_model():
     # 1. Basic report routing
     runtime_settings.set_override("llm_provider", "google")

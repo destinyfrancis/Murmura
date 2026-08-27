@@ -99,6 +99,9 @@ _SAMPLE_LLM_AGENT = {
     "persona": "A determined leader with strong ideological convictions.",
     "goals": ["Preserve national sovereignty", "Resist foreign interference"],
     "capabilities": ["Issue decrees", "Command armed forces"],
+    "constraints": ["Domestic legitimacy pressure", "Military overstretch risk"],
+    "beliefs": {"foreign_pressure_will_continue": 0.9, "deterrence_prevents_concessions": 0.8},
+    "memory_seed": "Remembers repeated external threats and prior failed negotiations.",
     "stance_axes": {"militarism": 0.85, "diplomacy": 0.2},
     "relationships": {"defence_ministry": "commands"},
     "openness": 0.2,
@@ -373,6 +376,13 @@ class TestParseAgentDict:
         assert isinstance(result.goals, tuple)
         assert isinstance(result.capabilities, tuple)
 
+    def test_constraints_beliefs_and_memory_seed_are_parsed(self):
+        result = KGAgentFactory._parse_agent_dict(_SAMPLE_LLM_AGENT)
+        assert result is not None
+        assert "Domestic legitimacy pressure" in result.constraints
+        assert ("foreign_pressure_will_continue", 0.9) in result.beliefs
+        assert "failed negotiations" in result.memory_seed
+
     def test_missing_optional_fields_use_defaults(self):
         minimal = {
             "id": "minimal_agent",
@@ -448,7 +458,7 @@ class TestGenerateFromKg:
             profiles[0].name = "mutated"  # type: ignore[misc]
 
     @pytest.mark.asyncio
-    async def test_raises_when_llm_generation_fails(self):
+    async def test_falls_back_when_llm_generation_fails(self):
         filter_response = {"eligible": [{"node_id": "n1"}], "excluded": []}
 
         mock_llm = MagicMock()
@@ -456,12 +466,16 @@ class TestGenerateFromKg:
         mock_llm.chat_json = AsyncMock(side_effect=[filter_response, RuntimeError("LLM down")])
         factory = KGAgentFactory(llm_client=mock_llm)
 
-        with pytest.raises(RuntimeError, match="LLM profile generation failed"):
-            await factory.generate_from_kg(
-                nodes=_SAMPLE_NODES,
-                edges=_SAMPLE_EDGES,
-                seed_text="scenario",
-            )
+        profiles = await factory.generate_from_kg(
+            nodes=_SAMPLE_NODES,
+            edges=_SAMPLE_EDGES,
+            seed_text="scenario",
+            target_count=2,
+        )
+
+        assert len(profiles) == 2
+        assert all(isinstance(profile, UniversalAgentProfile) for profile in profiles)
+        assert mock_llm.chat_json.await_count == 2
 
     @pytest.mark.asyncio
     async def test_falls_back_to_all_nodes_when_no_eligible(self):
@@ -507,6 +521,63 @@ class TestGenerateFromKg:
         second_call_kwargs = mock_llm.chat_json.call_args_list[1]
         user_msg = second_call_kwargs[1]["messages"][-1]["content"]
         assert "2" in user_msg  # target count embedded in prompt
+
+    @pytest.mark.asyncio
+    async def test_market_seed_injects_market_role_templates(self):
+        filter_response = {"eligible": [{"node_id": "n1", "label": "Acme"}], "excluded": []}
+        generation_response = {"agents": [_SAMPLE_LLM_AGENT]}
+
+        mock_llm = MagicMock()
+        mock_llm.chat_json = AsyncMock(side_effect=[filter_response, generation_response])
+        factory = KGAgentFactory(llm_client=mock_llm)
+
+        await factory.generate_from_kg(
+            nodes=_SAMPLE_NODES[:1],
+            edges=_SAMPLE_EDGES,
+            seed_text="A company prepares a product launch against a fierce competitor in the market.",
+            target_count=1,
+        )
+
+        user_msg = mock_llm.chat_json.call_args_list[1][1]["messages"][-1]["content"]
+        assert "SCENARIO FAMILY: MARKET" in user_msg
+        assert "customer segment, competitor, regulator, influencer, sales team, product team" in user_msg
+
+    @pytest.mark.asyncio
+    async def test_graph_edges_backfill_relationships_when_llm_omits_them(self):
+        filter_response = {
+            "eligible": [
+                {"node_id": "n1", "label": "Supreme Leader"},
+                {"node_id": "n2", "label": "Defence Ministry"},
+            ],
+            "excluded": [],
+        }
+        generation_response = {
+            "agents": [
+                {**_SAMPLE_LLM_AGENT, "relationships": {}, "kg_node_id": "n1"},
+                {
+                    **_SAMPLE_LLM_AGENT,
+                    "id": "defence_ministry",
+                    "name": "Defence Ministry",
+                    "role": "Military bureaucracy",
+                    "entity_type": "Military",
+                    "kg_node_id": "n2",
+                    "relationships": {},
+                },
+            ]
+        }
+
+        mock_llm = MagicMock()
+        mock_llm.chat_json = AsyncMock(side_effect=[filter_response, generation_response])
+        factory = KGAgentFactory(llm_client=mock_llm)
+
+        profiles = await factory.generate_from_kg(
+            nodes=_SAMPLE_NODES[:2],
+            edges=[{"source_id": "n1", "target_id": "n2", "relation_type": "commands"}],
+            seed_text="Iran nuclear negotiations",
+            target_count=2,
+        )
+        by_id = {profile.id: profile for profile in profiles}
+        assert ("defence_ministry", "commands") in by_id["supreme_leader"].relationships
 
 
 # ---------------------------------------------------------------------------
@@ -623,10 +694,11 @@ class TestFullPipeline:
             reader = csv.DictReader(fh)
             rows = list(reader)
 
-        assert len(rows) == 1
-        assert rows[0]["userid"] == "supreme_leader"
-        assert "determined leader" in rows[0]["user_char"]
-        assert len(rows[0]["username"]) > 6
+        assert len(rows) == 5
+        primary = next(row for row in rows if row["userid"] == "supreme_leader")
+        assert "determined leader" in primary["user_char"]
+        assert len(primary["username"]) > 6
+        assert all(row["userid"] for row in rows)
 
     @pytest.mark.asyncio
     async def test_pipeline_with_multiple_agents(self, tmp_path):

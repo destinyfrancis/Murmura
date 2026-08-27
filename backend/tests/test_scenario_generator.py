@@ -681,6 +681,21 @@ class TestScenarioGeneratorGenerate:
         assert dt_id == dt_id.lower()
 
 
+def test_build_fallback_scenario_config_is_valid() -> None:
+    from backend.app.services.scenario_generator import build_fallback_scenario_config
+
+    supplier = dataclasses.replace(_make_agent_profile(), entity_type="Supplier")
+    config = build_fallback_scenario_config(
+        seed_text="A supplier cost spike hits a manufacturer.",
+        kg_nodes=[{"id": "n1", "type": "Company", "label": "Manufacturer"}],
+        agent_profiles=[supplier],
+    )
+
+    assert config.decision_types
+    assert config.metrics
+    assert config.stakeholder_entity_types == ("Company", "Supplier")
+
+
 # ===========================================================================
 # Slug validation helpers
 # ===========================================================================

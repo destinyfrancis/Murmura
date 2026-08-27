@@ -173,6 +173,27 @@ class TestBasicQuery:
         analytics.close()
         analytics.close()  # should not raise
 
+    def test_sqlite_path_with_spaces_attaches(self, tmp_path: Path) -> None:
+        spaced_dir = tmp_path / "db path with spaces"
+        spaced_dir.mkdir()
+        db_path = spaced_dir / "murmura test.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE simulation_sessions (id TEXT PRIMARY KEY, name TEXT, status TEXT)")
+        conn.execute(
+            "INSERT INTO simulation_sessions (id, name, status) VALUES ('sess-space', 'Space Path', 'completed')"
+        )
+        conn.commit()
+        conn.close()
+
+        analytics = DuckDBAnalytics(db_path)
+        try:
+            result = analytics.query("SELECT name FROM simulation_sessions WHERE id = $1", ["sess-space"])
+        finally:
+            analytics.close()
+
+        assert result.row_count == 1
+        assert result.rows[0][0] == "Space Path"
+
 
 # ---------------------------------------------------------------------------
 # Tests: Analytical queries

@@ -39,22 +39,25 @@ async def test_run_quick_start_kg_driven_mode():
     )
 
     mock_graph = MagicMock()
-    mock_graph.build_graph = AsyncMock(return_value={"graph_id": "graph_test_123"})
+    mock_graph.build_graph_from_seed = AsyncMock(return_value={"graph_id": "graph_test_123"})
 
     mock_manager = MagicMock()
     mock_manager.create_session = AsyncMock(return_value={"session_id": "sess-123"})
     mock_manager.start_session = AsyncMock()
 
     mock_gen_agents = AsyncMock(return_value=([], "/tmp/agents.csv"))
+    mock_preflight = MagicMock()
+    mock_preflight.run_for_session = AsyncMock(return_value={"ready": True, "blocking_errors": [], "warnings": []})
 
     with (
         patch("backend.app.services.zero_config.ZeroConfigService", return_value=mock_zc),
         patch("backend.app.services.graph_builder.GraphBuilderService", return_value=mock_graph),
         patch("backend.app.api.simulation.get_simulation_manager", return_value=mock_manager),
         patch("backend.app.api.simulation.generate_agents", mock_gen_agents),
+        patch("backend.app.services.simulation_preflight.SimulationPreflightService", return_value=mock_preflight),
         patch("backend.app.api.simulation.store_universal_agent_profiles", new_callable=AsyncMock),
         patch("backend.app.models.simulation_config.resolve_preset", return_value=MagicMock(agents=100, rounds=30)),
-        patch("backend.app.utils.prompt_security.sanitize_seed_text", side_effect=lambda x: x),
+        patch("backend.app.utils.prompt_security.sanitize_source_seed_text", side_effect=lambda x: x),
         patch("asyncio.create_task"),
     ):
         result = await _run_quick_start("USA and Iran enter full military conflict.", "predict oil prices", "standard")
@@ -83,7 +86,7 @@ async def test_run_quick_start_hk_mode_unchanged():
     )
 
     mock_graph = MagicMock()
-    mock_graph.build_graph = AsyncMock(return_value={"graph_id": "graph_hk_123"})
+    mock_graph.build_graph_from_seed = AsyncMock(return_value={"graph_id": "graph_hk_123"})
 
     mock_manager = MagicMock()
     mock_manager.create_session = AsyncMock(return_value={"session_id": "sess-hk"})
@@ -95,16 +98,19 @@ async def test_run_quick_start_hk_mode_unchanged():
     mock_macro.get_baseline_for_scenario = AsyncMock(return_value=MagicMock())
     mock_profile_gen = MagicMock()
     mock_profile_gen.to_oasis_csv = MagicMock(return_value="userid,user_char,username\n")
+    mock_preflight = MagicMock()
+    mock_preflight.run_for_session = AsyncMock(return_value={"ready": True, "blocking_errors": [], "warnings": []})
 
     with (
         patch("backend.app.services.zero_config.ZeroConfigService", return_value=mock_zc),
         patch("backend.app.services.graph_builder.GraphBuilderService", return_value=mock_graph),
         patch("backend.app.api.simulation.get_simulation_manager", return_value=mock_manager),
+        patch("backend.app.services.simulation_preflight.SimulationPreflightService", return_value=mock_preflight),
         patch("backend.app.api.simulation.AgentFactory", return_value=mock_factory),
         patch("backend.app.api.simulation.MacroController", return_value=mock_macro),
         patch("backend.app.api.simulation.ProfileGenerator", return_value=mock_profile_gen),
         patch("backend.app.models.simulation_config.resolve_preset", return_value=MagicMock(agents=100, rounds=15)),
-        patch("backend.app.utils.prompt_security.sanitize_seed_text", side_effect=lambda x: x),
+        patch("backend.app.utils.prompt_security.sanitize_source_seed_text", side_effect=lambda x: x),
         patch("backend.app.api.simulation.store_agent_profiles", new_callable=AsyncMock),
         patch("backend.app.api.simulation.store_activity_profiles", new_callable=AsyncMock),
         patch("asyncio.to_thread", new_callable=AsyncMock),

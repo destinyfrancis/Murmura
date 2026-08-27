@@ -1,4 +1,4 @@
-"""FastAPI application factory for Morai."""
+"""FastAPI application factory for Murmura."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,6 +19,8 @@ from backend.app.utils.logger import setup_logging
 # Router module names under backend.app.api
 _ROUTER_MODULES = (
     "auth",
+    "workflow",
+    "reality_seed",
     "graph",
     "simulation_macro",
     "simulation_branches",
@@ -120,8 +123,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     init_telemetry()
 
-    logger = logging.getLogger("murmuroscope")
-    logger.info("Starting Morai backend")
+    logger = logging.getLogger("murmura")
+    logger.info("Starting Murmura backend")
 
     # API Key Validation (L4)
     settings = get_settings()
@@ -571,7 +574,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             logger.info("DataScheduler stopped")
         except Exception:
             logger.warning("DataScheduler stop failed")
-    logger.info("Shutting down Morai backend")
+    logger.info("Shutting down Murmura backend")
 
 
 def create_app() -> FastAPI:
@@ -586,10 +589,10 @@ def create_app() -> FastAPI:
 
     log_level = logging.DEBUG if settings.DEBUG else logging.INFO
     setup_logging(level=log_level)
-    logger = logging.getLogger("murmuroscope")
+    logger = logging.getLogger("murmura")
 
     app = FastAPI(
-        title="Morai API",
+        title="Murmura API",
         version="0.1.0",
         lifespan=_lifespan,
     )
@@ -603,17 +606,16 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Rate limiting (slowapi) — middleware disabled temporarily due to
-    # slowapi 0.1.9 / Starlette compatibility issue (AttributeError in sync_check_limits).
-    # Exception handler still registered so @limiter.limit decorators don't crash.
+    # Rate limiting (slowapi)
     from slowapi import _rate_limit_exceeded_handler
     from slowapi.errors import RateLimitExceeded
+    from slowapi.middleware import SlowAPIMiddleware
 
     from backend.app.api.auth import _limiter
 
     app.state.limiter = _limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-    # app.add_middleware(SlowAPIMiddleware)  # re-enable after upgrading slowapi
+    app.add_middleware(SlowAPIMiddleware)
 
     # Health check
     @app.get("/api/health")
@@ -623,6 +625,12 @@ def create_app() -> FastAPI:
             "status": "ok",
             "capabilities": get_capabilities()
         }
+
+    @app.get("/api/diagnostics/setup")
+    async def setup_diagnostics() -> dict[str, Any]:
+        from backend.app.services.setup_diagnostics import run_setup_diagnostics
+
+        return await run_setup_diagnostics()
 
     # Mount routers (skip gracefully if module not yet implemented)
     for module_name in _ROUTER_MODULES:

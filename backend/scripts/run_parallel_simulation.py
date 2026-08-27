@@ -1,5 +1,5 @@
 """
-MurmuraScope OASIS Parallel Simulation Runner
+Murmura OASIS Parallel Simulation Runner
 
 Usage: python run_parallel_simulation.py --config /path/to/config.json
 
@@ -27,12 +27,20 @@ import argparse
 import json
 import logging
 import os
+import select
 import signal
 import subprocess
 import sys
 import threading
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+try:
+    from .failure_contract import classify_failure
+except ImportError:  # pragma: no cover - direct script execution
+    from failure_contract import classify_failure
 
 logging.basicConfig(
     level=logging.INFO,
@@ -67,12 +75,38 @@ def emit_progress(platform: str, round_num: int, total: int, detail: str = "") -
     )
 
 
-def emit_error(message: str, platform: str = "parallel") -> None:
-    emit("error", {"platform": platform, "message": message})
+def emit_error(message: str, platform: str = "parallel", code: str | None = None) -> None:
+    emit("error", {"platform": platform, "code": code or classify_failure(message), "message": message})
 
 
 def emit_complete(platform: str, summary: dict[str, Any]) -> None:
     emit("complete", {"platform": platform, **summary})
+
+
+def _tail_file(path: Path, max_chars: int = 1200) -> str:
+    if not path.is_file():
+        return ""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    return text[-max_chars:]
+
+
+def _platform_timeout_s(config: dict[str, Any]) -> float:
+    try:
+        return max(
+            1.0,
+            float(
+                os.environ.get("OASIS_PLATFORM_TIMEOUT_S")
+                or os.environ.get("OASIS_ROUND_TIMEOUT_S")
+                or config.get("oasis_platform_timeout_s")
+                or config.get("oasis_round_timeout_s")
+                or 300
+            ),
+        )
+    except (TypeError, ValueError):
+        return 300.0
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +124,14 @@ REQUIRED_CONFIG_KEYS = frozenset(
     }
 )
 
+LLM_ENV_KEYS: dict[str, str] = {
+    "fireworks": "FIREWORKS_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "together": "TOGETHER_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+}
+
 
 def load_config(config_path: str) -> dict[str, Any]:
     """Load and validate configuration from a JSON file."""
@@ -104,10 +146,12 @@ def load_config(config_path: str) -> dict[str, Any]:
     if missing:
         raise ValueError(f"Missing required config keys: {sorted(missing)}")
 
-    # Resolve llm_api_key from config or environment (SimulationRunner strips it
-    # from the written JSON for security; read it back from the environment here)
+    # Resolve llm_api_key from config or provider-specific environment.
+    # SimulationRunner strips it from the written JSON for security.
     if not config.get("llm_api_key"):
-        config = {**config, "llm_api_key": os.environ.get("OPENROUTER_API_KEY", "")}
+        provider = str(config.get("llm_provider") or "openrouter")
+        env_key = LLM_ENV_KEYS.get(provider, "OPENROUTER_API_KEY")
+        config = {**config, "llm_api_key": os.environ.get(env_key, "")}
 
     if not Path(config["agent_csv_path"]).is_file():
         raise FileNotFoundError(f"Agent profiles file not found: {config['agent_csv_path']}")
@@ -128,6 +172,7 @@ def _run_platform_subprocess(
     platform: str,
     config: dict[str, Any],
     shutdown_event: threading.Event,
+    on_progress: Callable[[str, int, dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Run a platform-specific simulation script as a subprocess.
 
@@ -144,32 +189,65 @@ def _run_platform_subprocess(
     child_config_path = Path(config["oasis_db_path"]).parent / f"config_{platform}.json"
     child_config_path.parent.mkdir(parents=True, exist_ok=True)
 
-    child_config = {**config, "platform": platform}
+    platform_db_path = Path(config["oasis_db_path"]).with_name(f"oasis_{platform}.db")
+    child_config = {**config, "platform": platform, "oasis_db_path": str(platform_db_path)}
     with open(child_config_path, "w", encoding="utf-8") as f:
         json.dump(child_config, f, ensure_ascii=False)
 
     logger.info("Starting %s simulation subprocess: %s", platform, script_path)
+    stdout_log_path = child_config_path.with_name(f"{platform}.stdout.log")
+    stderr_log_path = child_config_path.with_name(f"{platform}.stderr.log")
+    stderr_log = stderr_log_path.open("w", encoding="utf-8")
 
     proc = subprocess.Popen(
         [sys.executable, str(script_path), "--config", str(child_config_path)],
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=stderr_log,
         text=True,
         bufsize=1,
     )
 
     collected_posts: list[dict[str, Any]] = []
     last_round = 0
+    timeout_s = _platform_timeout_s(config)
+    last_output_at = time.monotonic()
 
     try:
-        for raw_line in iter(proc.stdout.readline, ""):
+        assert proc.stdout is not None
+        while True:
             if shutdown_event.is_set():
                 proc.terminate()
                 break
 
+            if proc.poll() is not None:
+                raw_line = proc.stdout.readline()
+                if raw_line == "":
+                    break
+            else:
+                ready, _, _ = select.select([proc.stdout], [], [], 1.0)
+                if not ready:
+                    idle_s = time.monotonic() - last_output_at
+                    if idle_s > timeout_s:
+                        logger.error("[%s] No output for %.0fs, killing subprocess", platform, idle_s)
+                        proc.kill()
+                        proc.wait()
+                        stderr_log.flush()
+                        raise RuntimeError(
+                            f"round_timeout: {platform} simulation timed out after {timeout_s:.0f}s without output; "
+                            f"stdout_log={stdout_log_path}; stderr_log={stderr_log_path}; "
+                            f"stderr_tail={_tail_file(stderr_log_path)}"
+                        )
+                    continue
+                raw_line = proc.stdout.readline()
+                if raw_line == "":
+                    continue
+
+            last_output_at = time.monotonic()
             line = raw_line.strip()
             if not line:
                 continue
+            with stdout_log_path.open("a", encoding="utf-8") as stdout_log:
+                stdout_log.write(line + "\n")
 
             try:
                 msg = json.loads(line)
@@ -183,6 +261,12 @@ def _run_platform_subprocess(
             if msg_type == "progress":
                 last_round = msg_data.get("round", last_round)
                 emit("progress", {**msg_data, "platform": platform})
+                try:
+                    round_num = int(last_round)
+                except (TypeError, ValueError):
+                    round_num = 0
+                if round_num > 0 and on_progress is not None:
+                    on_progress(platform, round_num, msg_data)
 
             elif msg_type == "post":
                 collected_posts.append(msg_data)
@@ -195,7 +279,14 @@ def _run_platform_subprocess(
                 emit("complete", {**msg_data, "platform": platform})
 
             elif msg_type == "error":
-                emit("error", {**msg_data, "platform": platform})
+                emit(
+                    "error",
+                    {
+                        **msg_data,
+                        "platform": platform,
+                        "code": msg_data.get("code") or classify_failure(str(msg_data)),
+                    },
+                )
 
         proc.wait(timeout=30)
 
@@ -203,19 +294,31 @@ def _run_platform_subprocess(
         logger.error("[%s] Subprocess timed out, killing", platform)
         proc.kill()
         proc.wait()
-        raise RuntimeError(f"{platform} simulation timed out")
+        stderr_log.flush()
+        raise RuntimeError(
+            f"round_timeout: {platform} simulation timed out; "
+            f"stdout_log={stdout_log_path}; stderr_log={stderr_log_path}; "
+            f"stderr_tail={_tail_file(stderr_log_path)}"
+        )
 
     finally:
+        try:
+            stderr_log.close()
+        except OSError:
+            pass
         # Clean up temp config
         try:
             child_config_path.unlink(missing_ok=True)
         except OSError:
             pass
 
-    stderr_output = proc.stderr.read() if proc.stderr else ""
     if proc.returncode != 0:
-        logger.error("[%s] exited with code %d: %s", platform, proc.returncode, stderr_output[:500])
-        raise RuntimeError(f"{platform} simulation failed (exit code {proc.returncode}): {stderr_output[:300]}")
+        stderr_tail = _tail_file(stderr_log_path)
+        logger.error("[%s] exited with code %d: %s", platform, proc.returncode, stderr_tail[:500])
+        raise RuntimeError(
+            f"{platform} simulation failed (exit code {proc.returncode}); "
+            f"stdout_log={stdout_log_path}; stderr_log={stderr_log_path}; stderr_tail={stderr_tail[:300]}"
+        )
 
     return {
         "platform": platform,
@@ -231,16 +334,24 @@ def _run_platform_thread(
     results: dict[str, Any],
     errors: dict[str, str],
     shutdown_event: threading.Event,
+    on_progress: Callable[[str, int, dict[str, Any]], None] | None = None,
 ) -> None:
     """Thread target that runs a platform subprocess and stores results."""
     try:
-        summary = _run_platform_subprocess(script_name, platform, config, shutdown_event)
+        summary = _run_platform_subprocess(
+            script_name,
+            platform,
+            config,
+            shutdown_event,
+            on_progress=on_progress,
+        )
         results[platform] = summary
     except Exception as exc:
         error_msg = f"{platform} simulation failed: {exc}"
         logger.error(error_msg)
         errors[platform] = error_msg
-        emit_error(error_msg, platform=platform)
+        shutdown_event.set()
+        emit_error(error_msg, platform=platform, code=classify_failure(exc))
 
 
 # ---------------------------------------------------------------------------
@@ -294,14 +405,19 @@ PLATFORM_SCRIPTS = {
 }
 
 
-def run_parallel(config: dict[str, Any]) -> None:
-    """Run enabled platform simulations in parallel threads."""
+def run_parallel(config: dict[str, Any]) -> int:
+    """Run enabled platform simulations in parallel threads.
+
+    Returns a process-style exit code. Any platform-level error is fatal for
+    the parent runner, because a completed session with zero actions is worse
+    than a clear failed session.
+    """
     platforms = config.get("platforms", {})
     enabled = [p for p, enabled in platforms.items() if enabled and p in PLATFORM_SCRIPTS]
 
     if not enabled:
         emit_error("No platforms enabled in config")
-        return
+        return 1
 
     session_id = config["session_id"]
     logger.info(
@@ -317,6 +433,24 @@ def run_parallel(config: dict[str, Any]) -> None:
     results: dict[str, Any] = {}
     errors: dict[str, str] = {}
     threads: list[threading.Thread] = []
+    progress_lock = threading.Lock()
+    platform_rounds = dict.fromkeys(enabled, 0)
+    aggregate_progress = {"round": 0}
+
+    def _on_platform_progress(platform: str, round_num: int, _data: dict[str, Any]) -> None:
+        """Emit a round-complete event after every enabled platform reaches it."""
+        with progress_lock:
+            platform_rounds[platform] = max(platform_rounds.get(platform, 0), round_num)
+            completed_by_all = min(platform_rounds.values()) if platform_rounds else 0
+            while aggregate_progress["round"] < completed_by_all:
+                aggregate_progress["round"] += 1
+                current = aggregate_progress["round"]
+                emit_progress(
+                    "parallel",
+                    current,
+                    config["round_count"],
+                    f"Round {current}/{config['round_count']} complete on all platforms",
+                )
 
     for platform in enabled:
         t = threading.Thread(
@@ -328,6 +462,7 @@ def run_parallel(config: dict[str, Any]) -> None:
                 results,
                 errors,
                 shutdown_event,
+                _on_platform_progress,
             ),
             daemon=True,
         )
@@ -352,10 +487,13 @@ def run_parallel(config: dict[str, Any]) -> None:
             "error",
             {
                 "platform": "parallel",
+                "code": classify_failure(str(errors)),
                 "message": f"Simulation completed with errors: {errors}",
                 "results": results,
             },
         )
+        logger.error("Parallel simulation failed. Results: %s, Errors: %s", results, errors)
+        return 1
     else:
         emit(
             "complete",
@@ -368,6 +506,7 @@ def run_parallel(config: dict[str, Any]) -> None:
         )
 
     logger.info("Parallel simulation finished. Results: %s, Errors: %s", results, errors)
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -376,7 +515,7 @@ def run_parallel(config: dict[str, Any]) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="MurmuraScope Parallel Simulation Runner")
+    parser = argparse.ArgumentParser(description="Murmura Parallel Simulation Runner")
     parser.add_argument(
         "--config",
         required=True,
@@ -392,7 +531,9 @@ def main() -> None:
         sys.exit(1)
 
     try:
-        run_parallel(config)
+        exit_code = run_parallel(config)
+        if exit_code:
+            sys.exit(exit_code)
     except Exception as exc:
         emit_error(f"Fatal error: {exc}")
         logger.exception("Unhandled exception in parallel simulation")

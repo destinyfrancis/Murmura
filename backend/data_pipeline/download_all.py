@@ -533,7 +533,7 @@ def _print_summary(summary: DownloadSummary) -> None:
 def main() -> None:
     """CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="Download HK public data for MurmuraScope",
+        description="Download HK public data for Murmura",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(

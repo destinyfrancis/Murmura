@@ -90,7 +90,7 @@ const typeColors = {
             </span>
             <h3 class="drawer-title">{{ selectedNode.label || selectedNode.id }}</h3>
           </div>
-          <button class="btn-close" @click="emit('close')">✕</button>
+          <button class="btn-close" type="button" aria-label="關閉詳情面板" @click="emit('close')">✕</button>
         </div>
 
         <!-- Tabs -->

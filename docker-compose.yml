@@ -1,6 +1,6 @@
 services:
   backend:
-    image: ghcr.io/destinyfrancis/murmurascope-backend:latest
+    image: ghcr.io/destinyfrancis/murmura-backend:latest
     pull_policy: always
     build:
       context: .
@@ -8,11 +8,11 @@ services:
     ports:
       - "5001:5001"
     volumes:
-      - murmuroscope-data:/app/data
+      - murmura-data:/app/data
     env_file:
       - .env
     environment:
-      - DATABASE_PATH=/app/data/murmuroscope.db
+      - DATABASE_PATH=/app/data/murmura.db
       - DEMO_MODE=${DEMO_MODE:-true}
     restart: unless-stopped
     init: true
@@ -36,7 +36,7 @@ services:
       - demo
 
   frontend:
-    image: ghcr.io/destinyfrancis/murmurascope-frontend:latest
+    image: ghcr.io/destinyfrancis/murmura-frontend:latest
     pull_policy: always
     build:
       context: ./frontend
@@ -66,5 +66,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  murmuroscope-data:
+  murmura-data:
     driver: local

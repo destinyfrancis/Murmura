@@ -1,4 +1,4 @@
-"""Session lifecycle state machine for MurmuraScope simulations.
+"""Session lifecycle state machine for Murmura simulations.
 
 Manages simulation sessions through their lifecycle:
   created → running → completed | failed
@@ -104,7 +104,7 @@ class SimulationManager:
         if round_count < 1:
             raise ValueError("round_count must be at least 1")
 
-        sim_mode = _infer_sim_mode(scenario_type)
+        sim_mode = _infer_sim_mode(request.get("sim_mode") or scenario_type)
 
         session = SessionState.create(
             name=f"{scenario_type}_{agent_count}agents",
@@ -196,6 +196,22 @@ class SimulationManager:
                 logger.info("Session %s is already %s — ignoring start request", session_id, session.status.value)
                 return
 
+            from backend.app.services.oasis_compatibility import get_capabilities  # noqa: PLC0415
+
+            capabilities = get_capabilities()
+            if not bool(capabilities.get("simulation_available", capabilities.get("simulation"))):
+                reason = str(capabilities.get("reason") or "unknown")
+                failed = session.with_status(
+                    SessionStatus.FAILED,
+                    error_message=f"Simulation engine unavailable: {reason}",
+                )
+                await _update_session_status(failed)
+                raise RuntimeError(f"simulation_engine_unavailable:{reason}")
+
+            from backend.app.services.simulation_preflight import SimulationPreflightService  # noqa: PLC0415
+
+            await SimulationPreflightService().ensure_ready_for_session(session_id)
+
             # Idempotent: check if already queued or running
             async with get_db() as db:
                 cursor = await db.execute(
@@ -225,6 +241,25 @@ class SimulationManager:
         by the background worker.
         """
         session = await _load_session(session_id)
+
+        from backend.app.services.oasis_compatibility import get_capabilities  # noqa: PLC0415
+
+        capabilities = get_capabilities()
+        if not bool(capabilities.get("simulation_available", capabilities.get("simulation"))):
+            reason = str(capabilities.get("reason") or "unknown")
+            failed = session.with_status(
+                SessionStatus.FAILED,
+                error_message=f"Simulation engine unavailable: {reason}",
+            )
+            await _update_session_status(failed)
+            async with get_db() as db:
+                await db.execute(
+                    "UPDATE simulation_jobs SET status = 'failed', error_message = ?, updated_at = datetime('now') "
+                    "WHERE id = ?",
+                    (f"Simulation engine unavailable: {reason}", job_id),
+                )
+                await db.commit()
+            raise RuntimeError(f"simulation_engine_unavailable:{reason}")
         
         # Internal transition from CREATED to RUNNING on the session record
         updated = session.with_status(SessionStatus.RUNNING)
@@ -486,8 +521,25 @@ async def generate_agents(
             )
 
         factory = await KGAgentFactory.create(graph_id=graph_id, llm_client=llm)
-        profiles = await factory.generate_from_kg(kg_nodes, kg_edges, seed_text)
+        requested_target = int(request.get("agent_count", 0) or 0)
+        profiles = await factory.generate_from_kg(
+            kg_nodes,
+            kg_edges,
+            seed_text,
+            target_count=requested_target or None,
+        )
+        if requested_target > 0 and len(profiles) != requested_target:
+            raise RuntimeError(
+                f"KGAgentFactory produced {len(profiles)} agents but {requested_target} were requested"
+            )
         written_path = factory.generate_agents_csv(profiles, csv_path)
+        # Persist platform identities to DB for simulation runtime lookup.
+        all_platform_ids = [
+            pi
+            for p in profiles
+            for pi in p.platform_identities
+        ]
+        await factory.save_platform_identities_to_db(session_id, all_platform_ids)
         logger.info(
             "KGAgentFactory: generated %d profiles for session %s at %s",
             len(profiles),
@@ -660,6 +712,28 @@ async def store_universal_agent_profiles(
         oasis_row = p.to_oasis_row()
         goals_json = json.dumps(list(getattr(p, "goals", ())), ensure_ascii=False)
         nationality = getattr(p, "nationality", "") or ""
+        properties_json = json.dumps(
+            {
+                "role": p.role,
+                "entity_type": p.entity_type,
+                "kg_node_id": p.kg_node_id,
+                "goals": list(getattr(p, "goals", ())),
+                "capabilities": list(getattr(p, "capabilities", ())),
+                "constraints": list(getattr(p, "constraints", ())),
+                "beliefs": dict(getattr(p, "beliefs", ())),
+                "stance_axes": dict(getattr(p, "stance_axes", ())),
+                "importance": getattr(p, "influence_weight", 1.0),
+                "activity_level": getattr(p, "activity_level", 0.5),
+                "influence_weight": getattr(p, "influence_weight", 1.0),
+                "is_stakeholder": bool(getattr(p, "is_stakeholder", False)),
+                "openness": p.openness,
+                "conscientiousness": p.conscientiousness,
+                "extraversion": p.extraversion,
+                "agreeableness": p.agreeableness,
+                "neuroticism": p.neuroticism,
+            },
+            ensure_ascii=False,
+        )
         rows.append(
             (
                 session_id,
@@ -685,6 +759,7 @@ async def store_universal_agent_profiles(
                 getattr(p, "activity_level", 0.5),
                 getattr(p, "influence_weight", 1.0),
                 int(getattr(p, "is_stakeholder", False)),
+                properties_json,
                 # big5_* aliases (mirror openness/conscientiousness/etc.)
                 p.openness,
                 p.conscientiousness,
@@ -707,15 +782,100 @@ async def store_universal_agent_profiles(
                 monthly_income, savings,
                 oasis_persona, oasis_username, created_at,
                 activity_level, influence_weight, is_stakeholder,
+                properties,
                 big5_openness, big5_conscientiousness, big5_extraversion,
                 big5_agreeableness, big5_neuroticism,
                 goals, nationality)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             rows,
         )
         await db.commit()
 
     logger.info("Stored %d universal agent profiles for session %s", len(rows), session_id)
+
+
+def _estimate_relationship_influence(source_profile: Any, relation_type: str) -> float:
+    base = float(getattr(source_profile, "influence_weight", 1.0) or 1.0)
+    relation_lower = relation_type.lower()
+    if any(token in relation_lower for token in ("commands", "controls", "regulates", "manages")):
+        return min(3.0, base + 0.4)
+    if any(token in relation_lower for token in ("ally", "partner", "advisor", "family", "friend")):
+        return min(3.0, base + 0.15)
+    if any(token in relation_lower for token in ("rival", "enemy", "critic", "opposes", "ex")):
+        return min(3.0, base + 0.2)
+    return min(3.0, max(0.2, base))
+
+
+def _estimate_relationship_trust(relation_type: str) -> float:
+    relation_lower = relation_type.lower()
+    if any(token in relation_lower for token in ("ally", "partner", "advisor", "family", "friend", "supports")):
+        return 0.25
+    if any(token in relation_lower for token in ("rival", "enemy", "critic", "opposes", "ex", "adversary")):
+        return -0.3
+    return 0.05
+
+
+async def store_universal_agent_relationships(
+    session_id: str,
+    profiles: list[Any],
+) -> int:
+    """Persist graph-derived universal relationships into ``agent_relationships``."""
+    if not profiles:
+        return 0
+
+    username_to_db_id: dict[str, int] = {}
+    profile_to_db_id: dict[str, int] = {}
+
+    async with get_db() as db:
+        rows = await (
+            await db.execute(
+                "SELECT id, oasis_username FROM agent_profiles WHERE session_id = ?",
+                (session_id,),
+            )
+        ).fetchall()
+
+        for row in rows:
+            username_to_db_id[str(row["oasis_username"])] = int(row["id"])
+
+        for profile in profiles:
+            username = profile.to_oasis_row()["username"]
+            db_id = username_to_db_id.get(username)
+            if db_id is not None:
+                profile_to_db_id[str(profile.id)] = db_id
+
+        relationship_rows: list[tuple[str, int, int, str, float, float]] = []
+        for profile in profiles:
+            source_db_id = profile_to_db_id.get(str(profile.id))
+            if source_db_id is None:
+                continue
+            for related_agent_id, relation_type in getattr(profile, "relationships", ()) or ():
+                target_db_id = profile_to_db_id.get(str(related_agent_id))
+                if target_db_id is None or target_db_id == source_db_id:
+                    continue
+                relationship_rows.append(
+                    (
+                        session_id,
+                        source_db_id,
+                        target_db_id,
+                        str(relation_type),
+                        _estimate_relationship_influence(profile, str(relation_type)),
+                        _estimate_relationship_trust(str(relation_type)),
+                    )
+                )
+
+        if not relationship_rows:
+            return 0
+
+        await db.executemany(
+            """INSERT OR IGNORE INTO agent_relationships
+               (session_id, agent_a_id, agent_b_id, relationship_type, influence_weight, trust_score)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            relationship_rows,
+        )
+        await db.commit()
+
+    logger.info("Stored %d universal agent relationships for session %s", len(relationship_rows), session_id)
+    return len(relationship_rows)
 
 
 async def store_activity_profiles(
@@ -854,7 +1014,7 @@ async def _persist_session(
       recover shocks, family_members, crm_data, and the CSV path.
     - estimated_cost_usd from the SessionState cost estimate.
     """
-    llm_model = request.get("llm_model", "deepseek/deepseek-v3.2")
+    llm_model = request.get("llm_model") or ""
     seed_text = request.get("seed_text", session.scenario_type)
 
     # Embed csv_path in the request blob so _build_runner_config can read it.
@@ -867,11 +1027,11 @@ async def _persist_session(
         await db.execute(
             """INSERT INTO simulation_sessions
                (id, name, sim_mode, seed_text, scenario_type, graph_id,
-                agent_count, round_count, llm_provider, llm_model,
+                agent_count, round_count, llm_provider, llm_model, platforms,
                 macro_scenario_id, oasis_db_path, status,
                 estimated_cost_usd, config_json, created_at, domain_pack_id,
                 owner_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 session.id,
                 session.name,
@@ -883,6 +1043,7 @@ async def _persist_session(
                 session.round_count,
                 session.llm_provider,
                 llm_model,
+                json.dumps(session.platforms, ensure_ascii=False),
                 request.get("macro_scenario_id"),
                 oasis_db_path,
                 session.status.value,
@@ -924,7 +1085,7 @@ async def _load_session(session_id: str) -> SessionState:
         )
 
     platforms_raw = row["platforms"] if "platforms" in row_keys else None
-    platforms: dict[str, bool] = json.loads(platforms_raw) if platforms_raw else {"twitter": True, "reddit": False}
+    platforms: dict[str, bool] = json.loads(platforms_raw) if platforms_raw else {"twitter": True, "reddit": True}
 
     created_at = row["created_at"] if "created_at" in row_keys else datetime.utcnow().isoformat()
 
@@ -1060,15 +1221,17 @@ async def _build_runner_config(session: SessionState) -> dict[str, Any]:
 
     # Fall back to env vars if no BYOK key
     if not api_key:
+        from backend.app.services.runtime_settings import get_override  # noqa: PLC0415
+
         if provider == "openrouter":
-            api_key = os.environ.get("OPENROUTER_API_KEY", "")
+            api_key = get_override("api_key_openrouter") or os.environ.get("OPENROUTER_API_KEY", "")
         elif provider == "fireworks":
-            api_key = os.environ.get("FIREWORKS_API_KEY", "")
+            api_key = get_override("api_key_fireworks") or os.environ.get("FIREWORKS_API_KEY", "")
         else:
             from backend.app.utils.llm_client import _PROVIDERS  # noqa: PLC0415
 
             env_key = _PROVIDERS.get(provider, {}).get("env_key", "")
-            api_key = os.environ.get(env_key, "") if env_key else ""
+            api_key = get_override(f"api_key_{provider}") or (os.environ.get(env_key, "") if env_key else "")
 
     if not base_url:
         if provider == "openrouter":
@@ -1080,10 +1243,21 @@ async def _build_runner_config(session: SessionState) -> dict[str, Any]:
 
             base_url = _PROVIDERS.get(provider, {}).get("base_url", "")
 
-    if not llm_model or llm_model in ("accounts/fireworks/models/deepseek/deepseek-v3.2", "deepseek/deepseek-v3.2"):
+    known_bad_models = {
+        "accounts/fireworks/models/deepseek-v3p2",
+        "accounts/fireworks/models/deepseek/deepseek-v3.2",
+    }
+    if not llm_model or llm_model in (*known_bad_models, "deepseek/deepseek-v3.2"):
         # Use AGENT_LLM_MODEL env var if set, else default for the provider
-        agent_model_env = os.environ.get("AGENT_LLM_MODEL", "")
-        llm_model = agent_model_env or "deepseek/deepseek-v3.2"
+        from backend.app.services.runtime_settings import get_override  # noqa: PLC0415
+
+        agent_model_env = get_override("agent_llm_model") or os.environ.get("AGENT_LLM_MODEL", "")
+        if agent_model_env and agent_model_env not in known_bad_models:
+            llm_model = agent_model_env
+        elif provider == "fireworks":
+            llm_model = "accounts/fireworks/models/minimax-m2p5"
+        else:
+            llm_model = "deepseek/deepseek-v3.2"
 
     return {
         "session_id": session.id,

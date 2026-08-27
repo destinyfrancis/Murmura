@@ -13,10 +13,11 @@ from typing import Any
 
 from backend.app.services.entity_extractor import EntityExtractor
 from backend.app.services.ontology_generator import OntologyGenerator
+from backend.app.services.scenario_intake import IntakeChunk, ScenarioIntakeService
 import backend.app.utils.db as db
 from backend.app.utils.llm_client import LLMClient, get_agent_provider_model
 from backend.app.utils.logger import get_logger
-from backend.app.utils.prompt_security import sanitize_seed_text
+from backend.app.utils.prompt_security import sanitize_source_seed_text
 from backend.prompts.ontology_prompts import (
     COMMUNITY_SUMMARY_SYSTEM,
     COMMUNITY_SUMMARY_USER,
@@ -64,7 +65,7 @@ class GraphBuilderService:
             Summary dict with graph_id, node_count, edge_count,
             entity_types, and relation_types.
         """
-        seed_text = sanitize_seed_text(seed_text)
+        seed_text = sanitize_source_seed_text(seed_text)
         graph_id = f"graph_{session_id}_{uuid.uuid4().hex[:8]}"
         logger.info("Building graph %s for session %s", graph_id, session_id)
 
@@ -107,6 +108,343 @@ class GraphBuilderService:
             "entity_types": entity_types,
             "relation_types": relation_types,
         }
+
+    async def build_graph_from_seed(
+        self,
+        graph_id: str,
+        scenario_type: str,
+        seed_text: str,
+    ) -> dict[str, Any]:
+        """Canonical seed-to-KG path shared by API graph build and quick-start."""
+        intake = ScenarioIntakeService().from_text(seed_text, source_ref="seed_text")
+        safe_seed = intake.text
+        await self._ensure_graph_session(graph_id, scenario_type, safe_seed)
+
+        seed_nodes = 0
+        seed_edges = 0
+        implicit_nodes = 0
+        mem_result = None
+
+        from backend.app.services.implicit_stakeholder_service import ImplicitStakeholderService  # noqa: PLC0415
+        from backend.app.services.memory_initialization import MemoryInitializationService  # noqa: PLC0415
+        from backend.app.services.seed_graph_injector import SeedGraphInjector  # noqa: PLC0415
+        from backend.app.services.text_processor import TextProcessor  # noqa: PLC0415
+
+        processor = TextProcessor()
+        processed = await processor.process(safe_seed)
+
+        injector = SeedGraphInjector()
+        inject_result = await injector.inject(graph_id, processed)
+        seed_nodes = inject_result.get("seed_nodes", 0)
+        seed_edges = inject_result.get("seed_edges", 0)
+        await self._attach_seed_evidence(graph_id, intake.chunks)
+
+        existing_for_dedup: list[dict[str, str]] = []
+        async with db.get_db() as conn:
+            cursor = await conn.execute(
+                "SELECT id, title, entity_type FROM kg_nodes WHERE session_id = ?",
+                (graph_id,),
+            )
+            existing_for_dedup = [
+                {"id": str(row[0]), "label": str(row[1] or ""), "entity_type": str(row[2] or "")}
+                for row in await cursor.fetchall()
+            ]
+
+        implicit_svc = ImplicitStakeholderService()
+        discovery = await implicit_svc.discover(graph_id, safe_seed, existing_for_dedup)
+        implicit_nodes = discovery.nodes_added
+
+        mem_svc = MemoryInitializationService()
+        mem_result = await mem_svc.build_from_graph(graph_id, safe_seed)
+
+        async with db.get_db() as conn:
+            node_count_row = await (
+                await conn.execute(
+                    "SELECT COUNT(*) FROM kg_nodes WHERE session_id = ?",
+                    (graph_id,),
+                )
+            ).fetchone()
+            edge_count_row = await (
+                await conn.execute(
+                    "SELECT COUNT(*) FROM kg_edges WHERE session_id = ?",
+                    (graph_id,),
+                )
+            ).fetchone()
+            et_cursor = await conn.execute(
+                "SELECT DISTINCT entity_type FROM kg_nodes WHERE session_id = ? AND entity_type IS NOT NULL",
+                (graph_id,),
+            )
+            entity_types = [row[0] for row in await et_cursor.fetchall()]
+            rt_cursor = await conn.execute(
+                "SELECT DISTINCT relation_type FROM kg_edges WHERE session_id = ? AND relation_type IS NOT NULL",
+                (graph_id,),
+            )
+            relation_types = [row[0] for row in await rt_cursor.fetchall()]
+
+        node_count = int(node_count_row[0] or 0) if node_count_row else 0
+        edge_count = int(edge_count_row[0] or 0) if edge_count_row else 0
+        if node_count == 0 or edge_count == 0:
+            logger.warning(
+                "Graph build produced incomplete KG for %s: nodes=%d edges=%d; using fallback graph",
+                graph_id,
+                node_count,
+                edge_count,
+            )
+            fallback = await self._build_fallback_graph(
+                graph_id=graph_id,
+                seed_text=safe_seed,
+            )
+            node_count = fallback["node_count"]
+            edge_count = fallback["edge_count"]
+            entity_types = fallback["entity_types"]
+            relation_types = fallback["relation_types"]
+
+        return {
+            "graph_id": graph_id,
+            "session_id": graph_id,
+            "node_count": node_count,
+            "edge_count": edge_count,
+            "entity_types": entity_types,
+            "relation_types": relation_types,
+            "seed_nodes": seed_nodes,
+            "seed_edges": seed_edges,
+            "implicit_nodes": implicit_nodes,
+            "world_context_count": mem_result.world_context_count if mem_result else 0,
+            "persona_template_count": mem_result.persona_template_count if mem_result else 0,
+            "scenario_type": scenario_type,
+            "chunk_count": intake.chunk_count,
+        }
+
+    async def _ensure_graph_session(self, graph_id: str, scenario_type: str, seed_text: str) -> None:
+        """Create a lightweight graph-holder session so KG FK constraints hold."""
+        async with db.get_db() as conn:
+            existing = await (
+                await conn.execute("SELECT id FROM simulation_sessions WHERE id = ?", (graph_id,))
+            ).fetchone()
+            if existing:
+                return
+            await conn.execute(
+                """INSERT INTO simulation_sessions
+                   (id, name, sim_mode, seed_text, scenario_type, graph_id,
+                    agent_count, round_count, llm_provider, llm_model,
+                    oasis_db_path, status, estimated_cost_usd, config_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    graph_id,
+                    f"Graph Build: {scenario_type}",
+                    "kg_driven",
+                    seed_text,
+                    scenario_type,
+                    graph_id,
+                    0,
+                    0,
+                    "system",
+                    "none",
+                    "",
+                    "created",
+                    0.0,
+                    json.dumps({"graph_holder": True}, ensure_ascii=False),
+                ),
+            )
+            await conn.commit()
+
+    async def _build_fallback_graph(self, graph_id: str, seed_text: str) -> dict[str, Any]:
+        """Build a minimal evidence-backed graph when extraction returns empty."""
+        actor_specs = _fallback_actor_specs(seed_text)
+        prefix = graph_id[:8]
+        node_rows = [
+            (
+                f"{prefix}_fallback_{idx}",
+                graph_id,
+                entity_type,
+                title,
+                description,
+                json.dumps(
+                    {
+                        "source": "graph_fallback",
+                        "include_in_simulation": True,
+                        "evidence_spans": [
+                            {
+                                "source_ref": "seed_text",
+                                "chunk_index": 0,
+                                "start_char": 0,
+                                "end_char": min(len(seed_text), 500),
+                                "text": seed_text[:500],
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                0.35,
+            )
+            for idx, (entity_type, title, description) in enumerate(actor_specs, start=1)
+        ]
+        edge_rows = [
+            (
+                graph_id,
+                node_rows[idx][0],
+                node_rows[idx + 1][0],
+                "influences",
+                "Fallback relation inferred from seed co-occurrence when extraction returned an incomplete graph.",
+                seed_text[:500],
+                0.25,
+                0.35,
+            )
+            for idx in range(len(node_rows) - 1)
+        ]
+
+        async with db.get_db() as conn:
+            await conn.executemany(
+                """
+                INSERT OR REPLACE INTO kg_nodes
+                    (id, session_id, entity_type, title, description, properties, confidence_score)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                node_rows,
+            )
+            await conn.executemany(
+                """
+                INSERT INTO kg_edges
+                    (session_id, source_id, target_id, relation_type, description,
+                     source_text, weight, confidence_score)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                edge_rows,
+            )
+            await conn.commit()
+
+        return {
+            "node_count": len(node_rows),
+            "edge_count": len(edge_rows),
+            "entity_types": sorted({row[2] for row in node_rows}),
+            "relation_types": ["influences"] if edge_rows else [],
+        }
+
+    async def _attach_seed_evidence(self, graph_id: str, chunks: tuple[IntakeChunk, ...]) -> None:
+        """Attach deterministic source chunk metadata to seed nodes and edges."""
+        if not chunks:
+            return
+
+        default_chunk = chunks[0]
+        default_evidence = {
+            "source_ref": default_chunk.source_ref,
+            "chunk_index": default_chunk.index,
+            "start_char": default_chunk.start_char,
+            "end_char": default_chunk.end_char,
+            "text": default_chunk.text[:500],
+        }
+
+        async with db.get_db() as conn:
+            node_rows = await conn.execute_fetchall(
+                "SELECT id, title, properties FROM kg_nodes WHERE session_id = ?",
+                (graph_id,),
+            )
+            node_titles = {str(row["id"]): str(row["title"] or "") for row in node_rows}
+            for row in node_rows:
+                evidence = self._find_evidence_for_text(str(row["title"] or ""), chunks) or default_evidence
+                props = json.loads(row["properties"] or "{}")
+                props.setdefault("source", "seed")
+                props["evidence_spans"] = [evidence]
+                await conn.execute(
+                    "UPDATE kg_nodes SET properties = ? WHERE id = ? AND session_id = ?",
+                    (json.dumps(props, ensure_ascii=False), row["id"], graph_id),
+                )
+
+            edge_rows = await conn.execute_fetchall(
+                "SELECT id, source_id, target_id, relation_type, description FROM kg_edges WHERE session_id = ?",
+                (graph_id,),
+            )
+            for row in edge_rows:
+                evidence = self._find_edge_evidence(
+                    source_title=node_titles.get(str(row["source_id"]), ""),
+                    target_title=node_titles.get(str(row["target_id"]), ""),
+                    description=str(row["description"] or ""),
+                    relation_type=str(row["relation_type"] or ""),
+                    chunks=chunks,
+                ) or default_evidence
+                await conn.execute(
+                    "UPDATE kg_edges SET source_text = ?, evidence_span = ? WHERE id = ? AND session_id = ?",
+                    (
+                        evidence["text"],
+                        json.dumps(
+                            {
+                                "source_ref": evidence["source_ref"],
+                                "chunk_index": evidence["chunk_index"],
+                                "start_char": evidence["start_char"],
+                                "end_char": evidence["end_char"],
+                            },
+                            ensure_ascii=False,
+                        ),
+                        row["id"],
+                        graph_id,
+                    ),
+                )
+            await conn.commit()
+
+    def _find_edge_evidence(
+        self,
+        *,
+        source_title: str,
+        target_title: str,
+        description: str,
+        relation_type: str,
+        chunks: tuple[IntakeChunk, ...],
+    ) -> dict[str, Any] | None:
+        """Prefer evidence that contains both endpoints, then relation text."""
+        endpoint_match = self._find_evidence_for_pair(source_title, target_title, chunks)
+        if endpoint_match:
+            return endpoint_match
+
+        for candidate in (description, relation_type.replace("_", " "), source_title, target_title):
+            evidence = self._find_evidence_for_text(candidate, chunks)
+            if evidence:
+                return evidence
+        return None
+
+    def _find_evidence_for_pair(
+        self,
+        left: str,
+        right: str,
+        chunks: tuple[IntakeChunk, ...],
+    ) -> dict[str, Any] | None:
+        left_norm = left.strip().lower()
+        right_norm = right.strip().lower()
+        if not left_norm or not right_norm:
+            return None
+
+        for chunk in chunks:
+            chunk_lower = chunk.text.lower()
+            left_pos = chunk_lower.find(left_norm)
+            right_pos = chunk_lower.find(right_norm)
+            if left_pos < 0 or right_pos < 0:
+                continue
+
+            start = min(left_pos, right_pos)
+            end = max(left_pos + len(left), right_pos + len(right))
+            return {
+                "source_ref": chunk.source_ref,
+                "chunk_index": chunk.index,
+                "start_char": chunk.start_char + start,
+                "end_char": chunk.start_char + end,
+                "text": chunk.text[max(0, start - 120) : end + 120],
+            }
+        return None
+
+    def _find_evidence_for_text(self, needle: str, chunks: tuple[IntakeChunk, ...]) -> dict[str, Any] | None:
+        normalized = needle.strip().lower()
+        if not normalized:
+            return None
+        for chunk in chunks:
+            pos = chunk.text.lower().find(normalized)
+            if pos >= 0:
+                return {
+                    "source_ref": chunk.source_ref,
+                    "chunk_index": chunk.index,
+                    "start_char": chunk.start_char + pos,
+                    "end_char": chunk.start_char + pos + len(needle),
+                    "text": chunk.text[max(0, pos - 120) : pos + len(needle) + 120],
+                }
+        return None
 
     # ------------------------------------------------------------------
     # Read
@@ -346,22 +684,43 @@ class GraphBuilderService:
         edges: list[dict[str, Any]],
     ) -> None:
         async with db.get_db() as conn:
-            await conn.executemany(
-                "INSERT INTO kg_edges "
-                "(session_id, source_id, target_id, relation_type, description, weight) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                [
-                    (
-                        session_id,
-                        e["source_id"],
-                        e["target_id"],
-                        e["relation_type"],
-                        e.get("description", ""),
-                        e.get("weight", 1.0),
-                    )
-                    for e in edges
-                ],
-            )
+            columns = await _table_columns(conn, "kg_edges")
+            if {"source_text", "evidence_span"}.issubset(columns):
+                await conn.executemany(
+                    "INSERT INTO kg_edges "
+                    "(session_id, source_id, target_id, relation_type, description, weight, source_text, evidence_span) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    [
+                        (
+                            session_id,
+                            e["source_id"],
+                            e["target_id"],
+                            e["relation_type"],
+                            e.get("description", ""),
+                            e.get("weight", 1.0),
+                            e.get("source_text"),
+                            json.dumps(e.get("evidence_span"), ensure_ascii=False) if e.get("evidence_span") else None,
+                        )
+                        for e in edges
+                    ],
+                )
+            else:
+                await conn.executemany(
+                    "INSERT INTO kg_edges "
+                    "(session_id, source_id, target_id, relation_type, description, weight) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    [
+                        (
+                            session_id,
+                            e["source_id"],
+                            e["target_id"],
+                            e["relation_type"],
+                            e.get("description", ""),
+                            e.get("weight", 1.0),
+                        )
+                        for e in edges
+                    ],
+                )
             await conn.commit()
 
     async def _update_edge_weights(
@@ -723,6 +1082,59 @@ class GraphBuilderService:
 # ---------------------------------------------------------------------------
 
 
+def _fallback_actor_specs(seed_text: str) -> list[tuple[str, str, str]]:
+    """Return conservative actors grounded in broad seed cues."""
+    text = seed_text.lower()
+    specs: list[tuple[str, str, str]] = []
+
+    if any(term in seed_text for term in ("香港", "樓市", "按揭", "銀行", "租客", "業主")):
+        specs.extend(
+            [
+                ("Government", "政府政策制定者", "公共 policy actor balancing market stability and affordability."),
+                ("FinancialInstitution", "銀行與按揭機構", "Credit providers repricing mortgage risk and liquidity constraints."),
+                ("Household", "年輕家庭與首次置業者", "Demand-side households reassessing affordability and expectations."),
+                ("PropertyOwner", "業主與投資者", "Asset holders reacting to price pressure, rental yield, and leverage."),
+                ("Tenant", "租客群體", "Residents affected by rental spillovers and housing insecurity."),
+                ("Developer", "地產商", "Supply-side firms adjusting launches, pricing, and financing plans."),
+            ]
+        )
+
+    if "company" in text or "competitor" in text or "市場" in seed_text or "競爭" in seed_text:
+        specs.extend(
+            [
+                ("Company", "核心企業", "Organization making strategic decisions under market uncertainty."),
+                ("Competitor", "主要競爭者", "Rival actor responding to pricing, positioning, and resource shifts."),
+                ("CustomerSegment", "客戶群體", "Demand-side actor changing adoption, trust, and purchase timing."),
+            ]
+        )
+
+    if "iran" in text or "伊朗" in seed_text:
+        specs.append(("Country", "Iran", "State actor balancing deterrence, legitimacy, and economic pressure."))
+    if "united states" in text or "u.s." in text or " us " in f" {text} " or "美國" in seed_text:
+        specs.append(("Country", "United States", "State actor balancing diplomacy, alliances, and domestic constraints."))
+    if "israel" in text or "以色列" in seed_text:
+        specs.append(("Country", "Israel", "Regional actor affected by threat perception and alliance signals."))
+    if "oil" in text or "hormuz" in text or "荷爾木茲" in seed_text:
+        specs.append(("Market", "能源與航運市場", "Market actor repricing supply disruption, insurance, and transport risk."))
+
+    specs.extend(
+        [
+            ("MediaOutlet", "媒體與資訊平台", "Narrative actor amplifying uncertainty and public interpretation."),
+            ("CivilSociety", "受影響公眾", "Collective public actor reacting through trust, fear, adaptation, and pressure."),
+            ("Institution", "協調與監管機構", "Institutional actor attempting to stabilize expectations and reduce systemic risk."),
+        ]
+    )
+
+    deduped: list[tuple[str, str, str]] = []
+    seen: set[str] = set()
+    for spec in specs:
+        if spec[1] in seen:
+            continue
+        seen.add(spec[1])
+        deduped.append(spec)
+    return deduped[:18]
+
+
 def _session_id_from_graph_id(graph_id: str) -> str:
     """Extract session_id from graph_id format ``graph_{session_id}_{hex}``.
 
@@ -733,3 +1145,15 @@ def _session_id_from_graph_id(graph_id: str) -> str:
         # Rejoin everything between 'graph_' and the final '_hex8'
         return "_".join(parts[1:-1])
     return graph_id
+
+
+async def _table_columns(conn: Any, table_name: str) -> set[str]:
+    """Return column names for a table, tolerating tuple and Row factories."""
+    rows = await conn.execute_fetchall(f"PRAGMA table_info({table_name})")
+    columns: set[str] = set()
+    for row in rows:
+        if hasattr(row, "keys") and "name" in row.keys():
+            columns.add(str(row["name"]))
+        else:
+            columns.add(str(row[1]))
+    return columns

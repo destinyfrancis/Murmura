@@ -40,7 +40,7 @@ class Platform(str, Enum):
     INSTAGRAM = "instagram"
 
 
-# Maps MurmuraScope platforms to their OASIS backend platform type.
+# Maps Murmura platforms to their OASIS backend platform type.
 # Facebook uses the Reddit (community/subreddit) backend.
 # Instagram uses the Twitter (feed/follower) backend.
 PLATFORM_OASIS_MAP: dict[Platform, str] = {
@@ -131,7 +131,7 @@ class SessionState:
     ) -> SessionState:
         """Create a new session state with generated ID and timestamps."""
         now = datetime.utcnow().isoformat()
-        default_platforms = {"facebook": True, "instagram": True}
+        default_platforms = {"twitter": True, "reddit": True}
         cost = CostEstimate.calculate(agent_count, round_count)
         return SessionState(
             id=str(uuid4()),

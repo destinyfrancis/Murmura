@@ -1,4 +1,4 @@
-"""Monte Carlo Engine for MurmuraScope.
+"""Monte Carlo Engine for Murmura.
 
 Runs N stochastic trials by perturbing decision confidence values and macro
 coefficients using Cholesky-decomposed correlated noise, then computes

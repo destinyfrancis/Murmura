@@ -1,4 +1,4 @@
-"""Zero-config quick-start service for MurmuraScope.
+"""Zero-config quick-start service for Murmura.
 
 Enables paste-text-and-run: accepts seed text, infers domain,
 and returns a ready-to-run simulation configuration.
@@ -6,6 +6,7 @@ and returns a ready-to-run simulation configuration.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -44,9 +45,48 @@ _STATIC_DOMAIN_KEYWORDS: dict[str, list[str]] = {
         "recession",
         "trade war",
         "油價",
+        "戰爭",
+        "衝突",
+        "軍事",
+        "制裁",
+        "核",
+        "鈾濃縮",
+        "美國",
+        "伊朗",
+        "以色列",
+        "中東",
+        "荷爾木茲",
+        "海峽",
+        "地緣政治",
+        "停火",
+        "終戰",
+        "談判",
+        "封鎖",
+        "空襲",
+        "導彈",
+        "部隊",
+        "民兵",
+        "真主黨",
+        "胡塞",
         "commodity",
         "world economy",
         "geopolitical",
+        "iran",
+        "tehran",
+        "united states",
+        "u.s.",
+        " us ",
+        "israel",
+        "middle east",
+        "strait of hormuz",
+        "hormuz",
+        "ceasefire",
+        "negotiation",
+        "blockade",
+        "airstrike",
+        "missile",
+        "shipping risk",
+        "oil markets",
     ],
     "public_narrative": [
         "輿論",
@@ -100,7 +140,8 @@ def _build_domain_keywords() -> dict[str, list[str]]:
         for pack_id in DomainPackRegistry.list_packs():
             pack = DomainPackRegistry.get(pack_id)
             if pack.keywords:
-                result[pack_id] = list(pack.keywords)
+                merged = [*result.get(pack_id, []), *list(pack.keywords)]
+                result[pack_id] = list(dict.fromkeys(merged))
     except Exception:
         logger.debug("DomainPackRegistry unavailable — using static keywords")
     return result
@@ -153,6 +194,48 @@ _KG_DRIVEN_KEYWORDS: list[str] = [
     "trade war",
     "embargo",
     "coup",
+    "iran",
+    "tehran",
+    "united states",
+    "u.s.",
+    " us ",
+    "israel",
+    "middle east",
+    "hormuz",
+    "ceasefire",
+    "negotiation",
+    "blockade",
+    "airstrike",
+    "missile",
+    "shipping risk",
+    "戰爭",
+    "軍事",
+    "衝突",
+    "制裁",
+    "核",
+    "鈾濃縮",
+    "停火",
+    "終戰",
+    "轟炸",
+    "空襲",
+    "導彈",
+    "部隊",
+    "撤軍",
+    "封鎖",
+    "荷爾木茲",
+    "海峽",
+    "美國",
+    "伊朗",
+    "以色列",
+    "中東",
+    "巴基斯坦",
+    "俄羅斯",
+    "歐盟",
+    "聯合國",
+    "真主黨",
+    "胡塞",
+    "民兵",
+    "地緣政治",
 ]
 
 
@@ -232,6 +315,9 @@ class ZeroConfigService:
         hk_hits = sum(1 for kw in _HK_MODE_KEYWORDS if kw.lower() in text_lower)
         if hk_hits > 0:
             return "hk_demographic"
+        kg_hits = sum(1 for kw in _KG_DRIVEN_KEYWORDS if kw.lower() in text_lower)
+        if kg_hits > 0:
+            return "kg_driven"
         # LLM fallback for everything else
         return await self._llm_detect_mode(seed_text)
 
@@ -291,7 +377,7 @@ class ZeroConfigService:
             raise ValueError("seed_text must not be empty")
 
         domain = self.infer_domain(seed_text)
-        mode = self.detect_mode(seed_text)
+        mode = await self.detect_mode_async(seed_text)
 
         # Try entity extraction via existing TextProcessor -----------------
         entities: list[str] = []
@@ -373,23 +459,29 @@ class ZeroConfigService:
         )
 
         try:
-            import json
-
             from backend.app.utils.llm_client import get_step_provider_model
 
             provider, model = get_step_provider_model(2)
-            resp = await llm.chat(
+            data = await llm.chat_json(
                 [{"role": "user", "content": prompt}],
                 provider=provider,
                 model=model,
+                temperature=0.1,
+                max_tokens=512,
             )
-            data = json.loads(resp.content)
+            if not isinstance(data, dict):
+                raise ValueError("time_config_response_not_dict")
+            unit = str(data["round_label_unit"])
+            if unit not in {"hour", "day", "week", "month"}:
+                raise ValueError("invalid_round_label_unit")
             return TimeConfig(
                 total_simulated_hours=int(data["total_simulated_hours"]),
                 minutes_per_round=int(data["minutes_per_round"]),
-                round_label_unit=str(data["round_label_unit"]),
+                round_label_unit=unit,
                 rationale=str(data.get("rationale", "")),
             )
-        except Exception:
+        except Exception as exc:
+            if os.environ.get("MURMURA_STRICT_LIVE") == "1":
+                raise RuntimeError(f"oasis_runtime_error: time_config_inference_failed:{exc.__class__.__name__}") from exc
             logger.warning("Time config inference failed — using default (1 day/round)")
             return _DEFAULT

@@ -617,6 +617,8 @@ def _extract_list(raw: Any) -> list[dict[str, Any]] | None:
     if isinstance(raw, list):
         return raw
     if isinstance(raw, dict):
+        if "agent_id" in raw and "action" in raw:
+            return [raw]
         for key in ("decisions", "results", "data", "agents"):
             val = raw.get(key)
             if isinstance(val, list):

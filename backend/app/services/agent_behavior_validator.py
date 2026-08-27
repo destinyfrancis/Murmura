@@ -121,8 +121,8 @@ class AgentBehaviorValidator:
         Returns:
             BehaviorValidationResult with entropy + consistency scores.
         """
-        # Note: agent_profiles.tier column is added at startup via idempotent migration
-        # (see CLAUDE.md "Tier assignment" — INTEGER DEFAULT 2, added at startup).
+        # Note: agent_profiles.tier is added at startup via an idempotent migration.
+        # Stakeholders use tier 1; background agents default to tier 2.
         async with get_db() as db:
             cursor = await db.execute(
                 """

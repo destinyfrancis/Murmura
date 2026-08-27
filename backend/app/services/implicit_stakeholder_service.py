@@ -16,6 +16,7 @@ Pipeline:
 from __future__ import annotations
 
 import json
+import os
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -24,7 +25,7 @@ from typing import Any
 from backend.app.utils.db import get_db
 from backend.app.utils.llm_client import LLMClient, get_step_provider_model
 from backend.app.utils.logger import get_logger
-from backend.app.utils.prompt_security import sanitize_seed_text
+from backend.app.utils.prompt_security import sanitize_prompt_seed_text
 from backend.prompts.implicit_stakeholder_prompts import (
     IMPLICIT_STAKEHOLDER_SYSTEM,
     IMPLICIT_STAKEHOLDER_USER,
@@ -50,6 +51,10 @@ class ImplicitStakeholder:
     entity_type: str
     role: str
     relevance_reason: str
+    why_missing: str = ""
+    evidence_phrase: str = ""
+    inferred_role: str = ""
+    confidence: float = 0.45
 
 
 @dataclass(frozen=True)
@@ -96,7 +101,11 @@ class ImplicitStakeholderService:
 
         try:
             raw_actors = await self._call_llm(seed_text, existing_nodes)
-        except Exception:
+        except Exception as exc:
+            if os.environ.get("MURMURA_STRICT_LIVE") == "1":
+                raise RuntimeError(
+                    f"oasis_runtime_error: implicit_stakeholder_discovery_failed:{exc.__class__.__name__}"
+                ) from exc
             logger.exception("ImplicitStakeholderService: LLM call failed for graph %s", graph_id)
             return DiscoveryResult(stakeholders=(), nodes_added=0)
 
@@ -120,7 +129,7 @@ class ImplicitStakeholderService:
                 (graph_id,),
             )
             edges = [dict(r) for r in await cursor.fetchall()]
-            
+
             cursor = await db.execute(
                 "SELECT id, title, description FROM kg_nodes WHERE session_id = ?",
                 (graph_id,),
@@ -130,8 +139,8 @@ class ImplicitStakeholderService:
         if not edges:
             return DiscoveryResult(stakeholders=(), nodes_added=0)
 
-        from backend.app.utils.graph_metrics import calculate_topological_metrics # noqa: PLC0415
-        
+        from backend.app.utils.graph_metrics import calculate_topological_metrics  # noqa: PLC0415
+
         metrics = calculate_topological_metrics(edges)
         if "error" in metrics:
             return DiscoveryResult(stakeholders=(), nodes_added=0)
@@ -147,7 +156,7 @@ class ImplicitStakeholderService:
         # Call LLM to see if these bridges imply a 'hidden' actor
         # e.g. if A and B are connected only via a bridge, maybe there's a third party mediating.
         bridge_nodes = [n for n in nodes if n["id"] in bridge_ids]
-        
+
         try:
             user_content = (
                 f"Graph Topology Analysis for session: {graph_id}\n\n"
@@ -157,17 +166,17 @@ class ImplicitStakeholderService:
                 "identify any 'Latent Actors' (e.g. regulators, competitors, or covert influencers) "
                 "that are likely operating in the background but are not yet in the graph."
             )
-            
+
             messages = [
                 {"role": "system", "content": IMPLICIT_STAKEHOLDER_SYSTEM + " (Focus on Topological Structural Holes)"},
                 {"role": "user", "content": user_content},
             ]
-            
+
             _s1_provider, _s1_model = get_step_provider_model(1)
             raw = await self._llm.chat_json(messages, max_tokens=2048, temperature=0.3,
                                             provider=_s1_provider, model=_s1_model)
             raw_actors = raw.get("implied_actors", [])
-            
+
             return await self._process_and_persist(graph_id, raw_actors, nodes)
         except Exception:
             logger.exception("Topo-Auditor discovery failed for graph %s", graph_id)
@@ -197,13 +206,35 @@ class ImplicitStakeholderService:
                 continue
 
             actor_id = _to_slug(actor.get("id") or name)
+            relevance_reason = (actor.get("relevance_reason") or actor.get("reason") or "").strip()
+            evidence_phrase = (
+                actor.get("evidence_phrase")
+                or actor.get("evidence")
+                or relevance_reason
+                or ""
+            ).strip()
+            inferred_role = (actor.get("inferred_role") or actor.get("role") or "").strip()
+            why_missing = (actor.get("why_missing") or "").strip()
+            confidence = _clamp_confidence(actor.get("confidence", 0.45))
+
+            if not evidence_phrase or not relevance_reason:
+                logger.debug(
+                    "ImplicitStakeholderService: skipping '%s' (missing evidence/rationale)",
+                    name,
+                )
+                continue
+
             new_stakeholders.append(
                 ImplicitStakeholder(
                     id=actor_id,
                     name=name,
                     entity_type=actor.get("entity_type", "Organization"),
-                    role=(actor.get("role") or "").strip(),
-                    relevance_reason=(actor.get("relevance_reason") or "").strip(),
+                    role=inferred_role,
+                    relevance_reason=relevance_reason,
+                    why_missing=why_missing,
+                    evidence_phrase=evidence_phrase,
+                    inferred_role=inferred_role,
+                    confidence=confidence,
                 )
             )
             existing_titles_norm.add(_normalize(name))  # prevent self-dups
@@ -234,7 +265,10 @@ class ImplicitStakeholderService:
         existing_nodes: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         """Call LLM and return raw list of implied actor dicts."""
-        safe_seed = sanitize_seed_text(seed_text)
+        safe_seed = sanitize_prompt_seed_text(seed_text)
+        strict_live = os.environ.get("MURMURA_STRICT_LIVE") == "1"
+        default_max = "8" if strict_live else "30"
+        max_actors = max(1, min(_MAX_IMPLICIT, int(os.environ.get("IMPLICIT_STAKEHOLDER_MAX_ACTORS", default_max))))
         node_summaries = [
             {
                 "id": n.get("id"),
@@ -243,19 +277,55 @@ class ImplicitStakeholderService:
             }
             for n in existing_nodes
         ]
-        user_content = IMPLICIT_STAKEHOLDER_USER.format(
-            seed_text=safe_seed,
-            node_count=len(node_summaries),
-            existing_nodes_json=json.dumps(node_summaries, ensure_ascii=False, indent=2),
-        )
-        messages = [
-            {"role": "system", "content": IMPLICIT_STAKEHOLDER_SYSTEM},
-            {"role": "user", "content": user_content},
-        ]
+        if strict_live:
+            existing_labels = [
+                str(item.get("label") or item.get("id") or "")[:80]
+                for item in node_summaries
+                if item.get("label") or item.get("id")
+            ]
+            user_content = (
+                "Seed text:\n"
+                f"{safe_seed}\n\n"
+                "Existing actors already represented:\n"
+                f"{json.dumps(existing_labels[:120], ensure_ascii=False, separators=(',', ':'))}\n\n"
+                f"Return at most {max_actors} important missing decision-making actors. "
+                "Only include actors grounded in the seed text. Keep every string under 90 characters. "
+                "Return valid JSON only with this exact shape: "
+                '{"implied_actors":[{"id":"slug","name":"name","entity_type":"Organization",'
+                '"role":"short role","relevance_reason":"short reason","why_missing":"short reason",'
+                '"evidence_phrase":"seed phrase","inferred_role":"short action","confidence":0.5}]}'
+            )
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You discover missing stakeholders for simulations. "
+                        "Output compact valid JSON only. No markdown. No trailing commas."
+                    ),
+                },
+                {"role": "user", "content": user_content},
+            ]
+        else:
+            user_content = IMPLICIT_STAKEHOLDER_USER.format(
+                seed_text=safe_seed,
+                node_count=len(node_summaries),
+                existing_nodes_json=json.dumps(node_summaries, ensure_ascii=False, separators=(",", ":")),
+            )
+            user_content += (
+                f"\n\nSTRICT OUTPUT LIMIT: Return at most {max_actors} implied actors. "
+                "Use compact one-sentence fields, no markdown, no trailing commas, valid JSON only."
+            )
+            messages = [
+                {"role": "system", "content": IMPLICIT_STAKEHOLDER_SYSTEM},
+                {"role": "user", "content": user_content},
+            ]
         _s1_provider, _s1_model = get_step_provider_model(1)
-        raw = await self._llm.chat_json(messages, max_tokens=4096, temperature=0.3,
+        token_default = "2048" if strict_live else "3072"
+        max_tokens = max(1024, int(os.environ.get("IMPLICIT_STAKEHOLDER_MAX_TOKENS", token_default)))
+        raw = await self._llm.chat_json(messages, max_tokens=max_tokens, temperature=0.1,
                                         provider=_s1_provider, model=_s1_model)
-        return raw.get("implied_actors", [])
+        raw_actors = raw.get("implied_actors", [])
+        return raw_actors[:max_actors]
 
     async def _load_kg_nodes(self, graph_id: str) -> list[dict[str, Any]]:
         """Return lightweight node dicts from DB for deduplication."""
@@ -278,27 +348,90 @@ class ImplicitStakeholderService:
     ) -> int:
         """Insert implicit actor nodes into kg_nodes. Returns count inserted."""
         prefix = graph_id.replace("-", "")[:8]
-        node_rows = [
-            (
-                f"{prefix}_imp_{s.id}",
-                graph_id,
-                s.entity_type,
-                s.name,
-                s.role,
-                json.dumps(
-                    {"relevance_reason": s.relevance_reason, "source": "implicit_discovery"},
-                    ensure_ascii=False,
-                ),
+        node_rows = []
+        evidence_rows = []
+        edge_rows = []
+        for s in stakeholders:
+            actor_node_id = f"{prefix}_imp_{s.id}"
+            evidence_node_id = f"{prefix}_evidence_{s.id}"
+            node_rows.append(
+                (
+                    actor_node_id,
+                    graph_id,
+                    s.entity_type,
+                    s.name,
+                    s.role,
+                    json.dumps(
+                        {
+                            "source": "implicit_discovery",
+                            "actor_visibility": "inferred",
+                            "include_in_simulation": True,
+                            "review_status": "pending",
+                            "relevance_reason": s.relevance_reason,
+                            "why_missing": s.why_missing,
+                            "evidence_phrase": s.evidence_phrase,
+                            "inferred_role": s.inferred_role,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    s.confidence,
+                )
             )
-            for s in stakeholders
-        ]
+            evidence_rows.append(
+                (
+                    evidence_node_id,
+                    graph_id,
+                    "Evidence",
+                    s.evidence_phrase[:120],
+                    f"Evidence phrase for inferred actor: {s.name}",
+                    json.dumps(
+                        {
+                            "source": "implicit_discovery",
+                            "actor_node_id": actor_node_id,
+                            "evidence_phrase": s.evidence_phrase,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    s.confidence,
+                )
+            )
+            edge_rows.append(
+                (
+                    graph_id,
+                    actor_node_id,
+                    evidence_node_id,
+                    "IMPLIED_BY",
+                    s.relevance_reason,
+                    s.evidence_phrase,
+                    json.dumps({"evidence_phrase": s.evidence_phrase}, ensure_ascii=False),
+                    s.confidence,
+                    "truth",
+                    s.confidence,
+                )
+            )
         try:
             async with get_db() as db:
                 await db.executemany(
                     """INSERT OR IGNORE INTO kg_nodes
-                       (id, session_id, entity_type, title, description, properties)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
+                       (id, session_id, entity_type, title, description,
+                        properties, confidence_score)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
                     node_rows,
+                )
+                await db.executemany(
+                    """INSERT OR IGNORE INTO kg_nodes
+                       (id, session_id, entity_type, title, description,
+                        properties, confidence_score)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    evidence_rows,
+                )
+                await db.executemany(
+                    """INSERT INTO kg_edges
+                       (session_id, source_id, target_id, relation_type,
+                        description, source_text, evidence_span, weight,
+                        layer_type, confidence_score)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    edge_rows,
                 )
                 await db.commit()
             return len(node_rows)
@@ -316,6 +449,13 @@ def _normalize(text: str) -> str:
     """Lowercase + strip accents for fuzzy deduplication."""
     nfkd = unicodedata.normalize("NFKD", text.lower().strip())
     return "".join(c for c in nfkd if not unicodedata.combining(c))
+
+
+def _clamp_confidence(value: Any) -> float:
+    try:
+        return max(0.0, min(1.0, float(value)))
+    except (TypeError, ValueError):
+        return 0.45
 
 
 def _to_slug(raw: str) -> str:

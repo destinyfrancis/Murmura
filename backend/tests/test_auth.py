@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import patch
+
 import pytest
 
 from backend.app.api.auth import (
@@ -261,9 +264,14 @@ class TestAuthSecretKeyConfiguration:
         import importlib
         import logging
 
+        import backend.app.config as config_mod
         import backend.app.api.auth as auth_module
 
-        with caplog.at_level(logging.WARNING, logger="api.auth"):
+        fake_settings = SimpleNamespace(AUTH_SECRET_KEY="", DEBUG=True)
+        with (
+            patch.object(config_mod, "_settings", fake_settings),
+            caplog.at_level(logging.WARNING, logger="api.auth"),
+        ):
             importlib.reload(auth_module)
 
         assert any(
@@ -279,10 +287,13 @@ class TestAuthSecretKeyConfiguration:
 
         import importlib
 
+        import backend.app.config as config_mod
         import backend.app.api.auth as auth_module
 
-        with pytest.raises(SystemExit) as exc_info:
-            importlib.reload(auth_module)
+        fake_settings = SimpleNamespace(AUTH_SECRET_KEY="", DEBUG=False)
+        with patch.object(config_mod, "_settings", fake_settings):
+            with pytest.raises(SystemExit) as exc_info:
+                importlib.reload(auth_module)
 
         assert "FATAL" in str(exc_info.value)
         assert "AUTH_SECRET_KEY" in str(exc_info.value)

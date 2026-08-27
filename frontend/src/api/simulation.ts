@@ -40,6 +40,12 @@ export function createSimulation(
   return api.post('/simulation/create', payload)
 }
 
+export function runSimulationPreflight(
+  data: Record<string, any>,
+): Promise<AxiosResponse<APIResponse<Record<string, any>>>> {
+  return api.post('/simulation/preflight', data)
+}
+
 export function startSimulation(
   data: StartSimulationPayload,
 ): Promise<AxiosResponse<APIResponse<SimulationSession>>> {
@@ -433,4 +439,16 @@ export function getConfidenceScore(
   sessionId: string,
 ): Promise<AxiosResponse<APIResponse<ConfidenceScore>>> {
   return api.get(`/simulation/${sessionId}/confidence-score`)
+}
+
+export function getConfidenceReport(
+  sessionId: string,
+): Promise<AxiosResponse<APIResponse<Record<string, any>>>> {
+  return api.get(`/simulation/${sessionId}/confidence-report`)
+}
+
+export function getSimulationArtifacts(
+  sessionId: string,
+): Promise<AxiosResponse<APIResponse<Record<string, any>>>> {
+  return api.get(`/simulation/${sessionId}/artifacts`)
 }

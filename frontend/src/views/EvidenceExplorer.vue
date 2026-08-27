@@ -86,7 +86,7 @@
     <!-- Detail Panel -->
     <div class="detail-panel" v-if="selected" @click.self="selected = null">
       <div class="detail-content">
-        <button class="close-btn" @click="selected = null">✕</button>
+        <button class="close-btn" type="button" aria-label="關閉證據詳情" @click="selected = null">✕</button>
         <h3>{{ selectedType === 'memory' ? '記憶詳情' : selectedType === 'node' ? '節點詳情' : '動態詳情' }}</h3>
         <pre class="detail-json">{{ JSON.stringify(selected, null, 2) }}</pre>
       </div>

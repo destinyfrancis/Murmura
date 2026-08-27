@@ -11,6 +11,8 @@ All handlers delegate to real service implementations:
 from __future__ import annotations
 
 import asyncio
+import os
+import uuid
 from pathlib import Path
 from typing import Annotated
 
@@ -35,10 +37,12 @@ from backend.app.services.simulation_manager import (
     store_activity_profiles,
     store_agent_profiles,
     store_universal_agent_profiles,
+    store_universal_agent_relationships,
 )
 from backend.app.services.supply_chain_builder import SupplyChainBuilder
 from backend.app.utils.db import get_db
 from backend.app.utils.logger import get_logger
+from backend.app.utils.ownership import require_session_access
 from backend.app.utils.prompt_security import sanitize_scenario_description
 
 # Default company count when scenario_type triggers auto-B2B generation
@@ -53,18 +57,89 @@ logger = get_logger("api.simulation")
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 
-@router.get("/sessions", response_model=APIResponse)
-async def list_sessions(limit: int = 20, offset: int = 0) -> APIResponse:
-    """List all simulation sessions, newest first."""
-    from backend.app.utils.db import get_db
+async def _load_graph_seed_text(graph_id: str) -> str:
+    """Load the original graph-holder seed text for a built graph."""
+    from backend.app.utils.db import get_db as _get_db  # noqa: PLC0415
 
+    async with _get_db() as db:
+        row = await (
+            await db.execute(
+                "SELECT seed_text FROM simulation_sessions WHERE id = ?",
+                (graph_id,),
+            )
+        ).fetchone()
+    if not row:
+        return ""
     try:
-        async with get_db() as db:
-            total_row = await (await db.execute("SELECT COUNT(*) as c FROM simulation_sessions")).fetchone()
+        return str(row["seed_text"] or "")
+    except (KeyError, TypeError, IndexError):
+        if isinstance(row, dict):
+            return str(row.get("seed_text") or "")
+        return ""
+
+
+async def _detect_create_mode(req: SimulationCreateRequest) -> tuple[str, str]:
+    """Infer whether a create request should use HK or KG-driven agents."""
+    if req.scenario_type == "kg_driven":
+        return "kg_driven", await _load_graph_seed_text(req.graph_id)
+
+    seed_text = await _load_graph_seed_text(req.graph_id)
+    if not seed_text.strip():
+        return "hk_demographic", ""
+
+    from backend.app.services.zero_config import ZeroConfigService  # noqa: PLC0415
+
+    detected_mode = await ZeroConfigService().detect_mode_async(seed_text)
+    return detected_mode, seed_text
+
+
+def _build_agent_role_coverage(profiles: list[object]) -> dict[str, object]:
+    """Summarise role/entity coverage for graph-driven agent generation."""
+    role_counts: dict[str, int] = {}
+    entity_type_counts: dict[str, int] = {}
+    relationship_edges = 0
+
+    for profile in profiles:
+        role = str(getattr(profile, "role", "") or "unknown")
+        entity_type = str(getattr(profile, "entity_type", "") or "unknown")
+        role_counts[role] = role_counts.get(role, 0) + 1
+        entity_type_counts[entity_type] = entity_type_counts.get(entity_type, 0) + 1
+        relationship_edges += len(getattr(profile, "relationships", ()) or ())
+
+    return {
+        "roles": role_counts,
+        "entity_types": entity_type_counts,
+        "relationship_edges": relationship_edges,
+    }
+
+
+@router.get("/sessions", response_model=APIResponse)
+async def list_sessions(
+    limit: int = 20,
+    offset: int = 0,
+    user: Annotated[UserProfile | None, Depends(get_optional_user)] = None,
+) -> APIResponse:
+    """List all simulation sessions, newest first."""
+    try:
+        from backend.app.utils.db import get_db as _get_db  # noqa: PLC0415
+
+        params: list[object] = []
+        where = ""
+        if user is None:
+            where = "WHERE owner_id IS NULL"
+        elif not user.is_admin:
+            where = "WHERE owner_id = ? OR owner_id IS NULL"
+            params.append(user.id)
+
+        async with _get_db() as db:
+            total_row = await (
+                await db.execute(f"SELECT COUNT(*) as c FROM simulation_sessions {where}", params)
+            ).fetchone()
             rows = await (
                 await db.execute(
-                    "SELECT id, name, scenario_type, status, agent_count, round_count, current_round, created_at FROM simulation_sessions ORDER BY created_at DESC LIMIT ? OFFSET ?",
-                    (min(limit, 100), max(offset, 0)),
+                    "SELECT id, name, scenario_type, status, agent_count, round_count, current_round, created_at "
+                    f"FROM simulation_sessions {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                    (*params, min(limit, 100), max(offset, 0)),
                 )
             ).fetchall()
         return APIResponse(
@@ -102,6 +177,17 @@ async def list_presets() -> APIResponse:
     return APIResponse(success=True, data={"presets": presets, "total": len(presets)})
 
 
+@router.get("/mode-presets", response_model=APIResponse)
+async def list_mode_presets_endpoint(q: str = "") -> APIResponse:
+    """Return productised first-use mode presets and optional auto-detection."""
+    from backend.app.services.mode_presets import detect_mode_from_text, list_mode_presets  # noqa: PLC0415
+
+    data = {"presets": list_mode_presets()}
+    if q.strip():
+        data["suggested"] = detect_mode_from_text(q)
+    return APIResponse(success=True, data=data, meta={"count": len(data["presets"])})
+
+
 @router.post("/create", response_model=APIResponse)
 @_limiter.limit("10/minute")
 async def create_simulation(
@@ -115,6 +201,7 @@ async def create_simulation(
             s.model_copy(update={"post_content": s.description}) if not s.post_content else s for s in req.shocks
         ]
         req = req.model_copy(update={"shocks": enriched_shocks})
+        mode, seed_text = await _detect_create_mode(req)
 
         # Resolve preset if provided
         if req.preset:
@@ -132,51 +219,95 @@ async def create_simulation(
                 }
             )
 
-        # Load domain pack demographics for agent generation
-        demographics = None
-        try:
-            from backend.app.domain.base import DomainPackRegistry  # noqa: PLC0415
-
-            pack = DomainPackRegistry.get(req.domain_pack_id)
-            demographics = pack.demographics
-        except (KeyError, Exception):
-            logger.debug("Domain pack '%s' not found or has no demographics, using defaults", req.domain_pack_id)
-
-        factory = AgentFactory(demographics=demographics)
-        profile_gen = ProfileGenerator(agent_factory=factory)
-        macro = MacroController()
-
-        distribution = req.agent_distribution or {}
-        profiles = factory.generate_population(req.agent_count, distribution or None)
-
-        if req.family_members:
-            for fm in req.family_members:
-                twin = factory.generate_twin(fm.model_dump())
-                profiles = [*profiles, twin]
-
-        if req.crm_data:
-            crm_records = [c.model_dump() for c in req.crm_data]
-            crm_profiles = factory.generate_crm_agents(crm_records)
-            profiles = [*profiles, *crm_profiles]
-
-        macro_state = await macro.get_baseline_for_scenario(req.scenario_type or "property")
-
         manager = get_simulation_manager()
         request_dict = req.model_dump()
         if user:
             request_dict["owner_id"] = user.id
+        if mode == "kg_driven":
+            request_dict["sim_mode"] = "kg_driven"
+        if seed_text:
+            request_dict["seed_text"] = seed_text
         session_data = await manager.create_session(request_dict, csv_path=None)
         session_id = session_data["session_id"]
 
         session_dir = _PROJECT_ROOT / "data" / "sessions" / session_id
         csv_path = str(session_dir / "agents.csv")
-        csv_content = profile_gen.to_oasis_csv(profiles, macro_state)
-        await asyncio.to_thread(Path(csv_path).write_text, csv_content, encoding="utf-8")
-        logger.info("Wrote %d agents to %s", len(profiles), csv_path)
+        agent_coverage: dict[str, object] | None = None
+
+        if mode == "kg_driven":
+            profiles, csv_path = await generate_agents(
+                session_id=session_id,
+                request={
+                    **request_dict,
+                    "graph_id": req.graph_id,
+                    "seed_text": seed_text,
+                    "agent_count": req.agent_count,
+                },
+                mode="kg_driven",
+            )
+            try:
+                await store_universal_agent_profiles(session_id, profiles)
+            except Exception:
+                logger.warning("Could not store universal agent profiles for session %s", session_id, exc_info=True)
+            try:
+                await store_universal_agent_relationships(session_id, profiles)
+            except Exception:
+                logger.warning("Could not store universal agent relationships for session %s", session_id, exc_info=True)
+            agent_coverage = _build_agent_role_coverage(profiles)
+        else:
+            # Load domain pack demographics for HK/default agent generation
+            demographics = None
+            try:
+                from backend.app.domain.base import DomainPackRegistry  # noqa: PLC0415
+
+                pack = DomainPackRegistry.get(req.domain_pack_id)
+                demographics = pack.demographics
+            except (KeyError, Exception):
+                logger.debug("Domain pack '%s' not found or has no demographics, using defaults", req.domain_pack_id)
+
+            factory = AgentFactory(demographics=demographics)
+            profile_gen = ProfileGenerator(agent_factory=factory)
+            macro = MacroController()
+
+            distribution = req.agent_distribution or {}
+            profiles = factory.generate_population(req.agent_count, distribution or None)
+
+            if req.family_members:
+                for fm in req.family_members:
+                    twin = factory.generate_twin(fm.model_dump())
+                    profiles = [*profiles, twin]
+
+            if req.crm_data:
+                crm_records = [c.model_dump() for c in req.crm_data]
+                crm_profiles = factory.generate_crm_agents(crm_records)
+                profiles = [*profiles, *crm_profiles]
+
+            macro_state = await macro.get_baseline_for_scenario(req.scenario_type or "property")
+            csv_content = profile_gen.to_oasis_csv(profiles, macro_state)
+            await asyncio.to_thread(Path(csv_path).write_text, csv_content, encoding="utf-8")
+            logger.info("Wrote %d agents to %s", len(profiles), csv_path)
+
+            try:
+                await store_agent_profiles(session_id, profiles, profile_gen, macro_state)
+            except Exception:
+                logger.warning(
+                    "Could not store agent profiles for session %s",
+                    session_id,
+                    exc_info=True,
+                )
+
+            # Phase 1B: generate temporal activity profiles and persist alongside agents.
+            try:
+                session_dir = _PROJECT_ROOT / "data" / "sessions" / session_id
+                await store_activity_profiles(session_id, profiles, session_dir, factory)
+            except Exception:
+                logger.warning(
+                    "Could not store activity profiles for session %s",
+                    session_id,
+                    exc_info=True,
+                )
 
         import json as _json  # noqa: PLC0415
-
-        from backend.app.utils.db import get_db  # noqa: PLC0415
 
         async with get_db() as db:
             row = await (
@@ -193,26 +324,6 @@ async def create_simulation(
                     (_json.dumps(cfg), session_id),
                 )
                 await db.commit()
-
-        try:
-            await store_agent_profiles(session_id, profiles, profile_gen, macro_state)
-        except Exception:
-            logger.warning(
-                "Could not store agent profiles for session %s",
-                session_id,
-                exc_info=True,
-            )
-
-        # Phase 1B: generate temporal activity profiles and persist alongside agents.
-        try:
-            session_dir = _PROJECT_ROOT / "data" / "sessions" / session_id
-            await store_activity_profiles(session_id, profiles, session_dir, factory)
-        except Exception:
-            logger.warning(
-                "Could not store activity profiles for session %s",
-                session_id,
-                exc_info=True,
-            )
 
         # ---- B2B enterprise auto-generation ----
         scenario_lower = (req.scenario_type or "").lower()
@@ -258,6 +369,8 @@ async def create_simulation(
                 "company_count": supply_chain_graph.node_count,
                 "supply_chain_edges": supply_chain_graph.edge_count,
             }
+        if agent_coverage is not None:
+            b2b_meta["agent_role_coverage"] = agent_coverage
 
         return APIResponse(
             success=True,
@@ -279,9 +392,14 @@ async def create_simulation(
 
 @router.post("/start", response_model=APIResponse)
 @_limiter.limit("5/minute")
-async def start_simulation(request: Request, req: SimulationStartRequest) -> APIResponse:
+async def start_simulation(
+    request: Request,
+    req: SimulationStartRequest,
+    user: Annotated[UserProfile | None, Depends(get_optional_user)] = None,
+) -> APIResponse:
     """Start a previously created simulation session."""
     try:
+        await require_session_access(req.session_id, user)
         manager = get_simulation_manager()
         await manager.start_session(req.session_id)
         return APIResponse(
@@ -292,10 +410,42 @@ async def start_simulation(request: Request, req: SimulationStartRequest) -> API
                 "message": "Simulation started. Connect to WebSocket /ws/progress/{session_id} for live updates.",
             },
         )
+    except HTTPException:
+        raise
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Bad request") from exc
+    except RuntimeError as exc:
+        if str(exc).startswith("simulation_engine_unavailable"):
+            raise HTTPException(status_code=503, detail="Simulation engine unavailable") from exc
+        if str(exc).startswith("preflight_blocked"):
+            raise HTTPException(status_code=422, detail="Simulation preflight failed") from exc
+        logger.exception("start_simulation runtime failure for session %s", req.session_id)
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
     except Exception as exc:
         logger.exception("start_simulation failed for session %s", req.session_id)
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+
+@router.post("/preflight", response_model=APIResponse)
+@_limiter.limit("10/minute")
+async def simulation_preflight(
+    request: Request,
+    req: dict,
+    user: Annotated[UserProfile | None, Depends(get_optional_user)] = None,
+) -> APIResponse:
+    """Return public-beta simulation readiness before creating or starting a run."""
+    try:
+        session_id = req.get("session_id")
+        if session_id:
+            await require_session_access(str(session_id), user)
+        from backend.app.services.simulation_preflight import SimulationPreflightService  # noqa: PLC0415
+
+        report = await SimulationPreflightService().run(req)
+        return APIResponse(success=True, data=report)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("simulation_preflight failed")
         raise HTTPException(status_code=500, detail="Internal server error") from exc
 
 
@@ -331,7 +481,7 @@ async def _run_quick_start(
     """Shared business logic for both JSON and file-upload quick-start endpoints."""
     from backend.app.services.graph_builder import GraphBuilderService  # noqa: PLC0415
     from backend.app.services.zero_config import ZeroConfigService  # noqa: PLC0415
-    from backend.app.utils.prompt_security import sanitize_seed_text as _sanitize_seed  # noqa: PLC0415
+    from backend.app.utils.prompt_security import sanitize_source_seed_text as _sanitize_seed  # noqa: PLC0415
 
     seed_text = _sanitize_seed(seed_text)
 
@@ -345,9 +495,10 @@ async def _run_quick_start(
     round_count_final = resolved.rounds
     estimated_duration = round_count_final * agent_count_final // 50
 
+    graph_id = str(uuid.uuid4())
     graph_builder = GraphBuilderService()
-    graph_result = await graph_builder.build_graph(
-        session_id="quick",
+    graph_result = await graph_builder.build_graph_from_seed(
+        graph_id=graph_id,
         scenario_type=config.domain_pack_id,
         seed_text=seed_text,
     )
@@ -370,13 +521,16 @@ async def _run_quick_start(
             "round_count": round_count_final,
             "graph_id": graph_id,
             "domain_pack_id": config.domain_pack_id,
-            "platforms": {"twitter": True, "reddit": True} if is_kg else {"facebook": True, "instagram": True},
+            "platforms": {"twitter": True, "reddit": True},
             "time_config": time_config.to_dict(),
             "owner_id": owner_id,
         },
         csv_path=None,
     )
     session_id = session_data["session_id"]
+    from backend.app.services.simulation_preflight import SimulationPreflightService  # noqa: PLC0415
+
+    preflight_report = await SimulationPreflightService().run_for_session(session_id)
 
     if is_kg:
         # --- kg_driven path: use KGAgentFactory via generate_agents() ---
@@ -393,6 +547,10 @@ async def _run_quick_start(
             await store_universal_agent_profiles(session_id, profiles)
         except Exception:
             logger.warning("Could not store universal agent profiles for %s", session_id, exc_info=True)
+        try:
+            await store_universal_agent_relationships(session_id, profiles)
+        except Exception:
+            logger.warning("Could not store universal agent relationships for %s", session_id, exc_info=True)
     else:
         # --- hk_demographic path: existing logic unchanged ---
         demographics = None
@@ -426,7 +584,12 @@ async def _run_quick_start(
         except Exception:
             logger.warning("Could not store activity profiles for quick-start session %s", session_id, exc_info=True)
 
-    asyncio.create_task(manager.start_session(session_id))
+    from backend.app.services.oasis_compatibility import get_capabilities  # noqa: PLC0415
+
+    capabilities = get_capabilities()
+    simulation_available = bool(capabilities.get("simulation_available", capabilities.get("simulation")))
+    if simulation_available and preflight_report.get("ready"):
+        asyncio.create_task(manager.start_session(session_id))
 
     return APIResponse(
         success=True,
@@ -441,6 +604,13 @@ async def _run_quick_start(
             "round_count": round_count_final,
             "scenario_question": scenario_question,
             "time_config": time_config.to_dict(),
+            "preflight": preflight_report,
+            "simulation_skipped": not simulation_available or not preflight_report.get("ready"),
+            "simulation_skip_reason": (
+                capabilities.get("reason", "")
+                if not simulation_available
+                else "preflight_blocked" if not preflight_report.get("ready") else ""
+            ),
         },
     )
 
@@ -480,54 +650,48 @@ async def quick_start_upload(
 
     Extracts text then delegates to ``_run_quick_start()``.
     """
-    import io as _io  # noqa: PLC0415
-
     try:
         content = await file.read()
-        if len(content) > _QUICK_START_MAX_BYTES:
-            raise HTTPException(status_code=400, detail="File exceeds 10 MB limit")
+        from backend.app.services.scenario_intake import ScenarioIntakeService  # noqa: PLC0415
 
-        ext = Path(file.filename or "").suffix.lower()
-        if ext not in _QUICK_START_ALLOWED_EXTS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported file type '{ext}'. Allowed: PDF, TXT, Markdown",
-            )
-
-        if ext == ".pdf":
-            seed_text = ""
-            try:
-                import pypdf  # noqa: PLC0415
-
-                reader = pypdf.PdfReader(_io.BytesIO(content))
-                seed_text = "\n\n".join(p.extract_text() or "" for p in reader.pages).strip()
-            except ImportError:
-                try:
-                    import PyPDF2  # noqa: PLC0415, N813
-
-                    reader = PyPDF2.PdfReader(_io.BytesIO(content))
-                    seed_text = "\n\n".join(p.extract_text() or "" for p in reader.pages).strip()
-                except ImportError:
-                    raise HTTPException(
-                        status_code=422,
-                        detail="PDF library not installed. Please upload TXT or Markdown.",
-                    ) from None
-            except Exception as exc:
-                raise HTTPException(status_code=422, detail=f"PDF extraction failed: {exc}") from exc
-        else:
-            seed_text = content.decode("utf-8", errors="replace").strip()
-
-        if not seed_text:
-            raise HTTPException(status_code=422, detail="Could not extract text from file")
+        intake = ScenarioIntakeService(max_bytes=_QUICK_START_MAX_BYTES).from_bytes(
+            content,
+            filename=file.filename,
+            content_type=file.content_type,
+        )
 
         scenario_question_raw = (scenario_question or "").strip()
         scenario_question = sanitize_scenario_description(scenario_question_raw) if scenario_question_raw else ""
         owner_id = user.id if user else None
-        return await _run_quick_start(seed_text, scenario_question, preset, owner_id=owner_id)
+        return await _run_quick_start(intake.text, scenario_question, preset, owner_id=owner_id)
+    except ValueError as exc:
+        message = str(exc)
+        status_code = 400 if "Unsupported" in message or "10 MB" in message else 422
+        raise HTTPException(status_code=status_code, detail=message) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.exception("quick_start_upload failed")
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+
+@router.get("/{session_id}/artifacts", response_model=APIResponse)
+async def get_simulation_artifacts(
+    session_id: str,
+    user: Annotated[UserProfile | None, Depends(get_optional_user)] = None,
+) -> APIResponse:
+    """Return non-secret live simulation artifact metadata and launch-gate counts."""
+    try:
+        await require_session_access(session_id, user)
+        from backend.app.services.simulation_artifacts import collect_simulation_artifacts  # noqa: PLC0415
+
+        return APIResponse(success=True, data=await collect_simulation_artifacts(session_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Session not found") from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("get_simulation_artifacts failed for %s", session_id)
         raise HTTPException(status_code=500, detail="Internal server error") from exc
 
 
@@ -560,9 +724,49 @@ async def list_simulation_queue(
                     (min(limit, 200),),
                 )
             ).fetchall()
+            status_rows = await (
+                await db.execute(
+                    "SELECT status, COUNT(*) AS c FROM simulation_jobs GROUP BY status"
+                )
+            ).fetchall()
+            failure_rows = await (
+                await db.execute(
+                    """
+                    SELECT error_message, COUNT(*) AS c
+                    FROM simulation_jobs
+                    WHERE status = 'failed' AND COALESCE(error_message, '') != ''
+                    GROUP BY error_message
+                    ORDER BY c DESC
+                    LIMIT 10
+                    """
+                )
+            ).fetchall()
+            cost_rows = await (
+                await db.execute(
+                    "SELECT COUNT(*) AS sessions, COALESCE(SUM(total_cost_usd), 0) AS total FROM session_costs"
+                )
+            ).fetchone()
+        from backend.app.services.simulation_artifacts import classify_failure  # noqa: PLC0415
+
+        failure_distribution: dict[str, int] = {}
+        for row in failure_rows or []:
+            code = classify_failure(str(row["error_message"] or ""))
+            failure_distribution[code] = failure_distribution.get(code, 0) + int(row["c"] or 0)
         return APIResponse(
             success=True,
-            data={"jobs": [dict(r) for r in (rows or [])], "count": len(rows or [])},
+            data={
+                "jobs": [dict(r) for r in (rows or [])],
+                "count": len(rows or []),
+                "summary": {
+                    "status_counts": {r["status"]: int(r["c"]) for r in (status_rows or [])},
+                    "max_concurrent": int(os.environ.get("MAX_CONCURRENT_SIMULATIONS", "3")),
+                    "cost_usage": {
+                        "sessions": int(cost_rows["sessions"] if cost_rows else 0),
+                        "total_cost_usd": float(cost_rows["total"] if cost_rows else 0.0),
+                    },
+                    "failure_distribution": failure_distribution,
+                },
+            },
         )
     except Exception as exc:
         logger.exception("list_simulation_queue failed")
@@ -1020,7 +1224,7 @@ async def rebalance_shards(
 @router.post("/{session_id}/resume", response_model=APIResponse)
 async def resume_session(
     session_id: str,
-    user: Annotated[UserProfile | None, Depends(get_optional_user)] = None,
+    user: Annotated[UserProfile, Depends(get_current_user)],
 ) -> APIResponse:
     """Resume a simulation session that was paused due to exceeding the hard cost cap.
 
@@ -1028,6 +1232,7 @@ async def resume_session(
     signals the asyncio.Event that the simulation loop is waiting on.
     """
     try:
+        await require_session_access(session_id, user)
         from backend.app.services import cost_tracker as _ct  # noqa: PLC0415
 
         if not _ct.is_paused(session_id):
@@ -1042,21 +1247,30 @@ async def resume_session(
             success=True,
             data={"session_id": session_id, "resumed": True, "total_cost": total_cost},
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("resume_session failed for session %s", session_id)
         raise HTTPException(status_code=500, detail="Internal server error") from exc
 
 
 @router.get("/{session_id}/status", response_model=APIResponse)
-async def get_session_status_alias(session_id: str) -> APIResponse:
+async def get_session_status_alias(
+    session_id: str,
+    user: Annotated[UserProfile | None, Depends(get_optional_user)] = None,
+) -> APIResponse:
     """Frontend poller alias — delegates to GET /{session_id}."""
-    return await get_session_status(session_id)
+    return await get_session_status(session_id, user=user)
 
 
 @router.get("/{session_id}", response_model=APIResponse)
-async def get_session_status(session_id: str) -> APIResponse:
+async def get_session_status(
+    session_id: str,
+    user: Annotated[UserProfile | None, Depends(get_optional_user)] = None,
+) -> APIResponse:
     """Get the current status and metadata of a simulation session."""
     try:
+        await require_session_access(session_id, user)
         manager = get_simulation_manager()
         session_data = await manager.get_session(session_id)
 
@@ -1079,6 +1293,8 @@ async def get_session_status(session_id: str) -> APIResponse:
             data["ensemble_summary"] = ensemble_summary
 
         return APIResponse(success=True, data=data)
+    except HTTPException:
+        raise
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="Not found") from exc
     except Exception as exc:
@@ -1087,9 +1303,13 @@ async def get_session_status(session_id: str) -> APIResponse:
 
 
 @router.get("/{session_id}/agents", response_model=APIResponse)
-async def list_agents(session_id: str) -> APIResponse:
+async def list_agents(
+    session_id: str,
+    user: Annotated[UserProfile | None, Depends(get_optional_user)] = None,
+) -> APIResponse:
     """List all agent profiles stored for a simulation session."""
     try:
+        await require_session_access(session_id, user)
         manager = get_simulation_manager()
         agents = await manager.get_agents(session_id)
         return APIResponse(
@@ -1097,6 +1317,8 @@ async def list_agents(session_id: str) -> APIResponse:
             data=agents,
             meta={"session_id": session_id, "count": len(agents)},
         )
+    except HTTPException:
+        raise
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="Not found") from exc
     except Exception as exc:
@@ -1150,11 +1372,13 @@ async def get_session_actions(
     round: int | None = None,
     platform: str | None = None,
     limit: int = 200,
+    user: Annotated[UserProfile | None, Depends(get_optional_user)] = None,
 ) -> APIResponse:
     """Get logged simulation actions for a session."""
     from backend.scripts.action_logger import ActionLogger  # noqa: PLC0415
 
     try:
+        await require_session_access(session_id, user)
         action_logger = ActionLogger()
         actions = await action_logger.get_round_actions(
             session_id=session_id,
@@ -1172,17 +1396,23 @@ async def get_session_actions(
                 "platform": platform,
             },
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("get_session_actions failed for session %s", session_id)
         raise HTTPException(status_code=500, detail="Internal server error") from exc
 
 
 @router.get("/{session_id}/actions/sentiment", response_model=APIResponse)
-async def get_sentiment_summary(session_id: str) -> APIResponse:
+async def get_sentiment_summary(
+    session_id: str,
+    user: Annotated[UserProfile | None, Depends(get_optional_user)] = None,
+) -> APIResponse:
     """Get per-round sentiment summary for a session."""
     from backend.scripts.action_logger import ActionLogger  # noqa: PLC0415
 
     try:
+        await require_session_access(session_id, user)
         action_logger = ActionLogger()
         summary = await action_logger.get_sentiment_summary(session_id)
         return APIResponse(
@@ -1190,6 +1420,8 @@ async def get_sentiment_summary(session_id: str) -> APIResponse:
             data=summary,
             meta={"session_id": session_id},
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("get_sentiment_summary failed for session %s", session_id)
         raise HTTPException(status_code=500, detail="Internal server error") from exc
@@ -1200,11 +1432,13 @@ async def get_agent_memories(
     session_id: str,
     agent_id: int,
     limit: int = 50,
+    user: Annotated[UserProfile | None, Depends(get_optional_user)] = None,
 ) -> APIResponse:
     """Get memory records for a specific agent in a session."""
     from backend.app.services.agent_memory import AgentMemoryService  # noqa: PLC0415
 
     try:
+        await require_session_access(session_id, user)
         memory_service = AgentMemoryService()
         memories = await memory_service.get_agent_memories(
             session_id=session_id,
@@ -1226,6 +1460,8 @@ async def get_agent_memories(
                 "triple_count": len(triples),
             },
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("get_agent_memories failed for session %s agent %d", session_id, agent_id)
         logger.exception("Internal error in get_agent_memories")
@@ -1241,6 +1477,7 @@ async def search_agent_memories(
     agent_id: int,
     q: str = "",
     top_k: int = 10,
+    user: Annotated[UserProfile | None, Depends(get_optional_user)] = None,
 ) -> APIResponse:
     """Semantic search across an agent's memories using vector similarity."""
     if not q.strip():
@@ -1261,6 +1498,7 @@ async def search_agent_memories(
         )
 
     try:
+        await require_session_access(session_id, user)
         results = await memory_service.search_memories(
             session_id=session_id,
             agent_id=agent_id,
@@ -1277,6 +1515,8 @@ async def search_agent_memories(
                 "count": len(results),
             },
         )
+    except HTTPException:
+        raise
     except RuntimeError as exc:
         logger.exception("Internal error in search_agent_memories")
         raise HTTPException(status_code=503, detail="Internal server error") from exc
@@ -1725,13 +1965,14 @@ async def inject_live_shock(
     request: Request,
     session_id: str,
     shock: ScheduledShock,
-    user: Annotated[UserProfile | None, Depends(get_optional_user)] = None,
+    user: Annotated[UserProfile, Depends(get_current_user)],
 ) -> APIResponse:
     """Inject a live shock into a running simulation (God Mode)."""
     from backend.app.api.ws import push_progress  # noqa: PLC0415
     from backend.app.utils.db import get_db  # noqa: PLC0415
 
     try:
+        await require_session_access(session_id, user)
         async with get_db() as db:
             row = await (
                 await db.execute(
@@ -2283,15 +2524,21 @@ async def trigger_multi_run(simulation_id: str) -> APIResponse:
 
 
 @router.post("/{session_id}/stop", response_model=APIResponse)
-async def stop_simulation(session_id: str) -> APIResponse:
+async def stop_simulation(
+    session_id: str,
+    user: Annotated[UserProfile | None, Depends(get_optional_user)] = None,
+) -> APIResponse:
     """Stop a running simulation session."""
     try:
+        await require_session_access(session_id, user)
         manager = get_simulation_manager()
         await manager.stop_session(session_id)
         return APIResponse(
             success=True,
             data={"stopped": True, "session_id": session_id},
         )
+    except HTTPException:
+        raise
     except ValueError as exc:
         logger.warning("stop_simulation: session not found %s: %s", session_id, exc)
         raise HTTPException(status_code=404, detail="Session not found") from exc
@@ -2301,7 +2548,10 @@ async def stop_simulation(session_id: str) -> APIResponse:
 
 
 @router.post("/{session_id}/cleanup", response_model=APIResponse)
-async def cleanup_session(session_id: str) -> APIResponse:
+async def cleanup_session(
+    session_id: str,
+    user: Annotated[UserProfile | None, Depends(get_optional_user)] = None,
+) -> APIResponse:
     """Release all in-memory resources for a session.
 
     Safe to call for any session state (running, completed, failed).
@@ -2309,6 +2559,7 @@ async def cleanup_session(session_id: str) -> APIResponse:
     Frontend should call this when user navigates away or closes the page.
     """
     try:
+        await require_session_access(session_id, user)
         manager = get_simulation_manager()
         # If still running, stop first
         if manager._runner._subprocess_mgr.is_running(session_id):
@@ -2321,6 +2572,8 @@ async def cleanup_session(session_id: str) -> APIResponse:
             success=True,
             data={"session_id": session_id, "cleaned": True},
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.debug("cleanup_session: %s — %s", session_id, exc)
         return APIResponse(

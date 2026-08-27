@@ -22,9 +22,14 @@ data/cleaned/
 data/sessions/
 data/test_sessions/
 data/vector_store/
+data/reality_seeds/
+data/benchmarks/*_latest.json
+data/benchmarks/*_[0-9]*T*.json
 
 # Logs
 log/
+logs/
+reports/
 *.log
 firebase-debug.log
 
@@ -45,16 +50,28 @@ frontend/tsconfig.tsbuildinfo
 # OASIS
 oasis_output/
 
-# Internal docs — track UPGRADE_PLAN only
+# Internal docs
 docs/superpowers/
+CLAUDE.md
+AGENTS.md
+*PLAN*.md
+*plan*.md
+*ROADMAP*.md
+*roadmap*.md
+*UPGRADE*.md
+*upgrade*.md
+*AUDIT*.md
+*audit*.md
+*PROMPT*.md
+*prompt*.md
+*NOTES*.md
+*notes*.md
 
 # Audit / debug artifacts
 backend/scripts/audit_report_raw.json
 
 # Claude / Personal (never commit these)
 .claude/
-CLAUDE.md
-AGENTS.md
 NEXT_PHASES.md
 SYSTEM_ASSESSMENT.md
 academic_evaluation_report.md
@@ -72,5 +89,9 @@ tests_list.txt
 
 # Playwright MCP
 .playwright-mcp/
+frontend/test-results/
+frontend/playwright-report/
 .worktrees/
 .venv311
+*.mov
+*.mp4

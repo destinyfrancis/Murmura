@@ -1,4 +1,4 @@
-"""VAR (Vector Autoregression) multi-variable forecaster for MurmuraScope.
+"""VAR (Vector Autoregression) multi-variable forecaster for Murmura.
 
 Implements Task 2.2: cross-indicator relationships such as
   HIBOR↑ → CCL↓,  unemployment↑ → consumer_confidence↓,  etc.

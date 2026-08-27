@@ -751,6 +751,57 @@ class SocialHooksMixin:
                 round_num,
             )
 
+    async def _process_moderation(
+        self,
+        session_id: str,
+        round_number: int,
+    ) -> None:
+        """Run moderation events for agents that posted this round."""
+        try:
+            from backend.app.services.moderation_engine import ModerationEngine  # noqa: PLC0415
+
+            if not hasattr(self, "_moderation_engine"):
+                self._moderation_engine = ModerationEngine()
+
+            round_agents = (
+                self._round_active_agents.get(session_id, {})
+                if hasattr(self, "_round_active_agents")
+                else {}
+            )
+            if not round_agents:
+                return
+
+            session_risks = (
+                self._agent_moderation_risks.get(session_id, {})
+                if hasattr(self, "_agent_moderation_risks")
+                else {}
+            )
+
+            import random  # noqa: PLC0415
+            rng = random.Random(hash(f"mod_{session_id}_{round_number}"))
+
+            for agent_id, platform in round_agents.items():
+                moderation_risk = session_risks.get(agent_id, 0.02)
+                event = self._moderation_engine.evaluate(
+                    agent_id=str(agent_id),
+                    platform=platform or "forum",
+                    moderation_risk=moderation_risk,
+                    rng=rng,
+                )
+                if event and hasattr(self, "_emotional_engine") and self._emotional_engine:
+                    await self._emotional_engine.apply_neuroticism_shock(
+                        session_id=session_id,
+                        agent_id=agent_id,
+                        delta=event.neuroticism_delta,
+                        reason=f"moderation_{event.event_type.value}",
+                    )
+                    logger.debug(
+                        "Moderation applied: agent=%s platform=%s delta=%.3f session=%s",
+                        agent_id, platform, event.neuroticism_delta, session_id,
+                    )
+        except Exception:
+            logger.exception("_process_moderation failed session=%s round=%d", session_id, round_number)
+
     async def _generate_emergence_scorecard(self, session_id: str) -> None:
         """Generate emergence scorecard at simulation completion."""
         try:

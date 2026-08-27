@@ -1,4 +1,4 @@
-FROM python:3.11-slim AS production
+FROM python:3.11-slim-bookworm AS production
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -21,10 +21,9 @@ RUN apt-get update && \
 
 # Install Python dependencies
 COPY pyproject.toml ./
-RUN pip install --upgrade pip && pip install .
-
-# Copy source
+COPY README.md ./
 COPY backend/ ./backend/
+RUN pip install --upgrade pip && pip install "."
 
 # Non-root user
 RUN adduser --disabled-password --gecos "" morai && \

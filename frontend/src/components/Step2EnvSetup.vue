@@ -1,11 +1,14 @@
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
-import { createSimulation, suggestConfig } from '../api/simulation.js'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { createSimulation, runSimulationPreflight, suggestConfig } from '../api/simulation.js'
 import PresetSelector from './PresetSelector.vue'
 
 const props = defineProps({
   session: { type: Object, required: true },
 })
+const emit = defineEmits(['simulation-created', 'update:session'])
+const { t } = useI18n()
 
 // Domain pack state — loaded when domainPackId is not 'hk_city'
 const packDetails = ref(null)
@@ -25,8 +28,6 @@ async function loadPackDetails(packId) {
   }
 }
 
-const emit = defineEmits(['simulation-created', 'update:session'])
-
 onMounted(async () => {
   // Express mode: if session already exists, emit immediately
   if (props.session.sessionId) {
@@ -35,6 +36,7 @@ onMounted(async () => {
   }
   // Normal mode: load pack details
   await loadPackDetails(props.session.domainPackId)
+  await runPreflight()
 })
 watch(() => props.session.domainPackId, (id) => loadPackDetails(id))
 
@@ -65,6 +67,11 @@ const config = reactive({
 const submitting = ref(false)
 const error = ref(null)
 const mode = ref('beginner')
+const preflight = ref(null)
+const preflightLoading = ref(false)
+const preflightError = ref('')
+let preflightTimer = null
+let preflightSeq = 0
 
 const showAiAssistant = ref(false)
 const aiQuery = ref('')
@@ -83,6 +90,7 @@ function onPresetChange(preset) {
   presetConfig.value = { ...preset }
   config.agentCount = preset.agents
   config.roundCount = preset.rounds
+  schedulePreflight()
 }
 
 const newShock = reactive({
@@ -98,10 +106,12 @@ const macroOptions = [
   { value: 'custom', label: '自訂情景', desc: '自定義宏觀參數' },
 ]
 
-const platformOptions = [
-  { value: 'facebook', label: 'Facebook / 面書' },
-  { value: 'instagram', label: 'Instagram / IG' },
-]
+const platformOptions = computed(() => [
+  { value: 'twitter', label: 'Twitter / X' },
+  { value: 'reddit', label: 'Reddit / Forum' },
+  { value: 'facebook', label: 'Facebook / 面書', badge: t('step2.badges.experimental') },
+  { value: 'instagram', label: 'Instagram / IG', badge: t('step2.badges.experimental') },
+])
 
 function togglePlatform(platform) {
   const idx = config.platforms.indexOf(platform)
@@ -110,6 +120,7 @@ function togglePlatform(platform) {
   } else {
     config.platforms = [...config.platforms, platform]
   }
+  schedulePreflight()
 }
 
 function addShock() {
@@ -157,13 +168,100 @@ function applyAiSuggestion() {
   showAiAssistant.value = false
   aiSuggestion.value = null
   aiQuery.value = ''
+  schedulePreflight()
 }
+
+const preflightBlocking = computed(() => preflight.value?.blocking_errors || [])
+const preflightWarnings = computed(() => preflight.value?.warnings || [])
+const preflightReady = computed(() => preflight.value?.ready === true)
+const preflightCost = computed(() => preflight.value?.cost_estimate?.estimated_cost_usd)
+const timeScaleLabel = computed(() => {
+  const tc = preflight.value?.time_config
+  if (!tc) return '--'
+  const unit = tc.round_label_unit || 'day'
+  return `${tc.minutes_per_round} min / round · ${unit}`
+})
+const readinessLabel = computed(() => {
+  if (preflightLoading.value) return 'CHECKING'
+  if (preflightReady.value) return 'READY'
+  if (preflightBlocking.value.length) return 'BLOCKED'
+  if (preflightError.value) return 'UNKNOWN'
+  return 'PENDING'
+})
+
+function buildPreflightPayload() {
+  return {
+    graph_id: props.session.graphId,
+    seed_text: props.session.seedText || '',
+    scenario_type: props.session.scenarioType,
+    domain_pack_id: props.session.domainPackId || 'hk_city',
+    agent_count: config.agentCount,
+    round_count: config.roundCount,
+    macro_scenario_id: config.macroScenario,
+    platforms: Object.fromEntries(config.platforms.map((p) => [p, true])),
+    shocks: config.shocks.map((s) => ({
+      round_number: s.round,
+      shock_type: 'manual',
+      description: s.description,
+      post_content: s.description,
+    })),
+  }
+}
+
+async function runPreflight() {
+  if (!props.session.graphId) return null
+  const seq = ++preflightSeq
+  preflightLoading.value = true
+  preflightError.value = ''
+  try {
+    const res = await runSimulationPreflight(buildPreflightPayload())
+    if (seq !== preflightSeq) return null
+    preflight.value = res.data?.data || res.data
+    emit('update:session', {
+      ...props.session,
+      preflight: preflight.value,
+      timeConfig: preflight.value?.time_config,
+    })
+    return preflight.value
+  } catch (err) {
+    if (seq !== preflightSeq) return null
+    preflightError.value = err.response?.data?.detail || err.message || 'Preflight failed'
+    return null
+  } finally {
+    if (seq === preflightSeq) preflightLoading.value = false
+  }
+}
+
+function schedulePreflight() {
+  if (preflightTimer) clearTimeout(preflightTimer)
+  preflightTimer = setTimeout(() => {
+    preflightTimer = null
+    runPreflight()
+  }, 450)
+}
+
+watch(
+  () => [config.agentCount, config.roundCount, config.macroScenario, config.shocks.length],
+  () => schedulePreflight(),
+)
+
+onUnmounted(() => {
+  if (preflightTimer) {
+    clearTimeout(preflightTimer)
+    preflightTimer = null
+  }
+})
 
 async function startSimulation() {
   submitting.value = true
   error.value = null
 
   try {
+    const readiness = await runPreflight()
+    if (readiness && readiness.ready === false) {
+      error.value = readiness.blocking_errors?.[0]?.message || 'Preflight blocked this simulation'
+      return
+    }
     const res = await createSimulation({
       graph_id: props.session.graphId,
       scenario_type: props.session.scenarioType,
@@ -180,7 +278,12 @@ async function startSimulation() {
       })),
     })
 
-    emit('update:session', { ...props.session, config: { ...props.session?.config, ...config } })
+    emit('update:session', {
+      ...props.session,
+      config: { ...props.session?.config, ...config },
+      preflight: preflight.value,
+      timeConfig: preflight.value?.time_config,
+    })
 
     const sessionId = res.data?.data?.session_id || res.data?.session_id
     emit('simulation-created', {
@@ -216,7 +319,7 @@ async function startSimulation() {
       <div v-if="showAiAssistant" class="ai-panel">
         <div class="ai-panel-header">
           <span>AI 配置助手</span>
-          <button class="close-ai" @click="showAiAssistant = false">✕</button>
+          <button class="close-ai" type="button" aria-label="關閉 AI 建議" @click="showAiAssistant = false">✕</button>
         </div>
         <textarea
           v-model="aiQuery"
@@ -266,6 +369,39 @@ async function startSimulation() {
           </button>
         </div>
       </div>
+
+    <div class="preflight-panel" :class="{ ready: preflightReady, blocked: preflightBlocking.length }">
+      <div class="preflight-header">
+        <span class="preflight-title">SIMULATION PREFLIGHT</span>
+        <span class="preflight-status">{{ readinessLabel }}</span>
+      </div>
+      <div class="preflight-metrics">
+        <div class="preflight-metric">
+          <span>TIME SCALE</span>
+          <strong>{{ timeScaleLabel }}</strong>
+        </div>
+        <div class="preflight-metric">
+          <span>EST. COST</span>
+          <strong>{{ preflightCost != null ? `$${Number(preflightCost).toFixed(4)}` : '--' }}</strong>
+        </div>
+        <div class="preflight-metric">
+          <span>MODEL</span>
+          <strong>{{ preflight?.model_check?.model || '--' }}</strong>
+        </div>
+      </div>
+      <p v-if="preflightError" class="preflight-error">{{ preflightError }}</p>
+      <div v-if="preflightBlocking.length" class="preflight-issues">
+        <div v-for="issue in preflightBlocking" :key="issue.code" class="preflight-issue">
+          <strong>{{ issue.code }}</strong>
+          <span>{{ issue.message }}</span>
+        </div>
+      </div>
+      <div v-else-if="preflightWarnings.length" class="preflight-warnings">
+        <span v-for="issue in preflightWarnings.slice(0, 2)" :key="issue.code">
+          {{ issue.message }}
+        </span>
+      </div>
+    </div>
 
     <!-- Preset selector (primary configuration method) -->
     <div class="config-card preset-card-wrapper">
@@ -348,7 +484,8 @@ async function startSimulation() {
             :class="{ active: config.platforms.includes(p.value) }"
             @click="togglePlatform(p.value)"
           >
-            {{ p.label }}
+            <span>{{ p.label }}</span>
+            <span v-if="p.badge" class="platform-badge">{{ p.badge }}</span>
           </button>
         </div>
       </div>
@@ -408,10 +545,10 @@ async function startSimulation() {
     <div class="action-bar">
       <button
         class="start-btn"
-        :disabled="submitting"
+        :disabled="submitting || preflightLoading || preflightBlocking.length > 0 || !!preflightError"
         @click="startSimulation"
       >
-        {{ submitting ? '建立中...' : '開始模擬' }}
+        {{ submitting ? t('step2.actions.creating') : preflightLoading ? 'CHECKING...' : t('step2.actions.start') }}
       </button>
     </div>
   </div>
@@ -419,7 +556,7 @@ async function startSimulation() {
 
 <style scoped>
 .step2 {
-  padding: 8px 0;
+  padding: 0;
 }
 
 .preset-card-wrapper {
@@ -435,14 +572,114 @@ async function startSimulation() {
 
 .config-card {
   background: var(--bg-card);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 24px;
+  padding: 20px;
+  box-shadow: var(--shadow-card);
+}
+
+.preflight-panel {
+  margin-bottom: 16px;
+  padding: 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.preflight-panel.ready {
+  border-color: rgba(4, 120, 87, 0.42);
+}
+
+.preflight-panel.blocked {
+  border-color: rgba(220, 38, 38, 0.5);
+}
+
+.preflight-header,
+.preflight-metrics {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.preflight-header {
+  margin-bottom: 10px;
+}
+
+.preflight-title,
+.preflight-status,
+.preflight-metric span,
+.preflight-issue strong {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.preflight-status {
+  padding: 3px 8px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-xs);
+  color: var(--text-primary);
+}
+
+.preflight-metric {
+  flex: 1;
+  min-width: 0;
+  padding: 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.preflight-metric span {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--text-muted);
+}
+
+.preflight-metric strong {
+  display: block;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preflight-error,
+.preflight-issue {
+  margin-top: 10px;
+  color: var(--accent-red);
+  font-size: 13px;
+}
+
+.preflight-issues,
+.preflight-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.preflight-issue {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.preflight-warnings span {
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .card-heading {
-  font-size: 16px;
-  font-weight: 600;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   margin-bottom: 16px;
   color: var(--text-primary);
 }
@@ -459,12 +696,12 @@ async function startSimulation() {
 }
 
 .field-label strong {
-  color: var(--accent-blue);
+  color: var(--accent);
 }
 
 .range-input {
   width: 100%;
-  accent-color: var(--accent-blue);
+  accent-color: var(--accent);
 }
 
 .range-labels {
@@ -486,15 +723,15 @@ async function startSimulation() {
   align-items: center;
   padding: 10px 14px;
   background: var(--bg-input);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: var(--transition);
 }
 
 .macro-option.selected {
-  border-color: var(--accent-blue);
-  background: var(--accent-blue-light);
+  border-color: var(--accent);
+  background: var(--accent-subtle);
 }
 
 .radio-hidden {
@@ -526,17 +763,33 @@ async function startSimulation() {
   flex: 1;
   padding: 12px;
   background: var(--bg-input);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   color: var(--text-secondary);
   font-size: 14px;
   transition: var(--transition);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 46px;
 }
 
 .platform-btn.active {
-  border-color: var(--accent-green);
-  color: var(--accent-green);
-  background: rgba(5, 150, 105, 0.08);
+  border-color: var(--accent-success);
+  color: var(--accent-success);
+  background: rgba(4, 120, 87, 0.08);
+}
+
+.platform-badge {
+  padding: 2px 6px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.2;
+  text-transform: uppercase;
+  opacity: 0.78;
 }
 
 .shock-type-chips {
@@ -555,18 +808,18 @@ async function startSimulation() {
 
 .shock-chip {
   padding: 4px 10px;
-  background: rgba(78, 204, 163, 0.08);
-  border: 1px solid rgba(78, 204, 163, 0.3);
-  border-radius: 9999px;
-  color: #4ecca3;
+  background: rgba(4, 120, 87, 0.08);
+  border: 1px solid rgba(4, 120, 87, 0.24);
+  border-radius: var(--radius-sm);
+  color: var(--accent-success);
   font-size: 12px;
   cursor: pointer;
   transition: var(--transition);
 }
 
 .shock-chip:hover {
-  background: rgba(78, 204, 163, 0.18);
-  border-color: #4ecca3;
+  background: rgba(4, 120, 87, 0.14);
+  border-color: var(--accent-success);
 }
 
 .shock-list {
@@ -627,7 +880,7 @@ async function startSimulation() {
   width: 72px;
   padding: 8px;
   background: var(--bg-input);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-primary);
   font-size: 13px;
@@ -638,7 +891,7 @@ async function startSimulation() {
   flex: 1;
   padding: 8px 12px;
   background: var(--bg-input);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-primary);
   font-size: 13px;
@@ -647,7 +900,7 @@ async function startSimulation() {
 .shock-add-btn {
   padding: 8px 14px;
   background: var(--accent-orange);
-  color: #0d1117;
+  color: #FFFFFF;
   border: none;
   border-radius: var(--radius-sm);
   font-size: 16px;
@@ -673,18 +926,21 @@ async function startSimulation() {
 
 .start-btn {
   padding: 14px 48px;
-  background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
-  color: #0d1117;
-  border: none;
-  border-radius: var(--radius-md);
-  font-size: 16px;
-  font-weight: 700;
+  background: var(--text-primary);
+  color: #FFFFFF;
+  border: 1px solid var(--text-primary);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   transition: var(--transition);
 }
 
 .start-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-md);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .start-btn:disabled {
@@ -697,22 +953,26 @@ async function startSimulation() {
   margin: 8px 0 16px;
   padding: 8px 16px;
   background: transparent;
-  border: 1px solid var(--accent-blue);
-  border-radius: var(--radius-md);
-  color: var(--accent-blue);
-  font-size: 13px;
+  border: 1px solid var(--text-primary);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
   cursor: pointer;
   transition: var(--transition);
   width: 100%;
 }
 
 .ai-assist-btn:hover {
-  background: var(--accent-blue-light);
+  background: var(--text-primary);
+  color: #FFFFFF;
 }
 
 .ai-panel {
-  background: var(--bg-primary);
-  border: 1px solid var(--accent-blue);
+  background: var(--bg-card);
+  border: 1px solid var(--text-primary);
   border-radius: var(--radius-lg);
   padding: 16px;
   margin-bottom: 16px;
@@ -723,9 +983,11 @@ async function startSimulation() {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 12px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--accent-blue);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text-primary);
+  text-transform: uppercase;
 }
 
 .close-ai {
@@ -740,8 +1002,8 @@ async function startSimulation() {
   width: 100%;
   padding: 10px;
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   color: var(--text-primary);
   font-size: 13px;
   resize: vertical;
@@ -752,12 +1014,13 @@ async function startSimulation() {
 .ai-suggest-btn {
   width: 100%;
   padding: 9px;
-  background: var(--accent-blue);
-  border: none;
-  border-radius: var(--radius-md);
-  color: #0d1117;
-  font-size: 13px;
-  font-weight: 600;
+  background: var(--text-primary);
+  border: 1px solid var(--text-primary);
+  border-radius: var(--radius-sm);
+  color: #FFFFFF;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
   cursor: pointer;
   transition: var(--transition);
 }
@@ -777,7 +1040,8 @@ async function startSimulation() {
   margin-top: 12px;
   padding: 12px;
   background: var(--bg-secondary);
-  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
 }
 
 .ai-result-row {
@@ -815,27 +1079,29 @@ async function startSimulation() {
   width: 100%;
   margin-top: 12px;
   padding: 9px;
-  background: var(--accent-blue-light);
-  border: 1px solid var(--accent-blue);
-  border-radius: var(--radius-md);
-  color: var(--accent-blue);
-  font-size: 13px;
-  font-weight: 600;
+  background: var(--accent-subtle);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
   cursor: pointer;
   transition: var(--transition);
 }
 
 .apply-btn:hover {
-  background: var(--accent-blue);
-  color: #0d1117;
+  background: var(--accent);
+  color: #FFFFFF;
 }
 
 .mode-toggle {
   display: flex;
   gap: 4px;
   padding: 3px;
-  background: var(--bg-secondary);
-  border-radius: 9999px;
+  background: var(--bg-graph);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   margin-bottom: 16px;
   width: fit-content;
 }
@@ -843,16 +1109,35 @@ async function startSimulation() {
 .mode-btn {
   padding: 6px 16px;
   border: none;
-  border-radius: 9999px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
   cursor: pointer;
   transition: var(--transition);
 }
 
 .mode-btn.active {
-  background: var(--accent-blue);
+  background: var(--text-primary);
   color: #FFFFFF;
+}
+
+@media (max-width: 900px) {
+  .config-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .preflight-metrics {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .platform-toggles,
+  .shock-form {
+    flex-wrap: wrap;
+  }
 }
 </style>

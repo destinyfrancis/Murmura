@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for MurmuraScope test suite."""
+"""Shared pytest fixtures for Murmura test suite."""
 
 from __future__ import annotations
 
@@ -21,6 +21,8 @@ if str(_PROJECT_ROOT) not in sys.path:
 # the production startup guard (SystemExit) does not fire during tests.
 if not os.environ.get("AUTH_SECRET_KEY"):
     os.environ["AUTH_SECRET_KEY"] = "test-secret-key-for-pytest-do-not-use-in-production"
+if not os.environ.get("DATA_ENCRYPTION_KEY"):
+    os.environ["DATA_ENCRYPTION_KEY"] = "gkNGJWxQNDWqiEgajKGn1cDrE9B_xIlLyvD9d5KOOmU="
 
 
 # ---------------------------------------------------------------------------
@@ -28,7 +30,7 @@ if not os.environ.get("AUTH_SECRET_KEY"):
 # belong to known integration/slow test modules.
 # ---------------------------------------------------------------------------
 
-_DB_FIXTURES = frozenset({"test_db", "test_db_path", "test_client"})
+_DB_FIXTURES = frozenset({"test_db", "test_db_path", "test_client", "rate_limited_client"})
 
 # Modules that do inline DB setup (not via shared fixtures)
 _INTEGRATION_MODULES = frozenset(
@@ -43,17 +45,6 @@ _INTEGRATION_MODULES = frozenset(
         "test_pipeline_verification",
     }
 )
-
-
-@pytest.fixture(autouse=True)
-def _disable_rate_limiter():
-    """Globally disable slowapi rate limiter for all tests."""
-    from backend.app.api.auth import _limiter as _auth_limiter
-
-    prev = _auth_limiter.enabled
-    _auth_limiter.enabled = False
-    yield
-    _auth_limiter.enabled = prev
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
@@ -102,6 +93,17 @@ async def test_db(test_db_path) -> AsyncIterator[aiosqlite.Connection]:
 # ---------------------------------------------------------------------------
 
 
+def _reset_rate_limiter_state(limiter) -> None:
+    """Clear in-memory slowapi counters between tests when supported."""
+    for target in (limiter, getattr(limiter, "_storage", None), getattr(limiter, "storage", None)):
+        reset = getattr(target, "reset", None)
+        if callable(reset):
+            try:
+                reset()
+            except Exception:
+                pass
+
+
 @pytest_asyncio.fixture()
 async def test_client(tmp_path):
     """Provide an async HTTPX test client bound to the FastAPI app.
@@ -114,10 +116,11 @@ async def test_client(tmp_path):
 
     test_db_file = str(tmp_path / "test_api.db")
 
-    # Disable rate limiting for this test to prevent in-memory counter
-    # accumulation across test invocations sharing the same _limiter instance.
+    # Most API tests are not asserting limiter behavior; keep counters off
+    # there and use rate_limited_client for explicit 429 coverage.
     from backend.app.api.auth import _limiter as _auth_limiter
 
+    _reset_rate_limiter_state(_auth_limiter)
     _auth_limiter.enabled = False
     try:
         with patch.dict(os.environ, {"DATABASE_PATH": test_db_file, "DEBUG": "false"}):
@@ -136,7 +139,7 @@ async def test_client(tmp_path):
                 from backend.app import create_app
 
                 app = create_app()
-                transport = ASGITransport(app=app)
+                transport = ASGITransport(app=app, client=("testclient.local", 123))
 
                 async with AsyncClient(
                     transport=transport,
@@ -144,6 +147,41 @@ async def test_client(tmp_path):
                 ) as client:
                     yield client
     finally:
+        _reset_rate_limiter_state(_auth_limiter)
+        _auth_limiter.enabled = True
+
+
+@pytest_asyncio.fixture()
+async def rate_limited_client(tmp_path):
+    """Async HTTPX client with slowapi enabled for explicit limiter tests."""
+    from httpx import ASGITransport, AsyncClient
+
+    test_db_file = str(tmp_path / "test_rate_limited_api.db")
+
+    from backend.app.api.auth import _limiter as _auth_limiter
+
+    _reset_rate_limiter_state(_auth_limiter)
+    _auth_limiter.enabled = True
+    try:
+        with patch.dict(os.environ, {"DATABASE_PATH": test_db_file, "DEBUG": "false"}):
+            import backend.app.config as config_mod
+
+            fresh_settings = config_mod.Settings()
+            with patch.object(config_mod, "_settings", fresh_settings):
+                schema_path = os.path.join(os.path.dirname(__file__), "..", "database", "schema.sql")
+                async with aiosqlite.connect(test_db_file) as db:
+                    with open(schema_path, encoding="utf-8") as f:
+                        await db.executescript(f.read())
+                    await db.commit()
+
+                from backend.app import create_app
+
+                app = create_app()
+                transport = ASGITransport(app=app, client=("ratelimit.local", 123))
+                async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+                    yield client
+    finally:
+        _reset_rate_limiter_state(_auth_limiter)
         _auth_limiter.enabled = True
 
 

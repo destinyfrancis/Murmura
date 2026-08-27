@@ -103,7 +103,7 @@ onUnmounted(() => {
   <div v-if="visible" class="contagion-map">
     <div class="cm-header">
       <h3 class="cm-title">情緒傳染地圖</h3>
-      <button class="cm-close" @click="$emit('toggle')" title="關閉">✕</button>
+      <button class="cm-close" type="button" aria-label="關閉傳播圖" @click="$emit('toggle')" title="關閉">✕</button>
     </div>
 
     <div v-if="loading && !contagionData" class="state-msg">

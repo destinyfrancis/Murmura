@@ -4,9 +4,41 @@ from __future__ import annotations
 
 import json
 import uuid
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+
+from backend.app.api.auth import UserProfile
+from backend.app.utils.db import get_db
+
+
+async def _auth_headers_for_session(test_client, session_id: str | None = None) -> tuple[str, dict[str, str]]:
+    session_id = session_id or str(uuid.uuid4())
+    resp = await test_client.post(
+        "/api/auth/register",
+        json={"email": f"report-{session_id}@example.com", "password": "password123"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    async with get_db() as db:
+        await db.execute(
+            """INSERT INTO simulation_sessions
+               (id, name, sim_mode, agent_count, round_count, llm_provider, owner_id)
+               VALUES (?, ?, 'kg_driven', 1, 1, 'test', ?)""",
+            (session_id, session_id, data["user_id"]),
+        )
+        await db.commit()
+    return session_id, {"Authorization": f"Bearer {data['token']}"}
+
+
+async def _auth_headers(test_client) -> dict[str, str]:
+    resp = await test_client.post(
+        "/api/auth/register",
+        json={"email": f"report-user-{uuid.uuid4()}@example.com", "password": "password123"},
+    )
+    assert resp.status_code == 200
+    return {"Authorization": f"Bearer {resp.json()['data']['token']}"}
 
 # ======================================================================
 # Report generation
@@ -21,13 +53,15 @@ class TestReportGenerationProducesMarkdown:
         # The report endpoint calls the real LLM and inserts into reports
         # table with a FK to simulation_sessions.  We just verify the
         # endpoint is reachable and returns a well-formed error or success.
+        session_id, headers = await _auth_headers_for_session(test_client)
         response = await test_client.post(
             "/api/report/generate",
             json={
-                "session_id": str(uuid.uuid4()),
+                "session_id": session_id,
                 "report_type": "full",
                 "focus_areas": ["property_sentiment", "demographics"],
             },
+            headers=headers,
         )
 
         # Accept either 200 (LLM available) or 500 (LLM unavailable / FK)
@@ -43,8 +77,86 @@ class TestReportGenerationProducesMarkdown:
     async def test_get_report_by_id(self, test_client):
         # A non-existent report should return 404
         report_id = str(uuid.uuid4())
-        response = await test_client.get(f"/api/report/{report_id}")
+        response = await test_client.get(
+            f"/api/report/{report_id}",
+            headers=await _auth_headers(test_client),
+        )
         assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_get_report_handles_agent_log_column(self, tmp_path):
+        """GET report should not call sqlite Row.get() and should decode agent_log safely."""
+        from contextlib import asynccontextmanager
+        from unittest.mock import patch
+
+        import aiosqlite
+
+        from backend.app.api.report import get_report
+
+        db_path = tmp_path / "reports.db"
+        schema_path = Path(__file__).parent.parent / "database" / "schema.sql"
+        async with aiosqlite.connect(db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await db.executescript(schema_path.read_text(encoding="utf-8"))
+            session_id = str(uuid.uuid4())
+            await db.execute(
+                """INSERT INTO simulation_sessions
+                   (id, name, sim_mode, agent_count, round_count, llm_provider)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (session_id, "test-session", "kg_driven", 2, 3, "test"),
+            )
+            await db.execute(
+                """INSERT INTO reports
+                   (id, session_id, report_type, title, content_markdown,
+                    summary, key_findings, charts_data, agent_log)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    "r-empty",
+                    session_id,
+                    "full",
+                    "Empty Log",
+                    "content",
+                    "summary",
+                    "[]",
+                    "{}",
+                    None,
+                ),
+            )
+            await db.execute(
+                """INSERT INTO reports
+                   (id, session_id, report_type, title, content_markdown,
+                    summary, key_findings, charts_data, agent_log)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    "r-log",
+                    session_id,
+                    "full",
+                    "With Log",
+                    "content",
+                    "summary",
+                    "[]",
+                    "{}",
+                    json.dumps([{"step_type": "Thought", "content": "ok"}]),
+                ),
+            )
+            await db.commit()
+
+        @asynccontextmanager
+        async def _patched_get_db():
+            async with aiosqlite.connect(db_path) as conn:
+                conn.row_factory = aiosqlite.Row
+                yield conn
+
+        with (
+            patch("backend.app.api.report.get_db", _patched_get_db),
+            patch("backend.app.utils.ownership.get_db", _patched_get_db),
+        ):
+            user = UserProfile(id="admin", email="admin@example.com", is_admin=True)
+            empty = await get_report("r-empty", user)
+            with_log = await get_report("r-log", user)
+
+        assert empty.data["agent_log"] == []
+        assert with_log.data["agent_log"] == [{"step_type": "Thought", "content": "ok"}]
 
     @pytest.mark.asyncio
     async def test_report_stored_in_db(self, test_db):
@@ -187,12 +299,14 @@ class TestChatContinuesConversation:
 
     @pytest.mark.asyncio
     async def test_chat_returns_reply(self, test_client):
+        session_id, headers = await _auth_headers_for_session(test_client)
         response = await test_client.post(
             "/api/report/chat",
             json={
-                "session_id": str(uuid.uuid4()),
+                "session_id": session_id,
                 "message": "What were the main drivers of sentiment change?",
             },
+            headers=headers,
         )
 
         assert response.status_code == 200
@@ -206,13 +320,15 @@ class TestChatContinuesConversation:
 
     @pytest.mark.asyncio
     async def test_chat_with_agent_id(self, test_client):
+        session_id, headers = await _auth_headers_for_session(test_client)
         response = await test_client.post(
             "/api/report/chat",
             json={
-                "session_id": str(uuid.uuid4()),
+                "session_id": session_id,
                 "message": "Why did you delay buying?",
                 "agent_id": 42,
             },
+            headers=headers,
         )
 
         assert response.status_code == 200
@@ -245,13 +361,15 @@ class TestAgentInterviewUsesHistory:
 
     @pytest.mark.asyncio
     async def test_interview_returns_answer(self, test_client):
+        session_id, headers = await _auth_headers_for_session(test_client)
         response = await test_client.post(
             "/api/report/interview",
             json={
-                "session_id": str(uuid.uuid4()),
+                "session_id": session_id,
                 "agent_id": 7,
                 "question": "Why did you decide to emigrate?",
             },
+            headers=headers,
         )
 
         assert response.status_code == 200
@@ -267,13 +385,15 @@ class TestAgentInterviewUsesHistory:
     @pytest.mark.asyncio
     async def test_interview_references_agent(self, test_client):
         agent_id = 15
+        session_id, headers = await _auth_headers_for_session(test_client)
         response = await test_client.post(
             "/api/report/interview",
             json={
-                "session_id": str(uuid.uuid4()),
+                "session_id": session_id,
                 "agent_id": agent_id,
                 "question": "What is your monthly income?",
             },
+            headers=headers,
         )
 
         data = response.json()

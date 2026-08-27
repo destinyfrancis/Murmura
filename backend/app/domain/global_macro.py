@@ -1,4 +1,4 @@
-"""Global Macro DomainPack for MurmuraScope.
+"""Global Macro DomainPack for Murmura.
 
 Covers multi-national macro indicators, commodity shocks, and central bank
 divergence scenarios. Designed for global investor and analyst personas.

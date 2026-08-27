@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# MurmuraScope — Quick Start Wizard
+# Murmura — Quick Start Wizard
 # Usage: bash scripts/quickstart.sh  OR  make quickstart
 # =============================================================================
 set -euo pipefail
@@ -21,7 +21,7 @@ cd "${PROJECT_ROOT}"
 
 echo -e "${BOLD}"
 echo "  ╔══════════════════════════════════════════╗"
-echo "  ║     MurmuraScope  —  Quick Start         ║"
+echo "  ║     Murmura  —  Quick Start         ║"
 echo "  ╚══════════════════════════════════════════╝"
 echo -e "${RESET}"
 
@@ -42,7 +42,7 @@ PY_MAJOR=$(echo "$PY_VER" | cut -d. -f1)
 PY_MINOR=$(echo "$PY_VER" | cut -d. -f2)
 
 if [ "$PY_MAJOR" -ne 3 ] || [ "$PY_MINOR" -lt 10 ] || [ "$PY_MINOR" -gt 11 ]; then
-    err "Python ${PY_VER} detected. MurmuraScope requires Python 3.10 or 3.11."
+    err "Python ${PY_VER} detected. Murmura requires Python 3.10 or 3.11."
     echo "    OASIS (the simulation engine) does not support Python 3.12+."
     echo "    → https://www.python.org/downloads/release/python-31115/"
     exit 1
@@ -91,6 +91,20 @@ if grep -q "^AUTH_SECRET_KEY=your-secret-key-here" .env 2>/dev/null; then
     fi
 fi
 
+# Generate DATA_ENCRYPTION_KEY if missing or still placeholder
+if ! grep -q "^DATA_ENCRYPTION_KEY=" .env 2>/dev/null || grep -q "^DATA_ENCRYPTION_KEY=your-32-byte-base64url-key" .env 2>/dev/null; then
+    DATA_KEY=$(python3 -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())")
+    tmp=$(mktemp)
+    if grep -q "^DATA_ENCRYPTION_KEY=" .env 2>/dev/null; then
+        sed "s|^DATA_ENCRYPTION_KEY=.*|DATA_ENCRYPTION_KEY=${DATA_KEY}|" .env > "$tmp"
+    else
+        cp .env "$tmp"
+        printf "\nDATA_ENCRYPTION_KEY=%s\n" "$DATA_KEY" >> "$tmp"
+    fi
+    mv "$tmp" .env
+    ok "Generated DATA_ENCRYPTION_KEY (for encrypted settings)"
+fi
+
 # Enable DEBUG mode for local dev (safe default; server won't reject missing key)
 if grep -q "^DEBUG=false" .env 2>/dev/null; then
     tmp=$(mktemp)
@@ -103,7 +117,7 @@ fi
 CURRENT_KEY=$(grep "^OPENROUTER_API_KEY=" .env 2>/dev/null | cut -d= -f2- || echo "")
 if [ -z "$CURRENT_KEY" ] || [ "$CURRENT_KEY" = "sk-or-your-openrouter-key" ]; then
     echo ""
-    echo -e "  ${BOLD}MurmuraScope needs an OpenRouter API key to run simulations.${RESET}"
+    echo -e "  ${BOLD}Murmura needs an OpenRouter API key to run simulations.${RESET}"
     echo "  Get one free at: https://openrouter.ai/keys"
     echo ""
     read -r -p "  Paste your OPENROUTER_API_KEY (or press Enter to skip for now): " USER_KEY
@@ -126,9 +140,28 @@ hdr "Step 3/4 — Installing dependencies"
 
 # ── Python venv ───────────────────────────────────────────────────────────────
 VENV_DIR="${PROJECT_ROOT}/.venv311"
+find_oasis_python() {
+    for candidate in python3.11 python3.10 python3; do
+        if command -v "$candidate" >/dev/null 2>&1; then
+            if "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] in ((3, 10), (3, 11)) else 1)' >/dev/null 2>&1; then
+                command -v "$candidate"
+                return 0
+            fi
+        fi
+    done
+    return 1
+}
+
+PYTHON_BIN="$(find_oasis_python || true)"
+if [ -z "$PYTHON_BIN" ]; then
+    echo -e "${RED}No compatible Python found. Murmura simulations require Python 3.10 or 3.11.${RESET}"
+    echo "Install python3.11 or python3.10, then rerun make quickstart."
+    exit 1
+fi
+
 if [ ! -d "$VENV_DIR" ]; then
-    echo "  Creating Python virtual environment (.venv311)..."
-    python3 -m venv "$VENV_DIR"
+    echo "  Creating Python virtual environment (.venv311) with $PYTHON_BIN..."
+    "$PYTHON_BIN" -m venv "$VENV_DIR"
     ok "Created .venv311"
 else
     ok ".venv311 already exists"
@@ -137,9 +170,15 @@ fi
 VENV_PIP="${VENV_DIR}/bin/pip"
 VENV_PYTHON="${VENV_DIR}/bin/python"
 
+if ! "$VENV_PYTHON" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] in ((3, 10), (3, 11)) else 1)' >/dev/null 2>&1; then
+    echo -e "${RED}.venv311 is not using Python 3.10/3.11.${RESET}"
+    echo "Remove .venv311 and rerun make quickstart after installing python3.11 or python3.10."
+    exit 1
+fi
+
 echo "  Installing Python packages (this may take 2–3 min on first run)..."
 "$VENV_PIP" install --quiet --upgrade pip
-"$VENV_PIP" install --quiet -e ".[dev]"
+"$VENV_PIP" install --quiet -e ".[dev,simulation]"
 ok "Python dependencies installed"
 
 # ── Frontend npm ──────────────────────────────────────────────────────────────
@@ -162,14 +201,13 @@ ok "data/ and logs/ directories ready"
 # =============================================================================
 # STEP 4 — Launch
 # =============================================================================
-hdr "Step 4/4 — Starting MurmuraScope"
+hdr "Step 4/4 — Starting Murmura"
 
-UVICORN="${VENV_DIR}/bin/uvicorn"
 mkdir -p "${PROJECT_ROOT}/logs"
 
 # ── Start backend in background ───────────────────────────────────────────────
 echo "  Starting backend..."
-"$UVICORN" backend.app:create_app --factory --reload --port 5001 \
+"$VENV_PYTHON" -m uvicorn backend.app:create_app --factory --reload --port 5001 \
     > "${PROJECT_ROOT}/logs/backend.log" 2>&1 &
 BACKEND_PID=$!
 
@@ -216,7 +254,7 @@ fi
 
 echo ""
 echo -e "  ${BOLD}╔══════════════════════════════════════════╗${RESET}"
-echo -e "  ${BOLD}║     MurmuraScope is running!             ║${RESET}"
+echo -e "  ${BOLD}║     Murmura is running!             ║${RESET}"
 echo -e "  ${BOLD}║                                          ║${RESET}"
 echo -e "  ${BOLD}║  Frontend : http://localhost:5173        ║${RESET}"
 echo -e "  ${BOLD}║  Backend  : http://localhost:5001        ║${RESET}"
@@ -230,7 +268,7 @@ echo ""
 # ── Graceful shutdown on Ctrl+C ───────────────────────────────────────────────
 cleanup() {
     echo ""
-    echo -e "${YELLOW}  Shutting down MurmuraScope...${RESET}"
+    echo -e "${YELLOW}  Shutting down Murmura...${RESET}"
     kill "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null || true
     pkill -f "run_(twitter|parallel|facebook|instagram|reddit)_simulation.py" 2>/dev/null || true
     pkill -f "uvicorn.*5001" 2>/dev/null || true

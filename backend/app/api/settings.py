@@ -4,6 +4,7 @@ Architecture:
   GET  /api/settings         — 返回所有設定（API keys masked）
   PUT  /api/settings         — 更新設定，寫 DB + 更新 RuntimeSettingsStore
   POST /api/settings/test-key — 測試 API key 有效性
+  POST /api/settings/models   — 讀取供應商目前可用模型清單
 
 API keys 的優先級：
   RuntimeSettingsStore (DB) > .env
@@ -12,15 +13,17 @@ API keys 的優先級：
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Annotated, Any
 
 import httpx
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, ConfigDict
 
-from backend.app.services.runtime_settings import get_all, get_override, set_override
+from backend.app.api.auth import UserProfile, require_admin
+from backend.app.services.runtime_settings import get_override, set_override
 from backend.app.utils.db import get_db
 from backend.app.utils.logger import get_logger
+from backend.app.utils.secret_settings import encrypt_setting_value
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 logger = get_logger("api.settings")
@@ -75,6 +78,31 @@ _SETTINGS_KEY_MAP: dict[str, str] = {
     "external_feed_enabled": "data_external_feed_enabled",
     "feed_refresh_interval": "data_feed_refresh_interval",
 }
+_SETTINGS_KEY_MAP.update(
+    {
+        # Canonical RuntimeSettings keys accepted for external callers and
+        # scripts that bypass the frontend's shorter field names.
+        key: key
+        for key in (
+            "agent_llm_provider",
+            "agent_llm_model",
+            "agent_llm_model_lite",
+            "llm_provider",
+            "report_llm_model",
+            "step1_llm_provider",
+            "step1_llm_model",
+            "step2_llm_provider",
+            "step2_llm_model",
+            "step3_llm_provider",
+            "step3_llm_model",
+            "step3_llm_model_lite",
+            "step4_llm_provider",
+            "step4_llm_model",
+            "step5_llm_provider",
+            "step5_llm_model",
+        )
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +211,8 @@ class SettingsUpdateRequest(BaseModel):
     Any subset of keys may be provided; unspecified keys are untouched.
     """
 
+    model_config = ConfigDict(extra="allow")
+
     # LLM config — global fallbacks
     agent_provider: str | None = None
     agent_model: str | None = None
@@ -228,6 +258,12 @@ class TestKeyRequest(BaseModel):
     model: str | None = None    # When set, send a 1-token request to verify model availability
 
 
+class ProviderModelsRequest(BaseModel):
+    provider: str
+    api_key: str | None = None  # None = use stored key
+    account_id: str | None = None  # Fireworks only; defaults to public "fireworks" account
+
+
 # ---------------------------------------------------------------------------
 # DB helpers
 # ---------------------------------------------------------------------------
@@ -235,6 +271,7 @@ class TestKeyRequest(BaseModel):
 
 async def _persist_to_db(key: str, value: str) -> None:
     """Upsert a single setting into app_settings."""
+    stored_value = encrypt_setting_value(key, value)
     async with get_db() as db:
         await db.execute(
             """INSERT INTO app_settings (key, value, updated_at)
@@ -242,21 +279,22 @@ async def _persist_to_db(key: str, value: str) -> None:
                ON CONFLICT(key) DO UPDATE SET
                    value = excluded.value,
                    updated_at = excluded.updated_at""",
-            (key, value),
+            (key, stored_value),
         )
         await db.commit()
 
 
-async def _apply_update(field: str, value: Any) -> None:
+async def _apply_update(field: str, value: Any) -> bool:
     """Map a request field → store key, persist to DB and update in-memory store."""
     store_key = _SETTINGS_KEY_MAP.get(field)
     if store_key is None:
         logger.warning("No store key mapping for field '%s'; skipping", field)
-        return
+        return False
     str_value = str(value) if not isinstance(value, bool) else ("true" if value else "false")
-    set_override(store_key, str_value)
     await _persist_to_db(store_key, str_value)
+    set_override(store_key, str_value)
     logger.info("Settings: updated %s → %s", store_key, "***" if "key" in store_key else str_value)
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -265,29 +303,40 @@ async def _apply_update(field: str, value: Any) -> None:
 
 
 @router.get("")
-async def get_settings() -> dict[str, Any]:
+async def get_settings(_user: Annotated[UserProfile, Depends(require_admin)]) -> dict[str, Any]:
     """Return all current settings with API keys masked."""
     return _build_settings_response(mask_keys=True)
 
 
 @router.put("")
-async def update_settings(req: SettingsUpdateRequest) -> dict[str, Any]:
+async def update_settings(
+    req: SettingsUpdateRequest,
+    _user: Annotated[UserProfile, Depends(require_admin)],
+) -> dict[str, Any]:
     """Update one or more settings.  Writes to DB + RuntimeSettingsStore immediately."""
     updated: list[str] = []
 
     # Iterate over set fields only
-    for field, value in req.model_dump(exclude_none=True).items():
-        await _apply_update(field, value)
-        updated.append(field)
+    update_fields = req.model_dump(exclude_none=True)
+    for field, value in (req.model_extra or {}).items():
+        if value is not None:
+            update_fields[field] = value
+
+    for field, value in update_fields.items():
+        if await _apply_update(field, value):
+            updated.append(field)
 
     logger.info("Settings updated: %s", updated)
     return {"success": True, "updated": updated, "settings": _build_settings_response(mask_keys=True)}
 
 
 @router.post("/test-key")
-async def test_api_key(req: TestKeyRequest) -> dict[str, Any]:
+async def test_api_key(
+    req: TestKeyRequest,
+    _user: Annotated[UserProfile, Depends(require_admin)],
+) -> dict[str, Any]:
     """Test whether an API key (and optionally a specific model) is valid."""
-    provider = req.provider.lower()
+    provider = req.provider.strip().lower()
     # Resolve key: use request value, fall back to stored key
     api_key = (req.api_key or "").strip() or _get_env_key(provider)
 
@@ -307,15 +356,62 @@ async def test_api_key(req: TestKeyRequest) -> dict[str, Any]:
 
         return {"success": True, "provider": provider, "message": result["message"]}
     except Exception as exc:
-        logger.warning("test-key failed for %s: %s", provider, exc)
-        return {"success": False, "provider": provider, "message": str(exc)}
+        logger.warning("test-key failed for provider=%s", provider)
+        return {"success": False, "provider": provider, "message": "Unable to validate API key"}
+
+
+@router.post("/models")
+async def list_provider_models(
+    req: ProviderModelsRequest,
+    _user: Annotated[UserProfile, Depends(require_admin)],
+) -> dict[str, Any]:
+    """Return a normalized model list for providers that expose catalog APIs."""
+    provider = req.provider.strip().lower()
+    api_key = (req.api_key or "").strip() or _get_env_key(provider)
+
+    if provider not in {"openrouter", "fireworks"}:
+        return {
+            "success": False,
+            "provider": provider,
+            "models": [],
+            "message": f"Provider '{provider}' does not support model discovery yet",
+        }
+    if not api_key:
+        raise HTTPException(status_code=400, detail="api_key is required and no stored key found")
+
+    try:
+        if provider == "openrouter":
+            models = await _fetch_openrouter_models(api_key)
+        else:
+            models = await _fetch_fireworks_models(api_key, req.account_id or "fireworks")
+        return {
+            "success": True,
+            "provider": provider,
+            "models": models,
+            "message": f"Loaded {len(models)} models from {provider}",
+        }
+    except Exception:  # noqa: BLE001
+        logger.warning("model discovery failed for provider=%s", provider)
+        return {
+            "success": False,
+            "provider": provider,
+            "models": [],
+            "message": f"Unable to load model list from {provider}",
+        }
 
 
 async def _test_provider_model(provider: str, api_key: str, model: str) -> dict[str, Any]:
     """Send a minimal 1-token LLM request to verify a specific model is accessible."""
+    model = model.strip()
+    if not model:
+        return {"ok": False, "message": "Model id is required"}
+    if provider == "openrouter":
+        return await _test_openrouter_model(api_key, model)
+
     try:
-        from backend.app.utils.llm_client import LLMClient  # noqa: PLC0415
-        client = LLMClient()
+        from backend.app.utils.llm_client import get_default_client  # noqa: PLC0415
+
+        client = get_default_client()
         resp = await client.chat(
             [{"role": "user", "content": "hi"}],
             provider=provider,
@@ -324,8 +420,53 @@ async def _test_provider_model(provider: str, api_key: str, model: str) -> dict[
             api_key=api_key,
         )
         return {"ok": True, "message": f"Model {model} accessible ✓ (via {provider})"}
-    except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "message": f"Model {model} error: {str(exc)[:120]}"}
+    except Exception:  # noqa: BLE001
+        return {"ok": False, "message": f"Model {model} is not accessible"}
+
+
+def _extract_provider_error(resp: httpx.Response) -> str:
+    """Return a compact provider error message without exposing request data."""
+    try:
+        payload = resp.json()
+    except Exception:
+        text = resp.text.strip()
+        return text[:160] if text else ""
+
+    error = payload.get("error")
+    if isinstance(error, dict):
+        message = error.get("message") or error.get("code") or ""
+    elif isinstance(error, str):
+        message = error
+    else:
+        message = payload.get("message", "")
+    return str(message)[:160] if message else ""
+
+
+async def _test_openrouter_model(api_key: str, model: str) -> dict[str, Any]:
+    """Verify an OpenRouter model through the official chat completions API."""
+    timeout = httpx.Timeout(20.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://murmura.local/settings",
+                "X-Title": "Murmura Settings",
+            },
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": "ping"}],
+                "max_tokens": 1,
+                "temperature": 0,
+            },
+        )
+    if resp.status_code == 200:
+        return {"ok": True, "message": f"Model {model} accessible ✓ (via OpenRouter)"}
+
+    message = _extract_provider_error(resp)
+    suffix = f": {message}" if message else ""
+    return {"ok": False, "message": f"Model {model} returned HTTP {resp.status_code}{suffix}"}
 
 
 async def _test_provider_key(provider: str, api_key: str) -> dict[str, Any]:
@@ -335,12 +476,14 @@ async def _test_provider_key(provider: str, api_key: str) -> dict[str, Any]:
     async with httpx.AsyncClient(timeout=timeout) as client:
         if provider == "openrouter":
             resp = await client.get(
-                "https://openrouter.ai/api/v1/models",
+                "https://openrouter.ai/api/v1/key",
                 headers={"Authorization": f"Bearer {api_key}"},
             )
             if resp.status_code == 200:
                 return {"ok": True, "message": "OpenRouter key valid ✓"}
-            return {"ok": False, "message": f"OpenRouter returned HTTP {resp.status_code}"}
+            message = _extract_provider_error(resp)
+            suffix = f": {message}" if message else ""
+            return {"ok": False, "message": f"OpenRouter returned HTTP {resp.status_code}{suffix}"}
 
         elif provider == "google":
             resp = await client.get(
@@ -390,6 +533,16 @@ async def _test_provider_key(provider: str, api_key: str) -> dict[str, Any]:
                 return {"ok": True, "message": "DeepSeek key valid ✓"}
             return {"ok": False, "message": f"DeepSeek returned HTTP {resp.status_code}"}
 
+        elif provider == "fireworks":
+            resp = await client.get(
+                "https://api.fireworks.ai/v1/accounts/fireworks/models",
+                params={"filter": "supports_serverless=true", "pageSize": 1},
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            if resp.status_code == 200:
+                return {"ok": True, "message": "Fireworks key valid ✓"}
+            return {"ok": False, "message": f"Fireworks returned HTTP {resp.status_code}"}
+
         elif provider in ("fred", "data"):
             resp = await client.get(
                 f"https://api.stlouisfed.org/fred/series?series_id=GNPCA&api_key={api_key}&file_type=json"
@@ -400,3 +553,78 @@ async def _test_provider_key(provider: str, api_key: str) -> dict[str, Any]:
 
         else:
             return {"ok": False, "message": f"Unknown provider '{provider}' — cannot test"}
+
+
+async def _fetch_openrouter_models(api_key: str) -> list[dict[str, Any]]:
+    """Fetch and normalize OpenRouter model catalog entries."""
+    async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+        resp = await client.get(
+            "https://openrouter.ai/api/v1/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        resp.raise_for_status()
+        raw_models = resp.json().get("data", [])
+
+    models: list[dict[str, Any]] = []
+    for item in raw_models:
+        architecture = item.get("architecture") or {}
+        top_provider = item.get("top_provider") or {}
+        pricing = item.get("pricing") or {}
+        model_id = item.get("id", "")
+        if not model_id:
+            continue
+        models.append(
+            {
+                "id": model_id,
+                "name": item.get("name") or model_id,
+                "description": item.get("description") or "",
+                "context_length": item.get("context_length") or top_provider.get("context_length"),
+                "pricing": {
+                    "prompt": pricing.get("prompt"),
+                    "completion": pricing.get("completion"),
+                },
+                "supports_tools": "tools" in (item.get("supported_parameters") or []),
+                "supports_image": "image" in (architecture.get("input_modalities") or []),
+            }
+        )
+    return sorted(models, key=lambda m: m["id"])
+
+
+async def _fetch_fireworks_models(api_key: str, account_id: str) -> list[dict[str, Any]]:
+    """Fetch and normalize Fireworks serverless text model catalog entries."""
+    models: list[dict[str, Any]] = []
+    page_token = ""
+    async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+        for _ in range(5):
+            params = {
+                "filter": "supports_serverless=true",
+                "pageSize": 200,
+            }
+            if page_token:
+                params["pageToken"] = page_token
+            resp = await client.get(
+                f"https://api.fireworks.ai/v1/accounts/{account_id}/models",
+                params=params,
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            for item in data.get("models", []):
+                model_id = item.get("name", "")
+                if not model_id:
+                    continue
+                models.append(
+                    {
+                        "id": model_id,
+                        "name": item.get("displayName") or model_id.rsplit("/", 1)[-1],
+                        "description": item.get("description") or "",
+                        "context_length": item.get("contextLength") or item.get("trainingContextLength"),
+                        "pricing": {},
+                        "supports_tools": bool(item.get("supportsTools")),
+                        "supports_image": bool(item.get("supportsImageInput")),
+                    }
+                )
+            page_token = data.get("nextPageToken") or ""
+            if not page_token:
+                break
+    return sorted(models, key=lambda m: m["id"])

@@ -1,4 +1,4 @@
-"""OASIS subprocess orchestration for MurmuraScope.
+"""OASIS subprocess orchestration for Murmura.
 
 Launches and monitors the OASIS Twitter simulation as an external subprocess,
 reading JSONL progress updates from stdout, pushing them to the WebSocket
@@ -21,6 +21,7 @@ import os
 import random
 import random as _random
 import time as _time
+import zlib
 from collections import defaultdict
 from collections.abc import Callable, Coroutine
 from pathlib import Path
@@ -128,6 +129,12 @@ class SimulationRunner(
         # Phase 4D: optional shard coordinator for large-scale subprocess sharding
         # Activated only when DB_SHARDING_ENABLED=true env var is set.
         self._shard_coordinators: dict[str, Any] = {}
+        # Multi-platform identity runtime state (populated by _init_multi_layer_network)
+        self._multi_layer_networks: dict[str, Any] = {}
+        # Per-session: agent_id → platform string for the current round
+        self._round_active_agents: dict[str, dict[str, str]] = {}
+        # Per-session: agent_id → max moderation_risk across that agent's platforms
+        self._agent_moderation_risks: dict[str, dict[str, float]] = {}
         self._init_batch_writer()
 
     def _init_batch_writer(self) -> None:
@@ -307,6 +314,8 @@ class SimulationRunner(
             )
             rows = []
         self._round_profiles[session_id] = rows
+        # Clear per-round platform selections (populated by _is_agent_active).
+        self._round_active_agents[session_id] = {}
 
         # Populate RoundCache with agent data keyed by oasis_username for O(1) lookups
         try:
@@ -348,8 +357,8 @@ class SimulationRunner(
         Group 3 (periodic, fire-and-forget): all interval-driven hooks
 
         The entire method is wrapped in a per-round timeout (ROUND_TIMEOUT_S env var,
-        default 600 s). If a round exceeds the timeout, it is cancelled and logged
-        as a warning so the simulation can continue with the next round.
+        default 600 s). If a round exceeds the timeout, fail the simulation
+        rather than silently skipping hooks and reporting a degraded success.
         """
         round_timeout_s = float(os.environ.get("ROUND_TIMEOUT_S", "600"))
         try:
@@ -358,12 +367,13 @@ class SimulationRunner(
                 timeout=round_timeout_s,
             )
         except asyncio.TimeoutError:
-            logger.warning(
-                "ROUND TIMEOUT: session=%s round=%d exceeded %.0fs — skipping to next round",
+            logger.error(
+                "ROUND TIMEOUT: session=%s round=%d exceeded %.0fs",
                 session_id,
                 round_num,
                 round_timeout_s,
             )
+            raise RuntimeError(f"round_timeout: round {round_num} exceeded {round_timeout_s:.0f}s") from None
 
     async def _execute_round_hooks_inner(self, session_id: str, round_num: int) -> None:
         """Internal implementation of round hooks (called by _execute_round_hooks).
@@ -475,6 +485,11 @@ class SimulationRunner(
                 session_id,
                 self._process_echo_chambers(session_id, round_num),
             )
+            if self._kg_mode.get(session_id) and self._multi_layer_networks.get(session_id):
+                self._create_tracked_task(
+                    session_id,
+                    self._process_moderation(session_id, round_num),
+                )
         if round_num > 0 and round_num % hc.macro_feedback_interval == 0:
             self._create_tracked_task(
                 session_id,
@@ -693,16 +708,18 @@ class SimulationRunner(
     ) -> bool:
         """Return True if the agent is temporally active in this round.
 
-        Falls back to True (always active) when no profile is available,
-        ensuring backward compatibility with sessions created before Phase 1B.
+        When a MultiLayerNetwork is loaded for this session, selects a platform
+        for the agent and passes its PlatformIdentity to TemporalActivationService,
+        overriding the global activity vector with the platform-specific one.
+        Records the chosen platform in ``_round_active_agents[session_id]``.
         """
         profiles = self._activity_profiles.get(session_id)
         if not profiles:
-            return True  # No profiles loaded — always active
+            return True
 
         agent_data = profiles.get(username)
         if agent_data is None:
-            return True  # Unknown agent — always active
+            return True
 
         try:
             from backend.app.models.activity_profile import ActivityProfile  # noqa: PLC0415
@@ -719,15 +736,31 @@ class SimulationRunner(
                 rng = random.Random(session_id)
                 self._activation_rngs[session_id] = rng
 
+            # Platform selection: use MultiLayerNetwork when available for this session.
+            platform_identity = None
+            network = self._multi_layer_networks.get(session_id)
+            if network is not None:
+                hour = (8 + round_number) % 24
+                platform = network.select_platform_for_round(
+                    agent_id=username,
+                    hour=hour,
+                    rng=random.Random(zlib.crc32(f"{username}_{round_number}".encode())),
+                )
+                if platform is not None:
+                    platform_identity = network.get_platform_identity(username, platform)
+                    if session_id not in self._round_active_agents:
+                        self._round_active_agents[session_id] = {}
+                    self._round_active_agents[session_id][username] = platform.value
+
             svc = TemporalActivationService()
-            return svc.should_activate(profile, round_number, rng)
+            return svc.should_activate(profile, round_number, rng, platform_identity=platform_identity)
         except Exception:
             logger.debug(
                 "Temporal activation check failed for %s round %d",
                 username,
                 round_number,
             )
-            return True  # Fail open
+            return True
 
     # ------------------------------------------------------------------
 

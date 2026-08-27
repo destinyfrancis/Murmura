@@ -1,24 +1,34 @@
 <script setup>
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 
 const router = useRouter()
+const { t } = useI18n()
 
-const steps = [
-  { num: '01', label: 'GRAPH', title: 'Knowledge Graph', desc: 'Seed text → entity extraction → causal network auto-built' },
-  { num: '02', label: 'ENV', title: 'Environment Setup', desc: 'Agent factory generates profiles from KG nodes, zero config needed' },
-  { num: '03', label: 'SIM', title: 'Simulation', desc: 'OASIS multi-agent engine runs with emergent behavior fully on' },
-  { num: '04', label: 'REPORT', title: 'ReACT Report', desc: '3-phase LLM: outline → per-section tool calls → markdown assembly' },
-  { num: '05', label: 'INTERACT', title: 'Deep Interaction', desc: 'Interview agents, inject shocks, branch into What-If scenarios' },
-]
+const steps = computed(() => [
+  { num: '01', label: t('landing.workflow.steps.graph.label'), title: t('landing.workflow.steps.graph.title'), desc: t('landing.workflow.steps.graph.desc') },
+  { num: '02', label: t('landing.workflow.steps.env.label'), title: t('landing.workflow.steps.env.title'), desc: t('landing.workflow.steps.env.desc') },
+  { num: '03', label: t('landing.workflow.steps.sim.label'), title: t('landing.workflow.steps.sim.title'), desc: t('landing.workflow.steps.sim.desc') },
+  { num: '04', label: t('landing.workflow.steps.report.label'), title: t('landing.workflow.steps.report.title'), desc: t('landing.workflow.steps.report.desc') },
+  { num: '05', label: t('landing.workflow.steps.interact.label'), title: t('landing.workflow.steps.interact.title'), desc: t('landing.workflow.steps.interact.desc') },
+])
 
-const features = [
-  { icon: '◈', title: 'Universal Mode', desc: 'Drop any seed text — news, fiction, geopolitics. Engine infers agents, decisions, metrics, shocks automatically.' },
-  { icon: '⬡', title: 'Knowledge Graph', desc: 'GraphRAG tracks entity relationships and causal chains. Snapshots every 5 rounds, evolves with each interaction.' },
-  { icon: '⊕', title: 'Emergence Engine', desc: 'Faction formation, tipping points, echo chambers, virality cascades — all emergent, not scripted.' },
-  { icon: '◱', title: 'Monte Carlo', desc: '100-trial LHS + t-Copula sampling. Wilson score confidence intervals. Up to 10,000 stochastic trials.' },
-  { icon: '⟳', title: 'Macro Feedback', desc: '11 macro indicators updated per round. Agent micro-decisions feed back into macro state in real time.' },
-  { icon: '⊞', title: 'Scenario Branches', desc: 'Fork any simulation at any round. Compare diverging timelines side by side.' },
-]
+const features = computed(() => [
+  { icon: '◈', title: t('landing.features.list.universal.title'), desc: t('landing.features.list.universal.desc') },
+  { icon: '⬡', title: t('landing.features.list.kg.title'), desc: t('landing.features.list.kg.desc') },
+  { icon: '⊕', title: t('landing.features.list.emergence.title'), desc: t('landing.features.list.emergence.desc') },
+  { icon: '◱', title: t('landing.features.list.monteCarlo.title'), desc: t('landing.features.list.monteCarlo.desc') },
+  { icon: '⟳', title: t('landing.features.list.macro.title'), desc: t('landing.features.list.macro.desc') },
+  { icon: '⊞', title: t('landing.features.list.scenarios.title'), desc: t('landing.features.list.scenarios.desc') },
+])
+
+const useCases = computed(() => [
+  { tag: t('landing.useCases.list.geopolitics.tag'), desc: t('landing.useCases.list.geopolitics.desc') },
+  { tag: t('landing.useCases.list.finance.tag'), desc: t('landing.useCases.list.finance.desc') },
+  { tag: t('landing.useCases.list.society.tag'), desc: t('landing.useCases.list.society.desc') },
+  { tag: t('landing.useCases.list.fiction.tag'), desc: t('landing.useCases.list.fiction.desc') },
+])
 </script>
 
 <template>
@@ -29,70 +39,67 @@ const features = [
     <!-- Nav -->
     <nav class="nav">
       <div class="nav-inner">
-        <span class="nav-logo">MORAI</span>
+        <span class="nav-logo">Murmura</span>
         <div class="nav-links">
-          <a href="#how-it-works" class="nav-link">How it works</a>
-          <a href="#features" class="nav-link">Features</a>
-          <button class="nav-cta" @click="router.push('/app')">Launch Engine →</button>
+          <a href="#how-it-works" class="nav-link">{{ t('landing.nav.howItWorks') }}</a>
+          <a href="#features" class="nav-link">{{ t('landing.nav.features') }}</a>
+          <button class="nav-cta" @click="router.push('/app')">{{ t('landing.nav.launch') }}</button>
         </div>
       </div>
     </nav>
 
     <!-- Hero -->
     <section class="hero">
-      <div class="hero-eyebrow">UNIVERSAL PREDICTION ENGINE</div>
+      <div class="hero-eyebrow">{{ t('landing.hero.eyebrow') }}</div>
       <h1 class="hero-title">
-        Drop any text.<br/>
-        <span class="hero-title-accent">Simulate any world.</span>
+        {{ t('landing.hero.title') }}<br/>
+        <span class="hero-title-accent">{{ t('landing.hero.titleAccent') }}</span>
       </h1>
-      <p class="hero-sub">
-        Feed Morai a sentence, a document, a scenario — it builds the knowledge graph,<br/>
-        spawns agents, runs the simulation, and predicts collective outcomes.
-      </p>
+      <p class="hero-sub">{{ t('landing.hero.sub') }}</p>
       <div class="hero-actions">
-        <button class="btn-primary" @click="router.push('/app')">Start Predicting</button>
-        <button class="btn-ghost" @click="router.push('/app/workspace')">Workspace</button>
+        <button class="btn-primary" @click="router.push('/app')">{{ t('landing.hero.cta') }}</button>
+        <button class="btn-ghost" @click="router.push('/app/workspace')">{{ t('landing.hero.workspace') }}</button>
       </div>
       <div class="hero-stats">
         <div class="stat-item">
           <span class="stat-n">50–10,000</span>
-          <span class="stat-l">Agents per run</span>
+          <span class="stat-l">{{ t('landing.hero.stats.agents') }}</span>
         </div>
         <div class="stat-divider" />
         <div class="stat-item">
           <span class="stat-n">11</span>
-          <span class="stat-l">Macro indicators</span>
+          <span class="stat-l">{{ t('landing.hero.stats.macro') }}</span>
         </div>
         <div class="stat-divider" />
         <div class="stat-item">
           <span class="stat-n">100+</span>
-          <span class="stat-l">Monte Carlo trials</span>
+          <span class="stat-l">{{ t('landing.hero.stats.monteCarlo') }}</span>
         </div>
         <div class="stat-divider" />
         <div class="stat-item">
           <span class="stat-n">14</span>
-          <span class="stat-l">XAI analysis tools</span>
+          <span class="stat-l">{{ t('landing.hero.stats.xai') }}</span>
         </div>
       </div>
       <!-- Hero visual: animated graph -->
       <div class="hero-visual">
         <svg viewBox="0 0 480 200" class="hero-svg" fill="none" xmlns="http://www.w3.org/2000/svg">
           <!-- connection lines -->
-          <line x1="240" y1="40" x2="80" y2="120" stroke="#00d4ff" stroke-width="1" stroke-dasharray="4 4" opacity="0.4"/>
-          <line x1="240" y1="40" x2="400" y2="120" stroke="#a78bfa" stroke-width="1" stroke-dasharray="4 4" opacity="0.4"/>
-          <line x1="80" y1="120" x2="160" y2="180" stroke="#00ff94" stroke-width="1" stroke-dasharray="4 4" opacity="0.4"/>
-          <line x1="400" y1="120" x2="320" y2="180" stroke="#00d4ff" stroke-width="1" stroke-dasharray="4 4" opacity="0.4"/>
-          <line x1="160" y1="180" x2="320" y2="180" stroke="#a78bfa" stroke-width="1" stroke-dasharray="4 4" opacity="0.3"/>
-          <line x1="80" y1="120" x2="400" y2="120" stroke="#00ff94" stroke-width="1" stroke-dasharray="4 4" opacity="0.2"/>
+          <line x1="240" y1="40" x2="80" y2="120" stroke="#ff5a1f" stroke-width="1" stroke-dasharray="4 4" opacity="0.42"/>
+          <line x1="240" y1="40" x2="400" y2="120" stroke="#f59e0b" stroke-width="1" stroke-dasharray="4 4" opacity="0.36"/>
+          <line x1="80" y1="120" x2="160" y2="180" stroke="#047857" stroke-width="1" stroke-dasharray="4 4" opacity="0.38"/>
+          <line x1="400" y1="120" x2="320" y2="180" stroke="#ff5a1f" stroke-width="1" stroke-dasharray="4 4" opacity="0.42"/>
+          <line x1="160" y1="180" x2="320" y2="180" stroke="#f59e0b" stroke-width="1" stroke-dasharray="4 4" opacity="0.3"/>
+          <line x1="80" y1="120" x2="400" y2="120" stroke="#047857" stroke-width="1" stroke-dasharray="4 4" opacity="0.22"/>
           <!-- nodes -->
-          <circle cx="240" cy="40" r="10" fill="#00d4ff" opacity="0.9" class="pulse-node"/>
-          <circle cx="80" cy="120" r="8" fill="#00ff94" opacity="0.8"/>
-          <circle cx="400" cy="120" r="8" fill="#a78bfa" opacity="0.8"/>
-          <circle cx="160" cy="180" r="7" fill="#00d4ff" opacity="0.7"/>
-          <circle cx="320" cy="180" r="7" fill="#00ff94" opacity="0.7"/>
-          <circle cx="240" cy="120" r="5" fill="#a78bfa" opacity="0.5"/>
+          <circle cx="240" cy="40" r="10" fill="#ff5a1f" opacity="0.9" class="pulse-node"/>
+          <circle cx="80" cy="120" r="8" fill="#047857" opacity="0.8"/>
+          <circle cx="400" cy="120" r="8" fill="#f59e0b" opacity="0.8"/>
+          <circle cx="160" cy="180" r="7" fill="#ff5a1f" opacity="0.7"/>
+          <circle cx="320" cy="180" r="7" fill="#047857" opacity="0.7"/>
+          <circle cx="240" cy="120" r="5" fill="#f59e0b" opacity="0.5"/>
           <!-- labels -->
-          <text x="240" y="24" text-anchor="middle" fill="#00d4ff" font-size="9" font-family="monospace" opacity="0.7">SEED EVENT</text>
+          <text x="240" y="24" text-anchor="middle" fill="#ff5a1f" font-size="9" font-family="monospace" opacity="0.78">SEED EVENT</text>
           <text x="60" y="116" text-anchor="middle" fill="#9aa8ba" font-size="8" font-family="monospace">ACTOR A</text>
           <text x="420" y="116" text-anchor="middle" fill="#9aa8ba" font-size="8" font-family="monospace">ACTOR B</text>
           <text x="150" y="196" text-anchor="middle" fill="#9aa8ba" font-size="8" font-family="monospace">POLICY</text>
@@ -103,8 +110,8 @@ const features = [
 
     <!-- 5-Step Workflow -->
     <section id="how-it-works" class="workflow">
-      <div class="section-label">HOW IT WORKS</div>
-      <h2 class="section-title">5-Step Workflow</h2>
+      <div class="section-label">{{ t('landing.workflow.label') }}</div>
+      <h2 class="section-title">{{ t('landing.workflow.title') }}</h2>
       <div class="steps-row">
         <template v-for="(step, i) in steps" :key="step.num">
           <div class="step-card">
@@ -120,8 +127,8 @@ const features = [
 
     <!-- Features -->
     <section id="features" class="features">
-      <div class="section-label">CAPABILITIES</div>
-      <h2 class="section-title">What the Engine Does</h2>
+      <div class="section-label">{{ t('landing.features.label') }}</div>
+      <h2 class="section-title">{{ t('landing.features.title') }}</h2>
       <div class="features-grid">
         <div v-for="f in features" :key="f.title" class="feature-card">
           <span class="feature-icon">{{ f.icon }}</span>
@@ -133,24 +140,12 @@ const features = [
 
     <!-- Example Use Cases -->
     <section class="use-cases">
-      <div class="section-label">USE CASES</div>
-      <h2 class="section-title">Works on Any Domain</h2>
+      <div class="section-label">{{ t('landing.useCases.label') }}</div>
+      <h2 class="section-title">{{ t('landing.useCases.title') }}</h2>
       <div class="use-case-row">
-        <div class="use-case-item">
-          <span class="uc-tag">Geopolitics</span>
-          <p>Taiwan Strait escalation, Iran-Israel scenarios, trade war cascades</p>
-        </div>
-        <div class="use-case-item">
-          <span class="uc-tag">Finance</span>
-          <p>Fed rate hike contagion, crypto market panics, corporate competition</p>
-        </div>
-        <div class="use-case-item">
-          <span class="uc-tag">Society</span>
-          <p>Policy impact modeling, social movement dynamics, demographic shifts</p>
-        </div>
-        <div class="use-case-item">
-          <span class="uc-tag">Fiction</span>
-          <p>Dream of the Red Chamber, Harry Potter, any narrative world</p>
+        <div v-for="useCase in useCases" :key="useCase.tag" class="use-case-item">
+          <span class="uc-tag">{{ useCase.tag }}</span>
+          <p>{{ useCase.desc }}</p>
         </div>
       </div>
     </section>
@@ -158,20 +153,20 @@ const features = [
     <!-- CTA -->
     <section class="cta-section">
       <div class="cta-box">
-        <div class="cta-label">READY TO SIMULATE?</div>
-        <h2 class="cta-title">Drop your first scenario</h2>
-        <p class="cta-sub">No configuration needed. Paste any text and the engine handles the rest.</p>
+        <div class="cta-label">{{ t('landing.cta.label') }}</div>
+        <h2 class="cta-title">{{ t('landing.cta.title') }}</h2>
+        <p class="cta-sub">{{ t('landing.cta.sub') }}</p>
         <button class="btn-primary btn-large" @click="router.push('/app')">
-          Launch Engine →
+          {{ t('landing.cta.btn') }}
         </button>
       </div>
     </section>
 
     <!-- Footer -->
     <footer class="footer">
-      <span class="footer-brand">MORAI</span>
-      <span class="footer-desc">Universal Prediction Engine · Agent-Based Simulation</span>
-      <span class="footer-copy">Built with FastAPI · Vue 3 · OASIS · LanceDB</span>
+      <span class="footer-brand">Murmura</span>
+      <span class="footer-desc">{{ t('landing.footer.desc') }}</span>
+      <span class="footer-copy">{{ t('landing.footer.copy') }}</span>
     </footer>
   </div>
 </template>
@@ -179,8 +174,8 @@ const features = [
 <style scoped>
 /* ─── Base ─────────────────────────────────────────────────────────────── */
 .landing {
-  background: #080d18;
-  color: #e2e8f0;
+  background: #080808;
+  color: #F5F5F5;
   min-height: 100vh;
   overflow-x: hidden;
   position: relative;
@@ -190,8 +185,8 @@ const features = [
   position: fixed;
   inset: 0;
   background-image:
-    linear-gradient(rgba(0, 212, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0, 212, 255, 0.03) 1px, transparent 1px);
+    linear-gradient(rgba(255, 90, 31, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 90, 31, 0.045) 1px, transparent 1px);
   background-size: 40px 40px;
   pointer-events: none;
   z-index: 0;
@@ -202,9 +197,9 @@ const features = [
   position: sticky;
   top: 0;
   z-index: 100;
-  background: rgba(8, 13, 24, 0.85);
-  backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(0, 212, 255, 0.1);
+  background: rgba(5, 5, 5, 0.92);
+  backdrop-filter: none;
+  border-bottom: 1px solid #2A2A2A;
 }
 .nav-inner {
   max-width: 1100px;
@@ -218,31 +213,31 @@ const features = [
   font-size: 18px;
   font-weight: 800;
   letter-spacing: 4px;
-  color: #00d4ff;
+  color: var(--accent);
   font-family: 'JetBrains Mono', 'SF Mono', monospace;
 }
 .nav-links { display: flex; align-items: center; gap: 24px; }
 .nav-link {
   font-size: 13px;
-  color: #64748b;
+  color: #9A9A9A;
   text-decoration: none;
   transition: color 0.2s;
 }
-.nav-link:hover { color: #e2e8f0; }
+.nav-link:hover { color: #F5F5F5; }
 .nav-cta {
   padding: 8px 18px;
-  background: rgba(0, 212, 255, 0.1);
-  border: 1px solid rgba(0, 212, 255, 0.3);
-  border-radius: 6px;
-  color: #00d4ff;
+  background: rgba(255, 90, 31, 0.12);
+  border: 1px solid rgba(255, 90, 31, 0.44);
+  border-radius: 4px;
+  color: var(--accent);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
 }
 .nav-cta:hover {
-  background: rgba(0, 212, 255, 0.2);
-  box-shadow: 0 0 20px rgba(0, 212, 255, 0.2);
+  background: var(--accent);
+  color: #FFFFFF;
 }
 
 /* ─── Hero ──────────────────────────────────────────────────────────────── */
@@ -258,7 +253,7 @@ const features = [
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 3px;
-  color: #00d4ff;
+  color: var(--accent);
   font-family: 'JetBrains Mono', monospace;
   margin-bottom: 24px;
   opacity: 0.8;
@@ -267,19 +262,16 @@ const features = [
   font-size: clamp(36px, 6vw, 64px);
   font-weight: 800;
   line-height: 1.15;
-  color: #f1f5f9;
+  color: #F5F5F5;
   margin-bottom: 24px;
   letter-spacing: -1px;
 }
 .hero-title-accent {
-  background: linear-gradient(135deg, #00d4ff, #a78bfa);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--accent);
 }
 .hero-sub {
   font-size: 17px;
-  color: #64748b;
+  color: #A3A3A3;
   line-height: 1.8;
   margin-bottom: 36px;
   max-width: 600px;
@@ -294,10 +286,10 @@ const features = [
 }
 .btn-primary {
   padding: 12px 28px;
-  background: linear-gradient(135deg, #00d4ff, #00b4cc);
-  color: #080d18;
-  border: none;
-  border-radius: 8px;
+  background: var(--accent);
+  color: #FFFFFF;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
   font-size: 15px;
   font-weight: 700;
   cursor: pointer;
@@ -305,8 +297,10 @@ const features = [
   letter-spacing: 0.3px;
 }
 .btn-primary:hover {
-  box-shadow: 0 0 30px rgba(0, 212, 255, 0.5);
   transform: translateY(-1px);
+  background: #FFFFFF;
+  color: #050505;
+  border-color: #FFFFFF;
 }
 .btn-primary.btn-large {
   padding: 16px 40px;
@@ -316,15 +310,15 @@ const features = [
   padding: 12px 28px;
   background: transparent;
   border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 8px;
-  color: #94a3b8;
+  border-radius: 4px;
+  color: #BDBDBD;
   font-size: 15px;
   cursor: pointer;
   transition: all 0.2s;
 }
 .btn-ghost:hover {
   border-color: rgba(255,255,255,0.3);
-  color: #e2e8f0;
+  color: #F5F5F5;
 }
 .hero-stats {
   display: flex;
@@ -343,14 +337,14 @@ const features = [
 .stat-n {
   font-size: 26px;
   font-weight: 800;
-  color: #f1f5f9;
+  color: #F5F5F5;
   font-family: 'JetBrains Mono', monospace;
   line-height: 1;
   margin-bottom: 4px;
 }
 .stat-l {
   font-size: 11px;
-  color: #475569;
+  color: #777;
   letter-spacing: 1px;
   text-transform: uppercase;
 }
@@ -373,8 +367,8 @@ const features = [
   animation: pulse-glow 2.5s ease-in-out infinite;
 }
 @keyframes pulse-glow {
-  0%, 100% { opacity: 0.9; filter: drop-shadow(0 0 6px #00d4ff); }
-  50% { opacity: 0.6; filter: drop-shadow(0 0 12px #00d4ff); }
+  0%, 100% { opacity: 0.9; filter: drop-shadow(0 0 5px rgba(255,90,31,0.55)); }
+  50% { opacity: 0.6; filter: drop-shadow(0 0 11px rgba(255,90,31,0.8)); }
 }
 
 /* ─── Section Label ─────────────────────────────────────────────────────── */
@@ -382,7 +376,7 @@ const features = [
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 4px;
-  color: #00ff94;
+  color: var(--accent);
   font-family: 'JetBrains Mono', monospace;
   margin-bottom: 12px;
   text-align: center;
@@ -391,7 +385,7 @@ const features = [
   font-size: clamp(22px, 3vw, 32px);
   font-weight: 700;
   text-align: center;
-  color: #f1f5f9;
+  color: #F5F5F5;
   margin-bottom: 48px;
   letter-spacing: -0.5px;
 }
@@ -418,12 +412,12 @@ const features = [
   padding: 24px 20px;
   background: rgba(255,255,255,0.02);
   border: 1px solid rgba(255,255,255,0.06);
-  border-radius: 12px;
+  border-radius: 6px;
   transition: border-color 0.2s, background 0.2s;
 }
 .step-card:hover {
-  border-color: rgba(0, 212, 255, 0.3);
-  background: rgba(0, 212, 255, 0.04);
+  border-color: rgba(255, 90, 31, 0.42);
+  background: rgba(255, 90, 31, 0.05);
 }
 .step-num {
   font-size: 28px;
@@ -436,25 +430,25 @@ const features = [
 .step-label-tag {
   display: inline-block;
   padding: 2px 8px;
-  background: rgba(0, 212, 255, 0.1);
-  border: 1px solid rgba(0, 212, 255, 0.2);
+  background: rgba(255, 90, 31, 0.12);
+  border: 1px solid rgba(255, 90, 31, 0.32);
   border-radius: 4px;
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 2px;
-  color: #00d4ff;
+  color: var(--accent);
   font-family: 'JetBrains Mono', monospace;
   margin-bottom: 10px;
 }
 .step-name {
   font-size: 14px;
   font-weight: 600;
-  color: #e2e8f0;
+  color: #F5F5F5;
   margin-bottom: 6px;
 }
 .step-desc {
   font-size: 12px;
-  color: #475569;
+  color: #8A8A8A;
   line-height: 1.6;
 }
 .step-arrow {
@@ -484,28 +478,28 @@ const features = [
   padding: 28px 24px;
   background: rgba(255,255,255,0.02);
   border: 1px solid rgba(255,255,255,0.06);
-  border-radius: 12px;
+  border-radius: 6px;
   transition: all 0.2s;
 }
 .feature-card:hover {
-  border-color: rgba(167, 139, 250, 0.3);
-  background: rgba(167, 139, 250, 0.03);
+  border-color: rgba(255, 90, 31, 0.35);
+  background: rgba(255, 90, 31, 0.04);
 }
 .feature-icon {
   display: block;
   font-size: 20px;
-  color: #a78bfa;
+  color: var(--accent);
   margin-bottom: 14px;
 }
 .feature-title {
   font-size: 15px;
   font-weight: 600;
-  color: #e2e8f0;
+  color: #F5F5F5;
   margin-bottom: 8px;
 }
 .feature-desc {
   font-size: 13px;
-  color: #475569;
+  color: #8A8A8A;
   line-height: 1.65;
 }
 
@@ -527,23 +521,23 @@ const features = [
   padding: 24px 20px;
   background: rgba(255,255,255,0.02);
   border: 1px solid rgba(255,255,255,0.06);
-  border-radius: 12px;
+  border-radius: 6px;
 }
 .uc-tag {
   display: inline-block;
   padding: 3px 10px;
-  background: rgba(0, 255, 148, 0.1);
-  border: 1px solid rgba(0, 255, 148, 0.2);
-  border-radius: 20px;
+  background: rgba(255, 90, 31, 0.12);
+  border: 1px solid rgba(255, 90, 31, 0.32);
+  border-radius: 4px;
   font-size: 11px;
   font-weight: 600;
-  color: #00ff94;
+  color: var(--accent);
   letter-spacing: 0.5px;
   margin-bottom: 12px;
 }
 .use-case-item p {
   font-size: 13px;
-  color: #475569;
+  color: #8A8A8A;
   line-height: 1.6;
 }
 
@@ -558,28 +552,27 @@ const features = [
 .cta-box {
   text-align: center;
   padding: 72px 40px;
-  background: radial-gradient(ellipse at 50% 100%, rgba(0, 212, 255, 0.06) 0%, transparent 70%),
-              rgba(255,255,255,0.02);
-  border: 1px solid rgba(0, 212, 255, 0.15);
-  border-radius: 20px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255, 90, 31, 0.28);
+  border-radius: 8px;
 }
 .cta-label {
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 4px;
-  color: #00d4ff;
+  color: var(--accent);
   font-family: 'JetBrains Mono', monospace;
   margin-bottom: 16px;
 }
 .cta-title {
   font-size: clamp(24px, 3vw, 36px);
   font-weight: 700;
-  color: #f1f5f9;
+  color: #F5F5F5;
   margin-bottom: 12px;
 }
 .cta-sub {
   font-size: 15px;
-  color: #475569;
+  color: #8A8A8A;
   margin-bottom: 32px;
 }
 
@@ -601,12 +594,12 @@ const features = [
   font-size: 13px;
   font-weight: 800;
   letter-spacing: 3px;
-  color: #00d4ff;
+  color: var(--accent);
   font-family: 'JetBrains Mono', monospace;
 }
 .footer-desc, .footer-copy {
   font-size: 11px;
-  color: #334155;
+  color: #777;
 }
 
 /* ─── Responsive ─────────────────────────────────────────────────────────── */

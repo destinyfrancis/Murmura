@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { startSimulation, stopSimulation, connectWebSocket, createBranch, injectShock, getSessionAgents, getEchoChambers, getContagionData, getCommunitySummaries, getTripleConflicts, getPolarization } from '../api/simulation.js'
+import { startSimulation, stopSimulation, connectWebSocket, createBranch, injectShock, getSessionAgents, getEchoChambers, getContagionData, getCommunitySummaries, getTripleConflicts, getPolarization, runSimulationPreflight } from '../api/simulation.js'
 import { getFactions, getTippingPoints, getWorldEvents, getSession } from '../api/simulation.js'
 import { getGraph, getGraphSnapshots, getGraphSnapshot } from '../api/graph.js'
 import GraphPanel from './GraphPanel.vue'
@@ -31,6 +31,8 @@ const currentRound = ref(0)
 const totalRounds = ref(props.session.config.roundCount)
 const activeTab = ref('feed')
 const error = ref(null)
+const preflight = ref(props.session.preflight || null)
+const preflightLoading = ref(false)
 
 const modelName = ref('')
 const tokenCostUsd = ref(0)
@@ -88,6 +90,15 @@ const tippingCount     = ref(0)
 const simCompleted     = ref(false)
 
 const awaitingData = computed(() => !completed.value && currentRound.value === 0 && posts.value.length === 0)
+const preflightBlocking = computed(() => preflight.value?.blocking_errors || [])
+const preflightWarnings = computed(() => preflight.value?.warnings || [])
+const preflightReady = computed(() => preflight.value?.ready === true)
+const preflightStatus = computed(() => {
+  if (preflightLoading.value) return 'CHECKING'
+  if (preflightReady.value) return 'READY'
+  if (preflightBlocking.value.length) return 'BLOCKED'
+  return 'PENDING'
+})
 
 let ws = null
 const MAX_RECONNECT = 5
@@ -224,11 +235,24 @@ function connectWs() {
 }
 
 async function start() {
-  running.value = true
   error.value = null
-  addLog('正在啟動模擬...')
+  preflightLoading.value = true
+  addLog('正在檢查模擬前置條件...')
 
   try {
+    const preflightRes = await runSimulationPreflight({
+      session_id: props.session.sessionId,
+      live_model_check: false,
+    })
+    preflight.value = preflightRes.data?.data || preflightRes.data
+    if (!preflight.value?.ready) {
+      const first = preflight.value?.blocking_errors?.[0]
+      error.value = first?.message || '模擬前置檢查未通過'
+      addLog(error.value, 'error')
+      return
+    }
+    running.value = true
+    addLog('正在啟動模擬...')
     await startSimulation({
       session_id: props.session.sessionId,
     })
@@ -237,6 +261,8 @@ async function start() {
     error.value = err.response?.data?.detail || err.message || '啟動模擬失敗'
     addLog(error.value, 'error')
     running.value = false
+  } finally {
+    preflightLoading.value = false
   }
 }
 
@@ -545,8 +571,38 @@ const factionAgentColourMap = computed(() => {
         target="_blank"
         title="在新分頁開啟知識圖譜"
       >
-        🗺 知識圖譜
+        KG GRAPH
       </router-link>
+    </div>
+
+    <div class="preflight-strip" :class="{ ready: preflightReady, blocked: preflightBlocking.length }">
+      <div class="preflight-strip-main">
+        <span class="preflight-kicker">PREFLIGHT</span>
+        <strong>{{ preflightStatus }}</strong>
+      </div>
+      <div class="preflight-strip-items">
+        <span>Model: {{ preflight?.model_check?.model || modelName || '--' }}</span>
+        <span>Cost: {{ preflight?.cost_estimate?.estimated_cost_usd != null ? `$${Number(preflight.cost_estimate.estimated_cost_usd).toFixed(4)}` : '--' }}</span>
+        <span>Time: {{ preflight?.time_config?.minutes_per_round || '--' }} min / round</span>
+      </div>
+      <router-link
+        v-if="preflightBlocking.length"
+        to="/settings"
+        class="preflight-settings"
+      >
+        SETTINGS
+      </router-link>
+    </div>
+
+    <div v-if="preflightBlocking.length" class="preflight-blockers">
+      <div v-for="issue in preflightBlocking" :key="issue.code" class="preflight-blocker">
+        <strong>{{ issue.code }}</strong>
+        <span>{{ issue.message }}</span>
+        <small>{{ issue.recommended_action }}</small>
+      </div>
+    </div>
+    <div v-else-if="preflightWarnings.length" class="preflight-warnings">
+      <span v-for="issue in preflightWarnings.slice(0, 2)" :key="issue.code">{{ issue.message }}</span>
     </div>
 
     <ForkModal
@@ -693,10 +749,13 @@ const factionAgentColourMap = computed(() => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 12px;
+  padding: 5px 12px;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 12px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
   color: var(--text-secondary);
   text-decoration: none;
   background: var(--bg-card);
@@ -706,6 +765,96 @@ const factionAgentColourMap = computed(() => {
 .quick-link:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.preflight-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.preflight-strip.ready {
+  border-color: rgba(4, 120, 87, 0.42);
+}
+
+.preflight-strip.blocked {
+  border-color: rgba(220, 38, 38, 0.5);
+}
+
+.preflight-strip-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 132px;
+}
+
+.preflight-kicker,
+.preflight-strip-main strong,
+.preflight-settings,
+.preflight-blocker strong {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.preflight-kicker {
+  color: var(--text-muted);
+}
+
+.preflight-strip-items {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 10px;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.preflight-strip-items span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preflight-settings {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.preflight-blockers,
+.preflight-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.preflight-blocker {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 4px 10px;
+  color: var(--accent-red);
+  font-size: 13px;
+}
+
+.preflight-blocker small {
+  grid-column: 2;
+  color: var(--text-muted);
+}
+
+.preflight-warnings {
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .sim-body {
@@ -743,7 +892,7 @@ const factionAgentColourMap = computed(() => {
   left: 0;
   right: 0;
   padding: 8px 14px;
-  background: rgba(239, 68, 68, 0.9);
+  background: rgba(185, 28, 28, 0.92);
   color: var(--bg-app);
   font-size: 13px;
   font-weight: 600;
@@ -818,7 +967,7 @@ const factionAgentColourMap = computed(() => {
   inset: 0;
   z-index: 9999;
   pointer-events: none;
-  background: linear-gradient(transparent 0%, rgba(34, 211, 238, 0.03) 50%, transparent 100%);
+  background: rgba(255, 90, 31, 0.06);
   animation: glitch-flash 0.3s ease-out forwards;
 }
 

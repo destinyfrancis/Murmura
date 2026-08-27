@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
+import subprocess
 import sys
 from collections.abc import Callable, Coroutine
 from pathlib import Path
@@ -23,35 +25,94 @@ logger = get_logger("simulation_runner")
 # Project root is 4 levels up: services → app → backend → project_root
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
+
+def _is_supported_python(python_bin: Path) -> bool:
+    """Return whether *python_bin* is Python 3.10 or 3.11."""
+    try:
+        result = subprocess.run(
+            [
+                str(python_bin),
+                "-c",
+                "import sys; raise SystemExit(0 if sys.version_info[:2] in ((3, 10), (3, 11)) else 1)",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception:
+        return False
+    return result.returncode == 0
+
+
 def _find_compatible_python() -> Path:
     """Find a Python 3.10 or 3.11 binary to satisfy OASIS requirements."""
     # 1. Check local .venv311
     venv_python = _PROJECT_ROOT / ".venv311" / "bin" / "python"
-    if venv_python.exists():
+    if venv_python.exists() and _is_supported_python(venv_python):
         return venv_python
-    
+
     # 2. Check current executable
     major, minor = sys.version_info[:2]
     if major == 3 and minor in (10, 11):
         return Path(sys.executable)
-    
+
     # 3. Search in PATH
-    import shutil # noqa: PLC0415
     for ver in ("3.11", "3.10"):
         found = shutil.which(f"python{ver}")
-        if found:
+        if found and _is_supported_python(Path(found)):
             return Path(found)
-            
+
     # 4. Fallback to current (and hope for the best)
     return Path(sys.executable)
 
 _PYTHON_BIN = _find_compatible_python()
 _SCRIPT_PATH = _PROJECT_ROOT / "backend" / "scripts" / "run_twitter_simulation.py"
+_REDDIT_SCRIPT = _PROJECT_ROOT / "backend" / "scripts" / "run_reddit_simulation.py"
 _PARALLEL_SCRIPT = _PROJECT_ROOT / "backend" / "scripts" / "run_parallel_simulation.py"
 _FACEBOOK_SCRIPT = _PROJECT_ROOT / "backend" / "scripts" / "run_facebook_simulation.py"
 _INSTAGRAM_SCRIPT = _PROJECT_ROOT / "backend" / "scripts" / "run_instagram_simulation.py"
 
 ProgressCallback = Callable[[dict[str, Any]], Coroutine[Any, Any, None]]
+
+
+def _progress_round_for_hooks(
+    update: dict[str, Any],
+    *,
+    multi_platform: bool,
+    processed_rounds: set[int],
+) -> int | None:
+    """Return the completed round that should run hooks, or None.
+
+    Platform scripts emit several ``round=0`` progress updates while they build
+    agents and reset their environments.  Those are status updates, not a round
+    boundary.  In multi-platform runs, child platforms also emit their own
+    per-round progress; hooks must wait for the aggregate "parallel" progress
+    emitted after every enabled platform finishes that round.
+    """
+    if update.get("type") != "progress":
+        return None
+
+    data = update.get("data", {})
+    if not isinstance(data, dict):
+        return None
+
+    try:
+        round_num = int(data.get("round", 0))
+    except (TypeError, ValueError):
+        return None
+
+    if round_num <= 0:
+        return None
+
+    if multi_platform and data.get("platform") != "parallel":
+        return None
+
+    if round_num in processed_rounds:
+        return None
+
+    processed_rounds.add(round_num)
+    return round_num
 
 
 def _clear_ws_progress(session_id: str) -> None:
@@ -127,6 +188,9 @@ class SimulationLifecycleMixin:
 
         # Late import to avoid circular dependency: ws imports nothing from here.
         from backend.app.api.ws import push_progress  # noqa: PLC0415
+        from backend.app.services.oasis_compatibility import ensure_oasis_available  # noqa: PLC0415
+
+        ensure_oasis_available()
 
         # Validate prerequisites (L5).
         if not _PYTHON_BIN.exists():
@@ -136,7 +200,7 @@ class SimulationLifecycleMixin:
                 "OASIS requires Python 3.10/3.11. "
                 "Please run 'make quickstart' or set up a compatible virtual environment."
             )
-        
+
         # Log which python we are using for visibility
         logger.info("Using Python: %s", _PYTHON_BIN)
 
@@ -148,7 +212,7 @@ class SimulationLifecycleMixin:
             )
 
         # Select simulation script based on enabled platforms.
-        platforms = config.get("platforms", {"facebook": True, "instagram": True})
+        platforms = config.get("platforms", {"twitter": True, "reddit": True})
         facebook_on = platforms.get("facebook", False)
         instagram_on = platforms.get("instagram", False)
         twitter_on = platforms.get("twitter", False)
@@ -164,6 +228,8 @@ class SimulationLifecycleMixin:
             script_to_run = _INSTAGRAM_SCRIPT
         elif twitter_on:
             script_to_run = _SCRIPT_PATH
+        elif reddit_on:
+            script_to_run = _REDDIT_SCRIPT
         else:
             script_to_run = _SCRIPT_PATH  # fallback
         if not script_to_run.exists():
@@ -174,6 +240,8 @@ class SimulationLifecycleMixin:
 
         # Phase 1B: Load temporal activity profiles for this session.
         self._load_activity_profiles(session_id)
+        # Multi-platform identity: build per-session MultiLayerNetwork from persisted identities.
+        await self._init_multi_layer_network(session_id)
 
         # Write the full config (without API key) to a session-specific file.
         full_config = _build_full_config(config, session_id)
@@ -200,18 +268,34 @@ class SimulationLifecycleMixin:
 
         # Write stderr to a log file to avoid pipe buffer blocking.
         log_file_path = config_dir / "sim.log"
+        stdout_log_path = config_dir / "sim.stdout.log"
         # log_file and process are initialised to None so the finally clause
         # can safely guard their cleanup even if creation fails mid-way.
         log_file = None
         process = None
+        runtime_errors: list[str] = []
+        processed_hook_rounds: set[int] = set()
+        multi_platform_run = enabled_count > 1
         import time as _time_mod  # noqa: PLC0415
 
         _sim_start_time = _time_mod.perf_counter()
         try:
             log_file = log_file_path.open("wb")
 
-            # Pass API key via env var (not in the config file on disk).
+            # Pass API keys via env vars (not in the config file on disk).
             subprocess_env = {**os.environ, "OPENROUTER_API_KEY": _get_api_key()}
+            provider = str(full_config.get("llm_provider") or "openrouter")
+            provider_env_keys = {
+                "fireworks": "FIREWORKS_API_KEY",
+                "deepseek": "DEEPSEEK_API_KEY",
+                "openai": "OPENAI_API_KEY",
+                "together": "TOGETHER_API_KEY",
+                "openrouter": "OPENROUTER_API_KEY",
+            }
+            provider_key = str(config.get("llm_api_key") or "")
+            provider_env_key = provider_env_keys.get(provider)
+            if provider_key and provider_env_key:
+                subprocess_env[provider_env_key] = provider_key
 
             process = await self._subprocess_mgr.launch(
                 session_id,
@@ -226,6 +310,8 @@ class SimulationLifecycleMixin:
                 line = raw_line.decode("utf-8", errors="replace").strip()
                 if not line:
                     continue
+                with stdout_log_path.open("a", encoding="utf-8") as stdout_log:
+                    stdout_log.write(line + "\n")
 
                 update = _try_parse_jsonl(line)
                 if update is None:
@@ -242,6 +328,10 @@ class SimulationLifecycleMixin:
                 if update.get("type") == "post":
                     await self._handle_post_update(session_id, update)
 
+                if update.get("type") == "error":
+                    message = str(update.get("data", {}).get("message") or update)
+                    runtime_errors.append(message[:500])
+
                 # Log non-content actions (follow, like, lurk, etc.)
                 if update.get("type") == "action":
                     await self._handle_action_update(session_id, update)
@@ -253,15 +343,25 @@ class SimulationLifecycleMixin:
                     except Exception:
                         logger.exception("Progress callback error for session %s", session_id)
 
-                # Process memories when a round completes
-                if update.get("type") == "progress":
-                    completed_round = update.get("data", {}).get("round")
-                    if completed_round is not None:
-                        completed_round_int = int(completed_round)
-                        await self._execute_round_hooks(session_id, completed_round_int)
+                # Process per-round hooks only at real, de-duplicated round boundaries.
+                completed_round_int = _progress_round_for_hooks(
+                    update,
+                    multi_platform=multi_platform_run,
+                    processed_rounds=processed_hook_rounds,
+                )
+                if completed_round_int is not None:
+                    await self._execute_round_hooks(session_id, completed_round_int)
 
             await process.wait()
             self._subprocess_mgr.check_exit_code(session_id)
+            if runtime_errors:
+                joined = "; ".join(runtime_errors[:3])
+                raise RuntimeError(f"OASIS emitted error event(s): {joined}")
+            from backend.app.services.simulation_artifacts import count_effective_actions  # noqa: PLC0415
+
+            action_count = await count_effective_actions(session_id)
+            if action_count <= 0:
+                raise RuntimeError("no_effective_actions: OASIS completed without effective actions")
 
             # Take final KG snapshot at completion
             try:
@@ -408,6 +508,11 @@ class SimulationLifecycleMixin:
         self._activation_rngs.pop(session_id, None)
         self._pending_arousal_deltas.pop(session_id, None)
 
+        # Multi-platform identity runtime state
+        self._multi_layer_networks.pop(session_id, None)
+        self._round_active_agents.pop(session_id, None)
+        self._agent_moderation_risks.pop(session_id, None)
+
         # kg_driven state
         self._kg_mode.pop(session_id, None)
         self._kg_sessions.pop(session_id, None)
@@ -502,7 +607,7 @@ class SimulationLifecycleMixin:
                 post_update: dict[str, Any] = {
                     "type": "post",
                     "data": {
-                        "platform": "facebook",
+                        "platform": "twitter",
                         "username": f"dry_user_{i}",
                         "content": f"[dry-run] Round {rnd} mock post #{i}",
                         "round": rnd,
@@ -559,13 +664,8 @@ class SimulationLifecycleMixin:
             except Exception:
                 logger.exception("dry_run progress_callback error session=%s", session_id)
 
-        # Clean up buffers (mirrors the finally block in run())
-        self._posts_buffer.pop(session_id, None)
-        self._macro_state.pop(session_id, None)
-        self._round_profiles.pop(session_id, None)
-        rc = self._round_caches.pop(session_id, None)
-        if rc is not None:
-            rc.clear()
+        # Clean up buffers/tasks (mirrors the finally block in run()).
         if self._batch_writer is not None:
             self._batch_writer.clear()
+        await self.cleanup_session(session_id)
         logger.info("dry_run complete for session %s (%d rounds)", session_id, mock_rounds)

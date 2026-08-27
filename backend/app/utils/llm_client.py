@@ -66,7 +66,7 @@ _RETRY_BASE_DELAY_S = 1.0
 _PROVIDERS: dict[str, dict[str, Any]] = {
     "fireworks": {
         "base_url": "https://api.fireworks.ai/inference/v1",
-        "default_model": "accounts/fireworks/models/deepseek/deepseek-v3.2",
+        "default_model": "accounts/fireworks/models/minimax-m2p5",
         "cost_per_1k_input": 0.00009,
         "cost_per_1k_output": 0.00027,
         "env_key": "FIREWORKS_API_KEY",
@@ -131,6 +131,21 @@ _PROVIDERS: dict[str, dict[str, Any]] = {
     },
 }
 
+_KNOWN_BAD_MODEL_IDS: frozenset[str] = frozenset(
+    {
+        "accounts/fireworks/models/deepseek-v3p2",
+        "accounts/fireworks/models/deepseek/deepseek-v3.2",
+    }
+)
+
+
+def _provider_default_model(provider: str) -> str:
+    return str(_PROVIDERS.get(provider, _PROVIDERS["openrouter"]).get("default_model") or "")
+
+
+def _is_known_bad_model(model: str | None) -> bool:
+    return bool(model and model in _KNOWN_BAD_MODEL_IDS)
+
 
 # ---------------------------------------------------------------------------
 # Helper: calculate cost
@@ -145,6 +160,55 @@ def _calculate_cost(
     input_cost = (prompt_tokens / 1000) * provider_cfg["cost_per_1k_input"]
     output_cost = (completion_tokens / 1000) * provider_cfg["cost_per_1k_output"]
     return round(input_cost + output_cost, 8)
+
+
+def _extract_json_payload(content: str) -> str:
+    """Return a parseable JSON object/array from an LLM response string."""
+    cleaned = content.strip()
+
+    if cleaned.startswith("```"):
+        first_newline = cleaned.find("\n")
+        if first_newline != -1:
+            cleaned = cleaned[first_newline + 1 :]
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
+    cleaned = cleaned.strip()
+
+    try:
+        json.loads(cleaned)
+        return cleaned
+    except json.JSONDecodeError:
+        pass
+
+    start_candidates = [(idx, ch) for ch in ("{", "[") if (idx := cleaned.find(ch)) != -1]
+    if not start_candidates:
+        return cleaned
+    start, opener = min(start_candidates, key=lambda item: item[0])
+    closer = "}" if opener == "{" else "]"
+
+    depth = 0
+    in_string = False
+    escape = False
+    for idx in range(start, len(cleaned)):
+        ch = cleaned[idx]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == opener:
+            depth += 1
+        elif ch == closer:
+            depth -= 1
+            if depth == 0:
+                return cleaned[start : idx + 1].strip()
+
+    return cleaned
 
 
 # ---------------------------------------------------------------------------
@@ -177,12 +241,12 @@ def get_agent_provider_model() -> tuple[str, str]:
     """
     provider = _rs_get("agent_llm_provider") or os.environ.get("AGENT_LLM_PROVIDER") or get_default_provider()
     model_override = _rs_get("agent_llm_model") or os.environ.get("AGENT_LLM_MODEL")
-    if model_override:
+    if model_override and not _is_known_bad_model(model_override):
         model = model_override
     elif provider == "google":
         model = os.environ.get("GOOGLE_AGENT_MODEL", _PROVIDERS["google"]["default_model"])
     else:
-        model = _PROVIDERS.get(provider, _PROVIDERS["openrouter"])["default_model"]
+        model = _provider_default_model(provider)
     return provider, model
 
 
@@ -197,7 +261,7 @@ def get_agent_model(is_stakeholder: bool = True) -> tuple[str, str]:
         return get_agent_provider_model()
     provider = _rs_get("agent_llm_provider") or os.environ.get("AGENT_LLM_PROVIDER") or get_default_provider()
     lite_model = _rs_get("agent_llm_model_lite") or os.environ.get("AGENT_LLM_MODEL_LITE")
-    if lite_model:
+    if lite_model and not _is_known_bad_model(lite_model):
         return provider, lite_model
     return get_agent_provider_model()
 
@@ -210,12 +274,12 @@ def get_report_provider_model() -> tuple[str, str]:
     """
     provider = _rs_get("llm_provider") or get_default_provider()
     model_override = _rs_get("report_llm_model")
-    if model_override:
+    if model_override and not _is_known_bad_model(model_override):
         model = model_override
     elif provider == "google":
         model = os.environ.get("GOOGLE_REPORT_MODEL", "gemini-3.1-pro-preview")
     else:
-        model = _PROVIDERS.get(provider, _PROVIDERS["openrouter"])["default_model"]
+        model = _provider_default_model(provider)
     return provider, model
 
 
@@ -241,7 +305,7 @@ def get_step_provider_model(step: int) -> tuple[str, str]:
         return get_agent_provider_model()
     provider = _rs_get(f"{prefix}_llm_provider")
     model = _rs_get(f"{prefix}_llm_model")
-    if not provider or not model:
+    if not provider or not model or _is_known_bad_model(model):
         return get_report_provider_model() if step == 4 else get_agent_provider_model()
     return provider, model
 
@@ -253,7 +317,7 @@ def get_step3_lite_model() -> tuple[str, str]:
     """
     provider = _rs_get("step3_llm_provider") or get_agent_provider_model()[0]
     lite_model = _rs_get("step3_llm_model_lite") or _rs_get("agent_llm_model_lite")
-    if not lite_model:
+    if not lite_model or _is_known_bad_model(lite_model):
         return get_agent_model(is_stakeholder=False)
     return provider, lite_model
 
@@ -328,13 +392,14 @@ class LLMClient:
         self,
         messages: list[dict[str, str]],
         *,
-        provider: str = "openrouter",
+        provider: str | None = None,
         model: str | None = None,
         temperature: float = 0.7,
         max_tokens: int = 4096,
         api_key: str | None = None,
         base_url: str | None = None,
         session_id: str | None = None,
+        json_mode: bool = False,
     ) -> LLMResponse:
         """Send a chat completion request and return an ``LLMResponse``.
 
@@ -344,6 +409,7 @@ class LLMClient:
             model: Override the provider's default model.
             temperature: Sampling temperature.
             max_tokens: Maximum tokens in the response.
+            json_mode: Request provider-native JSON output when supported.
 
         Returns:
             An immutable ``LLMResponse``.
@@ -355,6 +421,7 @@ class LLMClient:
         """
         from backend.app.utils.circuit_breaker import CircuitBreakerOpenError, get_breaker  # noqa: PLC0415
 
+        provider = provider or get_default_provider()
         breaker = get_breaker(provider)
         if breaker.is_open():
             raise CircuitBreakerOpenError(provider)
@@ -392,9 +459,11 @@ class LLMClient:
             elif provider == "anthropic":
                 response = await self._chat_anthropic(messages, resolved_model, temperature, max_tokens, cfg)
             elif provider == "google":
-                response = await self._chat_google(messages, resolved_model, temperature, max_tokens, cfg)
+                response = await self._chat_google(messages, resolved_model, temperature, max_tokens, cfg, json_mode)
             else:
-                response = await self._chat_openai_compat(messages, resolved_model, temperature, max_tokens, cfg)
+                response = await self._chat_openai_compat(
+                    messages, resolved_model, temperature, max_tokens, cfg, json_mode
+                )
             breaker.record_success()
         except Exception:
             breaker.record_failure()
@@ -411,9 +480,9 @@ class LLMClient:
         self,
         messages: list[dict[str, str]],
         *,
-        provider: str = "openrouter",
+        provider: str | None = None,
         **kwargs: Any,
-    ) -> dict[str, Any]:
+    ) -> Any:
         """Chat and parse the response as JSON.
 
         Appends an instruction asking the LLM to reply with valid JSON.
@@ -429,17 +498,9 @@ class LLMClient:
                 "content": ("IMPORTANT: Respond ONLY with valid JSON. No markdown, no code fences, no extra text."),
             },
         ]
-        response = await self.chat(augmented_messages, provider=provider, **kwargs)
+        response = await self.chat(augmented_messages, provider=provider, json_mode=True, **kwargs)
         cleaned = response.content.strip()
-
-        # Strip markdown code fences if present
-        if cleaned.startswith("```"):
-            first_newline = cleaned.index("\n")
-            cleaned = cleaned[first_newline + 1 :]
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3]
-
-        return json.loads(cleaned.strip())
+        return json.loads(_extract_json_payload(cleaned))
 
     # ------------------------------------------------------------------
     # Local inference (vLLM / Ollama with OpenRouter fallback)
@@ -539,7 +600,7 @@ class LLMClient:
         self,
         messages_batch: list[list[dict[str, str]]],
         *,
-        provider: str = "openrouter",
+        provider: str | None = None,
         model: str | None = None,
         temperature: float = 0.7,
         max_tokens: int = 4096,
@@ -566,6 +627,7 @@ class LLMClient:
         """
         if not messages_batch:
             return []
+        provider = provider or get_default_provider()
 
         async def _safe_chat(msgs: list[dict[str, str]]) -> str:
             try:
@@ -593,6 +655,7 @@ class LLMClient:
         temperature: float,
         max_tokens: int,
         cfg: dict[str, Any],
+        json_mode: bool = False,
     ) -> LLMResponse:
         """Call an OpenAI-compatible chat endpoint (DeepSeek / Qwen / vLLM / Ollama)."""
         url = f"{cfg['base_url']}/chat/completions"
@@ -605,6 +668,8 @@ class LLMClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
 
         client = self._get_http_client()
         _t0 = time.monotonic()
@@ -617,6 +682,9 @@ class LLMClient:
             except httpx.HTTPStatusError as exc:
                 last_exc = exc
                 status = exc.response.status_code if exc.response is not None else 0
+                if status == 400 and payload.pop("response_format", None) is not None:
+                    logger.warning("LLM %s rejected JSON mode — retrying without response_format", model)
+                    continue
                 if status in _RETRY_STATUSES and attempt < _MAX_RETRIES - 1:
                     delay = _RETRY_BASE_DELAY_S * (2**attempt)
                     logger.warning(
@@ -765,6 +833,7 @@ class LLMClient:
         temperature: float,
         max_tokens: int,
         cfg: dict[str, Any],
+        json_mode: bool = False,
     ) -> LLMResponse:
         """Call Google Generative AI REST API (generateContent)."""
         api_key = cfg["api_key"]
@@ -790,6 +859,8 @@ class LLMClient:
                 "maxOutputTokens": max_tokens,
             },
         }
+        if json_mode:
+            payload["generationConfig"]["responseMimeType"] = "application/json"
         if system_text:
             payload["system_instruction"] = {"parts": [{"text": system_text}]}
 

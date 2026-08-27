@@ -13,6 +13,7 @@ data/raw/
 data/cleaned/
 data/sessions/
 data/vector_store/
+data/reality_seeds/
 *.db
 *.db-shm
 *.db-wal

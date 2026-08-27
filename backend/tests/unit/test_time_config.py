@@ -61,13 +61,12 @@ async def test_infer_time_config_geopolitical():
     from backend.app.services.zero_config import ZeroConfigService
 
     mock_llm = AsyncMock()
-    mock_llm.chat.return_value = type(
-        "R",
-        (),
-        {
-            "content": '{"total_simulated_hours": 720, "minutes_per_round": 1440, "round_label_unit": "day", "rationale": "30-day geopolitical conflict"}'
-        },
-    )()
+    mock_llm.chat_json.return_value = {
+        "total_simulated_hours": 720,
+        "minutes_per_round": 1440,
+        "round_label_unit": "day",
+        "rationale": "30-day geopolitical conflict",
+    }
 
     zc = ZeroConfigService()
     tc = await zc.infer_time_config("USA-Israel-Iran military conflict", round_count=30, llm=mock_llm)
@@ -81,9 +80,23 @@ async def test_infer_time_config_fallback_on_error():
     from backend.app.services.zero_config import ZeroConfigService
 
     mock_llm = AsyncMock()
-    mock_llm.chat.side_effect = Exception("LLM down")
+    mock_llm.chat_json.side_effect = Exception("LLM down")
 
     zc = ZeroConfigService()
     tc = await zc.infer_time_config("anything", round_count=20, llm=mock_llm)
+    assert tc.minutes_per_round == 1440
+    assert tc.round_label_unit == "day"
+
+
+@pytest.mark.asyncio
+async def test_infer_time_config_fallback_on_invalid_json_shape():
+    """MagicMock or malformed chat_json payloads must not become valid time units."""
+    from backend.app.services.zero_config import ZeroConfigService
+
+    mock_llm = AsyncMock()
+    mock_llm.chat_json.return_value = {"round_label_unit": object()}
+
+    zc = ZeroConfigService()
+    tc = await zc.infer_time_config("anything", round_count=12, llm=mock_llm)
     assert tc.minutes_per_round == 1440
     assert tc.round_label_unit == "day"
