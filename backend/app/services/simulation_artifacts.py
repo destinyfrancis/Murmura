@@ -14,6 +14,7 @@ _SECRET_PATTERNS = (
     re.compile(r"sk-[A-Za-z0-9_\-]{8,}"),
     re.compile(r"(?i)(api[_-]?key|authorization|bearer|token|secret)\s*[:=]\s*['\"]?[^'\"\s,}]+"),
 )
+_SESSION_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
 
 
 def sanitize_artifact_message(message: str) -> str:
@@ -63,7 +64,7 @@ async def count_effective_actions(session_id: str) -> int:
 
 async def collect_simulation_artifacts(session_id: str) -> dict[str, Any]:
     """Return launch-gate artifact metadata without raw secrets."""
-    session_dir = _PROJECT_ROOT / "data" / "sessions" / session_id
+    session_dir = _session_directory(session_id)
     sim_config = session_dir / "sim_config.json"
     agents_csv = session_dir / "agents.csv"
     sim_log = session_dir / "sim.log"
@@ -188,14 +189,16 @@ async def collect_simulation_artifacts(session_id: str) -> dict[str, Any]:
         "counts": counts,
         "artifacts": {
             "sim_config": _file_meta(sim_config),
-            "agents_csv": _file_meta(Path(_agent_csv_path(session_row, agents_csv))),
+            "agents_csv": _file_meta(_agent_csv_path(session_row, agents_csv, session_dir)),
             "sim_log": _file_meta(sim_log),
             "sim_stdout": _file_meta(sim_stdout),
             "twitter_stdout": _file_meta(session_dir / "twitter.stdout.log"),
             "twitter_stderr": _file_meta(session_dir / "twitter.stderr.log"),
             "reddit_stdout": _file_meta(session_dir / "reddit.stdout.log"),
             "reddit_stderr": _file_meta(session_dir / "reddit.stderr.log"),
-            "oasis_db": _file_meta(Path(str(session_row["oasis_db_path"] or ""))),
+            "oasis_db": _file_meta(
+                _safe_session_file(session_dir, str(session_row["oasis_db_path"] or ""), session_dir / "oasis.db")
+            ),
         },
         "jobs": [_job_meta(row) for row in job_rows],
         "errors": errors[:10],
@@ -211,12 +214,34 @@ def _file_meta(path: Path) -> dict[str, Any]:
     }
 
 
-def _agent_csv_path(session_row: Any, default: Path) -> str:
+def _session_directory(session_id: str) -> Path:
+    """Return a validated session directory under the project sessions root."""
+    if not _SESSION_ID_PATTERN.fullmatch(session_id):
+        raise ValueError("Invalid session identifier")
+    sessions_root = (_PROJECT_ROOT / "data" / "sessions").resolve()
+    session_dir = (sessions_root / session_id).resolve()
+    if not session_dir.is_relative_to(sessions_root):
+        raise ValueError("Invalid session directory")
+    return session_dir
+
+
+def _safe_session_file(session_dir: Path, candidate: str | Path, default: Path) -> Path:
+    """Resolve a stored artifact path only when it remains inside its session."""
+    path = Path(candidate)
+    if not path.is_absolute():
+        path = _PROJECT_ROOT / path
+    resolved = path.resolve()
+    if resolved == session_dir or not resolved.is_relative_to(session_dir):
+        return default
+    return resolved
+
+
+def _agent_csv_path(session_row: Any, default: Path, session_dir: Path) -> Path:
     try:
         config = json.loads(session_row["config_json"] or "{}")
-        return str(config.get("agent_csv_path") or default)
+        return _safe_session_file(session_dir, str(config.get("agent_csv_path") or default), default)
     except (TypeError, json.JSONDecodeError):
-        return str(default)
+        return default
 
 
 def _tail_failure_lines(path: Path) -> list[str]:
