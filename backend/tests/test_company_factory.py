@@ -568,6 +568,7 @@ class TestCreateSimulationB2BIntegration:
             patch("backend.app.api.simulation.SupplyChainBuilder") as mock_scb,
             patch("asyncio.to_thread", new=AsyncMock()),
             patch("backend.app.api.simulation.get_db") as mock_get_db,
+            patch("backend.app.api.simulation._load_graph_seed_text", new=AsyncMock(return_value="")),
         ):
             _wire_mocks(mock_af, mock_pg, mock_mc, mock_sm, mock_get_db)
             mock_request = Request(scope={"type": "http", "path": "/api/simulation"})
@@ -596,6 +597,7 @@ class TestCreateSimulationB2BIntegration:
             patch("backend.app.api.simulation.SupplyChainBuilder") as mock_scb,
             patch("asyncio.to_thread", new=AsyncMock()),
             patch("backend.app.api.simulation.get_db") as mock_get_db,
+            patch("backend.app.api.simulation._load_graph_seed_text", new=AsyncMock(return_value="")),
         ):
             _wire_mocks(mock_af, mock_pg, mock_mc, mock_sm, mock_get_db)
             _wire_b2b_mocks(mock_cf, mock_scb, mock_companies)
@@ -634,6 +636,7 @@ class TestCreateSimulationB2BIntegration:
             patch("backend.app.api.simulation.SupplyChainBuilder") as mock_scb,
             patch("asyncio.to_thread", new=AsyncMock()),
             patch("backend.app.api.simulation.get_db") as mock_get_db,
+            patch("backend.app.api.simulation._load_graph_seed_text", new=AsyncMock(return_value="")),
         ):
             _wire_mocks(mock_af, mock_pg, mock_mc, mock_sm, mock_get_db)
             _wire_b2b_mocks(mock_cf, mock_scb, mock_companies)
@@ -664,6 +667,7 @@ class TestCreateSimulationB2BIntegration:
             patch("backend.app.api.simulation.SupplyChainBuilder"),
             patch("asyncio.to_thread", new=AsyncMock()),
             patch("backend.app.api.simulation.get_db") as mock_get_db,
+            patch("backend.app.api.simulation._load_graph_seed_text", new=AsyncMock(return_value="")),
         ):
             _wire_mocks(mock_af, mock_pg, mock_mc, mock_sm, mock_get_db)
             # Make generate_companies raise an error
@@ -693,6 +697,7 @@ class TestCreateSimulationB2BIntegration:
             patch("backend.app.api.simulation.SupplyChainBuilder") as mock_scb,
             patch("asyncio.to_thread", new=AsyncMock()),
             patch("backend.app.api.simulation.get_db") as mock_get_db,
+            patch("backend.app.api.simulation._load_graph_seed_text", new=AsyncMock(return_value="")),
         ):
             _wire_mocks(mock_af, mock_pg, mock_mc, mock_sm, mock_get_db)
             _wire_b2b_mocks(mock_cf, mock_scb, mock_companies)
@@ -726,6 +731,7 @@ class TestCreateSimulationB2BIntegration:
             patch("backend.app.api.simulation.SupplyChainBuilder") as mock_scb,
             patch("asyncio.to_thread", new=AsyncMock()),
             patch("backend.app.api.simulation.get_db") as mock_get_db,
+            patch("backend.app.api.simulation._load_graph_seed_text", new=AsyncMock(return_value="")),
         ):
             _wire_mocks(mock_af, mock_pg, mock_mc, mock_sm, mock_get_db)
             _wire_b2b_mocks(mock_cf, mock_scb, mock_companies, edge_count=7)
