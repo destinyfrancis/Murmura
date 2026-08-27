@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -218,22 +219,23 @@ def _session_directory(session_id: str) -> Path:
     """Return a validated session directory under the project sessions root."""
     if not _SESSION_ID_PATTERN.fullmatch(session_id):
         raise ValueError("Invalid session identifier")
-    sessions_root = (_PROJECT_ROOT / "data" / "sessions").resolve()
-    session_dir = (sessions_root / session_id).resolve()
-    if not session_dir.is_relative_to(sessions_root):
+    sessions_root = os.path.realpath(_PROJECT_ROOT / "data" / "sessions")
+    session_dir = os.path.realpath(os.path.join(sessions_root, session_id))
+    if not session_dir.startswith(f"{sessions_root}{os.sep}"):
         raise ValueError("Invalid session directory")
-    return session_dir
+    return Path(session_dir)
 
 
 def _safe_session_file(session_dir: Path, candidate: str | Path, default: Path) -> Path:
     """Resolve a stored artifact path only when it remains inside its session."""
-    path = Path(candidate)
-    if not path.is_absolute():
-        path = _PROJECT_ROOT / path
-    resolved = path.resolve()
-    if resolved == session_dir or not resolved.is_relative_to(session_dir):
+    candidate_path = str(candidate)
+    if not os.path.isabs(candidate_path):
+        candidate_path = os.path.join(_PROJECT_ROOT, candidate_path)
+    session_root = os.path.realpath(session_dir)
+    resolved = os.path.realpath(candidate_path)
+    if resolved == session_root or not resolved.startswith(f"{session_root}{os.sep}"):
         return default
-    return resolved
+    return Path(resolved)
 
 
 def _agent_csv_path(session_row: Any, default: Path, session_dir: Path) -> Path:
