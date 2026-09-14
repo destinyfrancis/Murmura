@@ -70,7 +70,7 @@ async function fetchMore() {
 }
 
 function goToSession(session) {
-  router.push(`/app/graph/${session.id}`)
+  router.push({ path: '/process/quick', query: { express: '1', sessionId: session.id } })
 }
 
 function goNew() {

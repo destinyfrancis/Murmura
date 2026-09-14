@@ -64,9 +64,14 @@ async def dry_run_db(tmp_path):
         finally:
             await conn.close()
 
+    # Import the consumer before patching the provider module. Otherwise the
+    # lazy import below can permanently bind this fixture's DB function into
+    # action_logger after the patch context exits.
+    from backend.scripts import action_logger as action_logger_module
+
     with (
         patch("backend.app.utils.db.get_db", _mock_get_db),
-        patch("backend.scripts.action_logger.get_db", _mock_get_db),
+        patch.object(action_logger_module, "get_db", _mock_get_db),
     ):
         yield db_path, _mock_get_db
 

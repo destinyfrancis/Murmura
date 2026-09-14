@@ -378,7 +378,14 @@ def validate_granger_causality(
     effective_max_lag = min(max_lag, max(1, min_len // 3))
 
     try:
-        results = grangercausalitytests(data, maxlag=effective_max_lag, verbose=False)
+        try:
+            # ``verbose`` was removed by newer statsmodels releases; keep the
+            # quiet call for older versions and retry without it when needed.
+            results = grangercausalitytests(data, maxlag=effective_max_lag, verbose=False)
+        except TypeError as exc:
+            if "verbose" not in str(exc):
+                raise
+            results = grangercausalitytests(data, maxlag=effective_max_lag)
     except Exception as exc:
         logger.warning("Granger test failed for %s -> %s: %s", cause_name, effect_name, exc)
         return GrangerResult(

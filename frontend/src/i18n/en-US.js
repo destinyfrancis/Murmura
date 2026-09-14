@@ -1,4 +1,33 @@
 export default {
+  research: {
+    chooseActor: 'Choose an actor / entity',
+    demoLabel: 'SCRIPTED REPLAY', demoOpen: 'Open free demo', demoHint: 'This free demo uses scripted data; no model was run. Disable DEMO_MODE and configure a model to explore your own material.',
+    novel: { label: 'Fiction: a village facing a flood', desc: 'Will the characters cooperate, divide or change their minds?', seed: 'Fictional scenario: a village faces a flood. Mayor Ming wants to save the old bridge. Boat operator Ling can evacuate people but needs fuel. Shopkeeper Hong has fuel but is still owed payment from the last rescue. Doctor Yan must evacuate patients first. These four previously worked together. Use only these facts.', question: 'How do the fuel shortage and unpaid debt change cooperation?' },
+    politics: { label: 'Politics: a contested policy', desc: 'Explore stakeholder reactions using dated, sourced material.', seed: 'Hypothetical scenario, not a news report: a city proposes converting traffic lanes into bus lanes. The mayor wants less congestion. The transport union supports it but needs more drivers. Shop owners fear losing loading access. Residents want elderly pickup points retained. Consultation is ongoing and no start date has been set.', question: 'Which concession might enable agreement, and which disputes remain?' },
+    relationship: { label: 'Relationships: a relocation decision', desc: 'Explore choices without claiming to know a real person’s mind.', seed: 'Fictional relationship: Tong has a job offer abroad and wants partner Him to move too. Him cares for his father but has not explained this concern to Tong. Their friend Shan knows both situations and offers help arranging care. The couple value living together but have not discussed a time limit for living apart.', question: 'How might their choices change once the care responsibilities are discussed?' },
+    interpret: 'Interpret with a model (uses API)',
+
+    "preset": "Small world",
+    "presetHint": "Up to 16 agents · 5 rounds · one platform",
+    "world": "World & interactions",
+    "worldHint": "Inspect the graph while your scenario unfolds.",
+    "empty": "The graph will appear after the seed is processed.",
+    "loading": "Loading world…",
+    "failed": "Could not load this world.",
+    "retry": "Retry",
+    "nodes": "Actors / entities",
+    "edges": "Relationships",
+    "events": "Recent activity",
+    "source": "Source / description",
+    "unknown": "Not available",
+    "advanced": "More research settings",
+    "scale": "World size",
+    "agents": "Agents",
+    "rounds": "Rounds",
+    "custom": "Custom",
+    "unverified": "Scenario exploration · prediction accuracy unverified"
+},
+
   nav: {
     home: 'Home',
     workspace: 'Workspace',
@@ -503,11 +532,11 @@ export default {
     consoleTitle: 'Prediction Console',
     consoleStatus: 'System Status',
     consoleStatusLive: 'Available',
-    consoleSignal: 'Clean-room UI · 5-step workflow',
+    consoleSignal: 'Actors · interactions · possible futures',
     pipelineTitle: '5-Step Control Flow',
     examplesTitle: 'Example Scenarios',
-    betaTitle: 'Beta Workflows',
-    betaHint: 'Calibrated launch templates; stronger for public beta than arbitrary scenarios.',
+    betaTitle: 'Start with a small scenario',
+    betaHint: 'Three fictional starting points. Edit the people, relationships and question.',
     beta: {
       publicNarrative: {
         label: 'Public Narrative',
@@ -557,7 +586,7 @@ export default {
     workflow: {
       graph: 'Extract entities, relations, and hidden stakeholders',
       env: 'Generate agents, platform identities, and scenario config',
-      sim: 'Run multi-agent simulation and emergence hooks',
+      sim: 'Observe interaction and changing choices',
       report: 'Generate traceable reports through XAI tools',
       interact: 'Interview agents and explore What-If branches'
     },
@@ -591,11 +620,11 @@ export default {
     godView: 'God View',
     presets: {
       fast: 'Fast',
-      fastHint: '100 agents · 15 rounds (~2 min)',
+      fastHint: '100 agents · 15 rounds',
       standard: 'Standard',
-      standardHint: '300 agents · 20 rounds (~8 min)',
+      standardHint: '300 agents · 20 rounds',
       deep: 'Deep',
-      deepHint: '500 agents · 30 rounds (~20 min)'
+      deepHint: '500 agents · 30 rounds'
     },
     errors: {
       format: 'Support for {ext} format is not available. Please upload PDF, TXT, or Markdown.',
@@ -614,17 +643,23 @@ export default {
     }
   },
   landing: {
+    brandZh: '群飛鳥',
     nav: {
       howItWorks: 'How it works',
       features: 'Features',
+      github: 'Open source',
       launch: 'Launch Engine →'
     },
     hero: {
-      eyebrow: 'UNIVERSAL PREDICTION ENGINE',
-      title: 'Drop any text.',
-      titleAccent: 'Simulate any world.',
-      sub: 'Feed Murmura a sentence, a document, or a scenario — it builds the knowledge graph, spawns agents, runs the simulation, and predicts collective outcomes.',
-      cta: 'Start Predicting',
+      eyebrow: 'MURMURA · A SCENARIO INTELLIGENCE ENGINE',
+      title: 'The future is not a line.',
+      titleAccent: 'It emerges from interaction.',
+      titleZh: '未來唔係一條直線，而係由互動湧現。',
+      sub: 'Start with a news story, a policy memo, a market question, or a human situation. Murmura turns the text into a living world where stakeholders respond, influence one another, and reveal several plausible ways forward.',
+      note: 'Not a prophecy. A clearer way to examine what could happen next.',
+      seed: 'SEED',
+      possibleFutures: 'POSSIBLE FUTURES',
+      cta: 'Request a preview',
       workspace: 'Workspace',
       stats: {
         agents: 'Agents per run',
@@ -633,47 +668,71 @@ export default {
         xai: 'XAI analysis tools'
       }
     },
+    promise: {
+      label: 'WHY SIMULATE',
+      title: 'A decision never meets just one reaction.',
+      desc: 'A poll captures what people say they intend to do. Murmura places context, incentives, memory, trust, and constraints into the same runnable scenario, then watches how interaction changes the outcome. The result is not a fragile single forecast line, but a map of possibilities you can question, compare, and test again.',
+    },
+    lenses: {
+      list: {
+        interactions: { title: 'See interaction, not isolated opinion', desc: 'Each agent carries its own goals, memories, personality, and trust circles. Outcomes form through their responses to one another.' },
+        feedback: { title: 'Follow feedback as it compounds', desc: 'A decision can shift confidence, attention, resources, and the next round of decisions. Murmura keeps that causal thread visible.' },
+        emergence: { title: 'Catch what was never scripted', desc: 'Factions, reversals, tipping points, unexpected alliances, and cascades can surface after enough rounds of interaction.' },
+      }
+    },
     workflow: {
       label: 'HOW IT WORKS',
       title: '5-Step Workflow',
       steps: {
-        graph: { label: 'GRAPH', title: 'Knowledge Graph', desc: 'Seed text → entity extraction → causal network auto-built' },
-        env: { label: 'ENV', title: 'Environment Setup', desc: 'Agent factory generates profiles from KG nodes, zero config needed' },
-        sim: { label: 'SIM', title: 'Simulation', desc: 'OASIS multi-agent engine runs with emergent behavior fully on' },
-        report: { label: 'REPORT', title: 'ReACT Report', desc: '3-phase LLM: outline → per-section tool calls → markdown assembly' },
-        interact: { label: 'INTERACT', title: 'Deep Interaction', desc: 'Interview agents, inject shocks, branch into What-If scenarios' }
+        graph: { label: 'GRAPH', title: 'Read the situation first', desc: 'Seed text → entities, relationships, and stakeholders → a traceable world graph' },
+        env: { label: 'ENV', title: 'Give the world its people', desc: 'Turn graph nodes into agents with goals, memories, trust, and constraints—without hand-building every profile' },
+        sim: { label: 'SIM', title: 'Let the world run', desc: 'Across multiple rounds, agents respond and update their beliefs until new paths begin to surface' },
+        report: { label: 'REPORT', title: 'Make it discussable', desc: 'Organise simulation evidence into probabilities, turning points, risks, and open questions' },
+        interact: { label: 'INTERACT', title: 'Ask “what if?” again', desc: 'Interview agents, inject shocks, and branch the timeline to test the next assumption' }
       }
     },
     features: {
       label: 'CAPABILITIES',
       title: 'What the Engine Does',
       list: {
-        universal: { title: 'Universal Mode', desc: 'Drop any seed text — news, fiction, geopolitics. Engine infers actors, decisions, metrics, shocks automatically.' },
-        kg: { title: 'Knowledge Graph', desc: 'GraphRAG tracks entity relationships and causal chains. Snapshots every 5 rounds, evolves with each interaction.' },
-        emergence: { title: 'Emergence Engine', desc: 'Faction formation, tipping points, echo chambers, virality cascades — all emergent, not scripted.' },
-        monteCarlo: { title: 'Monte Carlo', desc: '100-trial LHS + t-Copula sampling. Wilson score confidence intervals. Up to 10,000 stochastic trials.' },
+        universal: { title: 'Start with a text', desc: 'A news story, document, or rough idea can be the starting point. The engine extracts actors, decisions, metrics, and possible shocks.' },
+        kg: { title: 'Relationships before answers', desc: 'GraphRAG connects evidence, entities, and causal chains so every path has context—not just a score.' },
+        emergence: { title: 'Multi-agent emergence', desc: 'Independent agents act from their goals, memories, and constraints. Factions, reversals, tipping points, and cascades form through interaction.' },
+        monteCarlo: { title: 'Monte Carlo', desc: '500 LHS + t-Copula samples with Wilson intervals, turning a single answer into a probability range you can reason about.' },
         macro: { title: 'Macro Feedback', desc: '11 macro indicators updated per round. Agent micro-decisions feed back into macro state in real time.' },
         scenarios: { title: 'Scenario Branches', desc: 'Fork any simulation at any round. Compare diverging timelines side by side.' }
       }
     },
     useCases: {
       label: 'USE CASES',
-      title: 'Works on Any Domain',
+      title: 'From geopolitics to your next decision.',
       list: {
         geopolitics: { tag: 'Geopolitics', desc: 'Taiwan Strait escalation, Iran-Israel scenarios, trade war cascades' },
-        finance: { tag: 'Finance', desc: 'Fed rate hike contagion, crypto market panics, corporate competition' },
-        society: { tag: 'Society', desc: 'Policy impact modeling, social movement dynamics, demographic shifts' },
-        fiction: { tag: 'Fiction', desc: 'Dream of the Red Chamber, Harry Potter, any narrative world' }
+        finance: { tag: 'Finance & macro', desc: 'Trace how rates, inflation, equities, futures, and currencies move through expectations into firms and households.' },
+        society: { tag: 'Public policy', desc: 'Explore how people of different incomes, ages, places, and beliefs interpret, accept, or resist a policy.' },
+        property: { tag: 'Property & personal finance', desc: 'Combine prices, rates, supply, income, and buyer confidence to explore several paths to an entry decision.' },
+        product: { tag: 'Product & market', desc: 'Before launch, simulate early adopters, wait-and-see customers, competitors, and channel partners.' },
+        reputation: { tag: 'Brand & reputation', desc: 'Follow a small mistake from the first post through trust loss, media attention, and internal pressure.' },
+        relationships: { tag: 'People & relationships', desc: 'Place needs, attachment, misunderstandings, and outside pressure into a scenario to see where a relationship may turn.' },
+        fiction: { tag: 'Stories & worlds', desc: 'Turn a novel, a game faction, a speculative universe, or your own draft into a world you can explore.' }
       }
     },
+    audiences: {
+      label: 'WHO IT IS FOR',
+      title: 'Turn “what if?” into a world you can actually walk through.',
+      policy: { label: 'Policy & public affairs', title: 'See the reaction before the decision.', desc: 'Bring a policy draft, news context, or geopolitical event. Explore how governments, allies, media, businesses, and citizens influence one another, with evidence and uncertainty kept in view.' },
+      business: { label: 'Business & strategy', title: 'Stress-test one product idea against the whole market.', desc: 'From audience segments to competitors, channels, and public conversation, simulate launches, pricing, supply shocks, and reputation risk to find the few factors that really change the outcome.' },
+      individual: { label: 'Individuals & researchers', title: 'Make a difficult choice easier to compare.', desc: 'Whether it is a property decision, a career move, relocation, or a relationship question, Murmura helps you name assumptions, see risks, and notice branches you had not considered.' },
+    },
     cta: {
-      label: 'READY TO SIMULATE?',
-      title: 'Drop your first scenario',
-      sub: 'No configuration needed. Paste any text and the engine handles the rest.',
-      btn: 'Launch Engine →'
+      label: 'PRIVATE PREVIEW',
+      title: 'Bring us the “what if?” you keep returning to.',
+      sub: 'You do not need to learn a modelling language first. Bring a question or a piece of text, and we will map the futures worth exploring.',
+      btn: 'Request a preview →'
     },
     footer: {
       desc: 'Universal Prediction Engine · Agent-Based Simulation',
+      github: 'View on GitHub',
       copy: 'Built with FastAPI · Vue 3 · OASIS · LanceDB'
     }
   },
@@ -786,6 +845,21 @@ export default {
     header: {
       title: 'Settings',
       subtitle: 'Manage API keys, model selection, and system preferences'
+    },
+    access: {
+      loading: 'Checking local settings access…',
+      title: 'Manage local settings',
+      desc: 'On a fresh install, the first registered account becomes the administrator. Use that account to manage models and API keys.',
+      email: 'Email',
+      password: 'Password (at least 8 characters)',
+      login: 'Sign in',
+      register: 'Create administrator',
+      working: 'Working…',
+      switchToRegister: 'Fresh install? Create the first account',
+      switchToLogin: 'Already have an account? Sign in',
+      notAdmin: 'This account is not an administrator and cannot change models or API keys.',
+      failed: 'Sign in failed. Check your email and password.',
+      logout: 'Sign out of settings'
     },
     tabs: {
       navLabel: 'Settings sections',

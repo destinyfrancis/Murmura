@@ -66,8 +66,8 @@ async def test_canonical_graph_build_creates_holder_and_evidence(test_client) ->
 
 
 @pytest.mark.asyncio
-async def test_graph_build_fallback_preserves_long_seed(test_client) -> None:
-    """Empty extraction should still return a fallback KG for long seeds."""
+async def test_empty_extraction_does_not_invent_a_world(test_client) -> None:
+    """Keep the input, but do not manufacture actors/relations after empty extraction."""
     long_seed = "香港樓市加息，銀行收緊按揭，業主同租客重新判斷風險。" * 180
     processed = ProcessedSeed(
         language="zh",
@@ -101,16 +101,13 @@ async def test_graph_build_fallback_preserves_long_seed(test_client) -> None:
             json={"scenario_type": "property", "seed_text": long_seed},
         )
 
-    assert response.status_code == 200
-    payload = response.json()
-    graph_id = payload["data"]["graph_id"]
-    assert payload["data"]["node_count"] >= 3
-    assert payload["data"]["edge_count"] >= 2
-
-    graph_response = await test_client.get(f"/api/graph/{graph_id}")
-    graph_payload = graph_response.json()["data"]
-    assert graph_payload["nodes"]
-    assert graph_payload["edges"]
+    assert response.status_code == 400
+    from backend.app.utils.db import get_db
+    async with get_db() as db:
+        row = await (await db.execute("SELECT seed_text FROM simulation_sessions ORDER BY rowid DESC LIMIT 1")).fetchone()
+        count = await (await db.execute("SELECT COUNT(*) FROM kg_nodes")).fetchone()
+    assert row['seed_text'].count('重新判斷風險。') == 180
+    assert count[0] == 0
 
 
 def test_edge_evidence_prefers_chunk_with_both_endpoints() -> None:

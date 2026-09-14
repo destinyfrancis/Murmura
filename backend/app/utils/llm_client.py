@@ -433,7 +433,7 @@ class LLMClient:
             demo_client = get_demo_client()
             
             # Extract main prompt for routing
-            prompt = messages[-1]["content"] if messages else ""
+            prompt = "\n".join(m["content"] for m in messages)
             content = await demo_client.generate_response(prompt)
             
             logger.info("LLM demo/%s | simulated response | $0.00", provider)

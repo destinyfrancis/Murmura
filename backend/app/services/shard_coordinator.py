@@ -92,8 +92,14 @@ class ShardCoordinator:
         self._sync_events: dict[int, asyncio.Event] = {}
         # Track reader tasks so they can be cancelled on shutdown
         self._reader_tasks: list[asyncio.Task] = []
-        # Patch file shared across shards
-        self._patch_file: Path = Path(tempfile.mktemp(prefix=f"hksim_patch_{session_id}_", suffix=".json"))
+        # Create the shared patch file atomically so another process cannot
+        # claim the predictable path between name generation and first write.
+        with tempfile.NamedTemporaryFile(
+            prefix=f"hksim_patch_{session_id}_",
+            suffix=".json",
+            delete=False,
+        ) as patch_file:
+            self._patch_file = Path(patch_file.name)
 
     # ------------------------------------------------------------------
     # Public API

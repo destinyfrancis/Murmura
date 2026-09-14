@@ -284,9 +284,14 @@ async def register(request: Request, req: RegisterRequest) -> APIResponse:
             if existing is not None:
                 raise HTTPException(status_code=409, detail="Email already registered")
 
+            cursor = await db.execute("SELECT COUNT(*) AS user_count FROM users")
+            count_row = await cursor.fetchone()
+            is_admin = int(count_row["user_count"] or 0) == 0
             await db.execute(
-                "INSERT INTO users (id, email, password_hash, display_name) VALUES (?, ?, ?, ?)",
-                (user_id, req.email, password_hash, display_name),
+                """INSERT INTO users
+                   (id, email, password_hash, display_name, is_admin)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (user_id, req.email, password_hash, display_name, int(is_admin)),
             )
             await db.commit()
     except HTTPException:
@@ -304,6 +309,7 @@ async def register(request: Request, req: RegisterRequest) -> APIResponse:
             "email": req.email,
             "display_name": display_name,
             "token": token,
+            "is_admin": is_admin,
         },
     )
 
@@ -318,7 +324,7 @@ async def login(request: Request, req: LoginRequest) -> APIResponse:
     try:
         async with get_db() as db:
             cursor = await db.execute(
-                "SELECT id, email, password_hash, display_name FROM users WHERE email = ?",
+                "SELECT id, email, password_hash, display_name, is_admin FROM users WHERE email = ?",
                 (req.email,),
             )
             row = await cursor.fetchone()
@@ -338,6 +344,7 @@ async def login(request: Request, req: LoginRequest) -> APIResponse:
             "email": row["email"],
             "display_name": row["display_name"],
             "token": token,
+            "is_admin": bool(row["is_admin"]),
         },
     )
 
@@ -354,5 +361,6 @@ async def get_me(
             "email": user.email,
             "display_name": user.display_name,
             "created_at": user.created_at,
+            "is_admin": user.is_admin,
         },
     )

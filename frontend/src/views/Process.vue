@@ -2,15 +2,14 @@
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { cleanupSession } from '../api/simulation.js'
-import PresetSelector from '../components/PresetSelector.vue'
 import Step1GraphBuild from '../components/Step1GraphBuild.vue'
 import Step2EnvSetup from '../components/Step2EnvSetup.vue'
 import Step3Simulation from '../components/Step3Simulation.vue'
 import Step4Report from '../components/Step4Report.vue'
 import Step5Interaction from '../components/Step5Interaction.vue'
-import WorkflowGraphPulse from '../components/WorkflowGraphPulse.vue'
+import WorldWorkspace from '../components/WorldWorkspace.vue'
 import { getWorkflow } from '../api/workflow.js'
+import { getSession } from '../api/simulation.js'
 
 const props = defineProps({
   scenarioType: { type: String, required: true },
@@ -59,12 +58,12 @@ const session = reactive({
   simulationComplete: false,
   reportId: null,
   scenarioQuestion: '',           // passed through to Step 4 report
-  preset: { name: 'standard', agents: 300, rounds: 20 },
+  preset: { name: 'research', agents: 16, rounds: 5 },
   config: {
-    agentCount: 100,
-    roundCount: 30,
+    agentCount: 16,
+    roundCount: 5,
     macroScenario: 'baseline',
-    platforms: ['twitter', 'reddit'],
+    platforms: ['twitter'],
     shocks: [],
   },
   capabilities: {
@@ -139,7 +138,8 @@ const currentComponent = computed(() => {
 })
 
 function canGoToStep(step) {
-  if (step > 2 && !session.capabilities.simulation) return false
+  if (step === 5 && session.demoMode) return false
+  if (step === 3 && !session.capabilities.simulation && !session.simulationComplete) return false
   if (step <= 1) return true
   if (step === 2) return session.graphId !== null
   if (step === 3) return session.sessionId !== null
@@ -149,6 +149,7 @@ function canGoToStep(step) {
 }
 
 function stepLockedReason(step) {
+  if (step === 5 && session.demoMode) return t('research.demoHint')
   if (step > 2 && !session.capabilities.simulation) return t('process.errors.engineUnavailable')
   if (step === 2) return t('process.errors.graphFirst')
   if (step === 3) return t('process.errors.envFirst')
@@ -199,7 +200,7 @@ function onSimulationComplete(data) {
 
 function onReportGenerated(data) {
   session.reportId = data.reportId
-  nextStep()
+  // Keep the finished report open; interaction is available in step 5.
 }
 
 function onSessionUpdate(data) {
@@ -211,7 +212,7 @@ const currentComponentProps = computed(() => {
   if (currentStep.value === 4) {
     return { session, scenarioQuestion: session.scenarioQuestion }
   }
-  return { session }
+  return { session, autoStart: !expressMode.value, embedded: expressMode.value }
 })
 
 // Express mode: unmount-safe guard
@@ -219,6 +220,7 @@ let _expressAdvanceCancelled = false
 const _expressTimeoutIds = []
 
 function _applyWorkflowState(data) {
+  const previous = workflowState.value
   workflowState.value = data
   if (!data) return
   if (data.graph_id) session.graphId = data.graph_id
@@ -226,12 +228,12 @@ function _applyWorkflowState(data) {
   if (data.report_id) session.reportId = data.report_id
   if (data.scenario_question) session.scenarioQuestion = data.scenario_question
   if (data.preset) session.preset = { ...(session.preset || {}), name: data.preset }
-  if (data.step_index && data.step_index >= 1) {
+  if (data.step_index && data.step_index >= 1 && (!previous || previous.step_index !== data.step_index)) {
     currentStep.value = Math.min(5, Math.max(currentStep.value, Number(data.step_index)))
   }
   if (data.status === 'completed' || data.status === 'degraded') {
     session.simulationComplete = true
-    currentStep.value = data.report_id ? 5 : 4
+    if (!previous || previous.status !== data.status) currentStep.value = 4
   }
   if (data.status === 'failed') {
     session.simulationComplete = false
@@ -244,6 +246,7 @@ async function _pollWorkflowOnce() {
   try {
     const res = await getWorkflow(expressWorkflowId.value)
     const data = res.data?.data || res.data
+    if (_expressAdvanceCancelled) return
     workflowError.value = ''
     _applyWorkflowState(data)
     if (data?.status === 'completed' || data?.status === 'degraded' || data?.status === 'failed') {
@@ -255,45 +258,20 @@ async function _pollWorkflowOnce() {
   }
 }
 
-// --- Resource cleanup on navigation away or browser close ---
-function _releaseSessionResources() {
-  if (session.sessionId) {
-    // Fire-and-forget — navigator.sendBeacon is unreliable for POST with body,
-    // so use a plain fetch with keepalive to survive page unload.
-    fetch(`/api/simulation/${session.sessionId}/cleanup`, {
-      method: 'POST',
-      keepalive: true,
-      headers: { 'Content-Type': 'application/json' },
-      body: '{}',
-    }).catch(() => {})
-  }
-}
-
-function _onBeforeUnload() {
-  _releaseSessionResources()
-}
-
-onMounted(() => {
-  window.addEventListener('beforeunload', _onBeforeUnload)
-})
-
 onUnmounted(() => {
   _expressAdvanceCancelled = true
   _expressTimeoutIds.forEach(id => clearTimeout(id))
   _expressTimeoutIds.length = 0
   if (_workflowPollId) clearInterval(_workflowPollId)
   _workflowPollId = null
-  window.removeEventListener('beforeunload', _onBeforeUnload)
-  // Release resources when navigating away within the SPA
-  if (session.sessionId) {
-    cleanupSession(session.sessionId).catch(() => {})
-  }
+  // Navigation must not terminate the server-owned simulation job.
 })
 
 onMounted(async () => {
   try {
     const res = await fetch('/api/health')
     const health = await res.json()
+    session.demoMode = health.demo_mode === true
     if (health.capabilities) {
       session.capabilities = { ...session.capabilities, ...health.capabilities }
     }
@@ -311,38 +289,43 @@ onMounted(async () => {
     })
     currentStep.value = 1
     await _pollWorkflowOnce()
-    if (!_workflowPollId) {
+    if (!_workflowPollId && !['completed', 'degraded', 'failed'].includes(workflowState.value?.status)) {
       _workflowPollId = setInterval(_pollWorkflowOnce, 1500)
     }
     return
   }
 
-  // Pre-populate session from URL params (reactive() mutation is intentional here —
-  // direct field mutation is Vue's intended pattern for reactive(); accepted exception
-  // to the project's immutability rule)
-  Object.assign(session, {
-    graphId: expressGraphId.value,
-    sessionId: expressSessionId.value,
-    scenarioQuestion: expressScenarioQuestion.value,
-    // Express mode: simulation already started — unlock step 3 nav immediately
-    // simulationComplete is set to true by Step3 when WS 'complete' event fires
-  })
+  await pollSavedSession()
+  if (!['completed', 'failed', 'interrupted'].includes(workflowState.value?.status)) {
+    _workflowPollId = setInterval(pollSavedSession, 2000)
+  }
 
-  // Auto-advance: briefly show each step as "auto-completed" before landing on Step 3
-  currentStep.value = 1
-  await new Promise((r) => {
-    const id = setTimeout(r, 600)
-    _expressTimeoutIds.push(id)
-  })
-  if (_expressAdvanceCancelled) return
-  currentStep.value = 2
-  await new Promise((r) => {
-    const id = setTimeout(r, 400)
-    _expressTimeoutIds.push(id)
-  })
-  if (_expressAdvanceCancelled) return
-  currentStep.value = 3
 })
+
+async function pollSavedSession() {
+  if (!expressSessionId.value) return
+  try {
+    const res = await getSession(expressSessionId.value)
+    if (_expressAdvanceCancelled) return
+    const data = res.data?.data || res.data
+    Object.assign(session, {
+      graphId: data.graph_id || expressGraphId.value,
+      sessionId: expressSessionId.value,
+      reportId: data.report_id || null,
+      scenarioType: data.scenario_type,
+      simulationComplete: data.status === 'completed',
+      config: { ...session.config, agentCount: data.agent_count, roundCount: data.round_count },
+    })
+    const previousStatus = workflowState.value?.status
+    workflowState.value = { status: data.status, message: data.error_message || '', events: [] }
+    if (data.status === 'failed') workflowError.value = data.error_message || t('process.errors.workflowFailed')
+    if (previousStatus !== data.status) currentStep.value = session.simulationComplete ? 4 : 3
+    if (['completed', 'failed', 'interrupted'].includes(data.status) && _workflowPollId) {
+      clearInterval(_workflowPollId); _workflowPollId = null
+    }
+  } catch (err) { workflowError.value = err.message }
+
+}
 
 // Sync preset agents/rounds into config whenever preset changes
 watch(
@@ -449,15 +432,16 @@ watch(
     </div>
 
     <!-- Express mode indicator -->
-    <div v-if="expressMode" class="express-badge">{{ t('process.nav.expressBadge') }}</div>
+    <div v-if="expressMode" class="express-badge">{{ session.demoMode ? t('research.demoLabel') : t('process.nav.expressBadge') }}</div>
 
     <div v-if="!session.capabilities.simulation" class="capability-warning">
       {{ t('process.errors.engineUnavailableDetail') }}
     </div>
 
     <main class="step-content" :style="stepStyle">
-      <div class="stage-frame" :class="stageFrameClass">
-        <aside class="stage-context workbench-panel" :aria-label="t('process.context.label')">
+      <div class="stage-frame" :class="[stageFrameClass, { 'with-world': expressMode }]">
+        <WorldWorkspace v-if="expressMode" :graph-id="session.graphId" :session-id="session.sessionId" :running="workflowState?.status === 'running'" />
+        <aside v-if="!expressMode" class="stage-context workbench-panel" :aria-label="t('process.context.label')">
           <div class="context-header">
             <span class="workbench-label">{{ t('process.context.label') }}</span>
             <span class="context-step">{{ t('process.workbench.step') }} {{ currentStepNumber }}</span>
@@ -502,19 +486,16 @@ watch(
         </aside>
 
         <section class="stage-workbench">
-          <WorkflowGraphPulse
-            v-if="expressWorkflowId"
-            :workflow="workflowState"
-          />
+          <div v-if="expressMode && workflowState && !session.simulationComplete" class="workflow-summary">
+            <span class="workbench-label">{{ workflowState.status }}</span>
+            <p>{{ workflowState.message }}</p>
+            <ol><li v-for="event in (workflowState.events || []).slice(-6)" :key="event.id || event.created_at">{{ event.message }}</li></ol>
+          </div>
           <div v-if="workflowError" class="workflow-error">
             {{ workflowError }}
           </div>
-          <PresetSelector
-            v-if="currentStep === 2"
-            v-model="session.preset"
-            class="preset-selector-row"
-          />
           <component
+            v-if="!expressMode || (currentStep === 3 && session.sessionId && !session.demoMode) || (currentStep >= 4 && session.simulationComplete)"
             :is="currentComponent"
             v-bind="currentComponentProps"
             @graph-built="onGraphBuilt"
@@ -1130,4 +1111,17 @@ watch(
     padding: 14px;
   }
 }
+</style>
+
+<style scoped>
+.stage-frame.with-world { grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.workflow-summary { border: 1px solid var(--border); padding: 18px; margin-bottom: 14px; background: var(--bg-card); font-size: 13px; }
+.workflow-summary li { padding: 5px 0; color: var(--text-secondary); }
+@media(max-width: 1000px) { .stage-frame.with-world { grid-template-columns: minmax(0, 1fr); } }
+</style>
+
+<style scoped>
+.with-world :deep(.step4) { display: flex; flex-direction: column; gap: 14px; }
+.with-world :deep(.step4-left), .with-world :deep(.step4-right) { flex: none; width: 100%; min-width: 0; }
+.with-world :deep(.xai-sidebar) { width: auto; }
 </style>

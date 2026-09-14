@@ -289,6 +289,9 @@ class SimulationSubprocessManager:
         Args:
             session_id: UUID of the session to keep alive.
         """
+        if not self.is_running(session_id):
+            await self.cleanup(session_id)
+            return
         self._report_pending[session_id] = True
         logger.info("keep_alive_for_report: %s", session_id)
         task = asyncio.create_task(self._auto_release(session_id, timeout_s=1800))
@@ -319,7 +322,7 @@ class SimulationSubprocessManager:
         self._report_pending.pop(session_id, None)
         if self.is_running(session_id):
             await self.stop(session_id)
-            await self.cleanup(session_id)
+        await self.cleanup(session_id)
         logger.info("release_after_report: %s cleaned up", session_id)
 
     # ------------------------------------------------------------------

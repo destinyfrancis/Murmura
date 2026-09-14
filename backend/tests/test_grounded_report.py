@@ -83,9 +83,9 @@ async def test_grounded_market_report_contains_standard_sections_and_evidence(te
 
     report = bundle.to_report_dict()
     content = report["content_markdown"]
-    assert "## Executive Verdict" in content
-    assert "## Evidence Appendix" in content
-    assert "observed simulation results" in content
+    assert "## 實際出現的路徑" in content
+    assert "## 情境來源" in content
+    assert "模型內的角色選擇" in content
     assert "kg_edges:" in content
     assert report["charts_data"]["evidence_bundle"]
     assert report["key_findings"]
@@ -160,7 +160,7 @@ async def test_grounded_report_without_actions_uses_graph_scope_forecast(test_db
         bundle = await GroundedReportBuilder().build(session_id, "social_forecast", question="能源衝突")
 
     content = bundle.content_markdown
-    assert "graph-based scenario forecast" in content
-    assert "## Scenario Outcome Matrix" in content
-    assert "Nodes: 3" in content
+    assert "圖譜整理不代表已完成模擬" in content
+    assert "## 哪些地方仍可能改變" in content
+    assert "3 個實體" in content
     assert "kg_edges:" in content

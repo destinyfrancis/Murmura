@@ -65,6 +65,7 @@ class SimulationRunner(
         from backend.app.models.simulation_config import PRESET_STANDARD, SimPreset  # noqa: PLC0415
 
         self._preset: SimPreset = preset or PRESET_STANDARD
+        self._session_presets: dict[str, SimPreset] = {}
         self._dry_run = dry_run
         self._subprocess_mgr = SimulationSubprocessManager()
         self._action_logger: Any | None = None
@@ -387,7 +388,7 @@ class SimulationRunner(
         await self._fetch_and_cache_profiles(session_id)
         agent_count = len(self._round_profiles.get(session_id, []))
 
-        hc = self._preset.hook_config
+        hc = self._session_presets.get(session_id, self._preset).hook_config
 
         # Pre-round: kg_driven world event generation
         if self._kg_mode.get(session_id):
@@ -619,57 +620,6 @@ class SimulationRunner(
         session_buf = self._posts_buffer.get(session_id)
         if session_buf is not None:
             session_buf.pop(round_num, None)
-
-        # Cost pause check: if the session has hit the hard cap, pause up to 30 min.
-        # The simulation continues automatically after the timeout even if not resumed.
-        try:
-            from backend.app.services import cost_tracker as _ct  # noqa: PLC0415
-
-            if _ct.is_paused(session_id):
-                total_cost = _ct.get_session_cost(session_id)
-                hard_cap = float(os.environ.get("SESSION_COST_HARD_CAP_USD", "10.0"))
-                logger.warning(
-                    "Cost pause: session=%s round=%d total=$%.4f cap=$%.2f — waiting up to 30 min for resume",
-                    session_id,
-                    round_num,
-                    total_cost,
-                    hard_cap,
-                )
-                # Push WebSocket notification (best-effort)
-                try:
-                    from backend.app.api.ws import push_progress as _push  # noqa: PLC0415
-
-                    await _push(
-                        session_id,
-                        {
-                            "type": "cost_pause",
-                            "session_id": session_id,
-                            "total_cost": total_cost,
-                            "cap": hard_cap,
-                            "round": round_num,
-                        },
-                    )
-                except Exception:
-                    logger.debug("cost_pause: WS push failed (best-effort)")
-
-                resumed = await _ct.wait_for_resume(session_id, timeout_s=1800.0)
-                if resumed:
-                    logger.info(
-                        "Cost pause: session=%s resumed after manual resume",
-                        session_id,
-                    )
-                else:
-                    logger.warning(
-                        "Cost pause: session=%s timed out after 30 min — continuing",
-                        session_id,
-                    )
-        except Exception:
-            logger.debug(
-                "cost_pause check failed session=%s round=%d — continuing",
-                session_id,
-                round_num,
-                exc_info=True,
-            )
 
     # ------------------------------------------------------------------
     # Phase 1B: Temporal activation helpers

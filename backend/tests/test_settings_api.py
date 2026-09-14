@@ -126,10 +126,12 @@ async def _register_user(client, email: str, *, is_admin: bool = False) -> str:
     )
     assert resp.status_code == 200
     body = resp.json()["data"]
-    if is_admin:
-        async with get_db() as db:
-            await db.execute("UPDATE users SET is_admin = 1 WHERE id = ?", (body["user_id"],))
-            await db.commit()
+    async with get_db() as db:
+        await db.execute(
+            "UPDATE users SET is_admin = ? WHERE id = ?",
+            (int(is_admin), body["user_id"]),
+        )
+        await db.commit()
     return body["token"]
 
 

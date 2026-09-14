@@ -562,69 +562,14 @@ class MonteCarloEngine:
         metrics: list[str],
         n_trials: int,
     ) -> EnsembleResult:
-        """Generic Monte Carlo ensemble for non-HK domains (kg_driven mode).
+        """No distribution without a defined domain transition model.
 
-        Uses Student-t(df=5) perturbation on metric baselines loaded from the
-        ``belief_states`` table.  Fat-tailed distribution is appropriate for
-        social/political systems where extreme events are more likely than
-        Gaussian assumes (Mandelbrot & Hudson 2004, "The Misbehavior of Markets").
-
-        sigma=0.08 gives ±1σ band of ±8 percentage points on a [0,1] stance scale,
-        consistent with observed within-round belief variance in comparable ABM studies.
-
-        Args:
-            session_id: Simulation session UUID.
-            metrics: List of metric/topic names to ensemble.
-            n_trials: Number of stochastic trials.
-
-        Returns:
-            EnsembleResult with DistributionBand per metric; ``sampling_method``
-            is "generic_student_t" to distinguish from the HK calibrated path.
+        Random perturbation of a belief baseline is not an ensemble of simulated
+        futures. Preserve the response shape and return no invented trials.
         """
-        baselines = await self._load_generic_base_values(session_id, metrics)
-
-        rng = np.random.default_rng(seed=None)
-        trial_results: dict[str, list[float]] = {m: [] for m in metrics}
-
-        for _ in range(n_trials):
-            for metric in metrics:
-                base = baselines.get(metric, 0.5)
-                # Student-t noise: df=5 gives fat tails without infinite variance
-                noise = float(rng.standard_t(df=5)) * 0.08
-                perturbed = float(np.clip(base + noise, 0.0, 1.0))
-                trial_results[metric].append(perturbed)
-
-        bands: list[DistributionBand] = []
-        for metric in metrics:
-            values = np.array(trial_results[metric], dtype=float)
-            if len(values) == 0:
-                continue
-            p10, p25, p50, p75, p90 = np.percentile(values, [10, 25, 50, 75, 90])
-            bands.append(
-                DistributionBand(
-                    metric_name=metric,
-                    p10=float(p10),
-                    p25=float(p25),
-                    p50=float(p50),
-                    p75=float(p75),
-                    p90=float(p90),
-                )
-            )
-
-        await self._persist_results(session_id, n_trials, bands)
-
-        logger.info(
-            "Generic MC complete session=%s trials=%d metrics=%d",
-            session_id,
-            n_trials,
-            len(bands),
-        )
         return EnsembleResult(
-            session_id=session_id,
-            n_trials=n_trials,
-            distributions=bands,
-            data_integrity_score=0.5,  # generic path: reduced confidence score
-            sampling_method="generic_student_t",
+            session_id=session_id, n_trials=0, distributions=[],
+            data_integrity_score=None, sampling_method="unavailable_no_transition_model",
         )
 
     async def _load_generic_base_values(

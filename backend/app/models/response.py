@@ -28,7 +28,7 @@ class SimulationCreateResponse(BaseModel):
     agent_count: int
     round_count: int
     status: str
-    estimated_cost_usd: float
+    estimated_cost_usd: float | None
 
 
 class SimulationProgressUpdate(BaseModel):

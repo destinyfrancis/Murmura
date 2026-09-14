@@ -252,22 +252,12 @@ class SimulationPreflightService:
         warnings: list[dict[str, Any]],
     ) -> Any:
         cost = estimate_cost(provider, model, agent_count, round_count)
-        hard_cap = float(os.environ.get("SESSION_COST_HARD_CAP_USD", "10.0"))
-        budget = float(os.environ.get("SESSION_COST_BUDGET_USD", "5.0"))
-        if cost.estimated_cost_usd > hard_cap:
-            blocking.append(_issue(
-                "cost_exceeds_hard_cap",
-                f"Estimated cost ${cost.estimated_cost_usd:.4f} exceeds hard cap ${hard_cap:.2f}.",
-                "Lower agent/round counts or raise SESSION_COST_HARD_CAP_USD.",
-                retryable=True,
-            ))
-        elif cost.estimated_cost_usd > budget:
-            warnings.append(_issue(
-                "cost_exceeds_budget",
-                f"Estimated cost ${cost.estimated_cost_usd:.4f} exceeds budget ${budget:.2f}.",
-                "Continue only if this beta run is intentional.",
-                retryable=True,
-            ))
+        warnings.append(_issue(
+            "cost_estimate_unavailable",
+            "No reliable pre-run USD estimate is available because model calls, tokens, retries, and provider rates are not fully measured.",
+            "Use the small research preset and check recorded usage with your model provider. This warning does not pause research runs.",
+            retryable=False,
+        ))
         return cost
 
     async def _check_model(

@@ -366,6 +366,7 @@ class ActionLogger:
         round_number: int | None = None,
         platform: str | None = None,
         limit: int = 500,
+        latest: bool = False,
     ) -> list[dict]:
         """Fetch logged actions for a session, optionally filtered.
 
@@ -390,13 +391,14 @@ class ActionLogger:
             params.append(platform)
 
         where = " AND ".join(conditions)
+        order = "round_number DESC, id DESC" if latest else "round_number, id"
         params.append(limit)
 
         try:
             async with get_db() as db:
                 db.row_factory = aiosqlite.Row
                 cursor = await db.execute(
-                    f"SELECT * FROM simulation_actions WHERE {where} ORDER BY round_number, id LIMIT ?",
+                    f"SELECT * FROM simulation_actions WHERE {where} ORDER BY {order} LIMIT ?",
                     params,
                 )
                 rows = await cursor.fetchall()

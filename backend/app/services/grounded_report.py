@@ -36,7 +36,8 @@ class GroundedReportBundle:
             "key_findings": list(self.key_findings),
             "charts_data": {"evidence_bundle": list(self.evidence_bundle)},
             "agent_log": [],
-            "total_cost_usd": 0.0,
+            "total_cost_usd": None,
+            "cost_status": "unavailable",
         }
 
 
@@ -58,6 +59,7 @@ class GroundedReportBuilder:
         graph_session_id = session.get("graph_id") or session_id
         graph_result = await GraphRAGQueryService().query(graph_session_id, query[:120], hops=2, limit=12, strict=False)
         action_summary = await self._load_action_summary(session_id)
+        decisions = await self._load_decisions(session_id)
         hidden_actors = await self._load_hidden_actors(graph_session_id)
         faction_summary = await self._load_faction_summary(session_id)
         graph_summary = await self._load_graph_summary(graph_session_id)
@@ -75,6 +77,7 @@ class GroundedReportBuilder:
             graph_summary=graph_summary,
             graph_data=graph_result.to_dict(),
             evidence=evidence,
+            decisions=decisions,
         )
 
         return GroundedReportBundle(
@@ -132,10 +135,11 @@ class GroundedReportBuilder:
             top_actions = await (
                 await db.execute(
                     """
-                    SELECT round_number, oasis_username, action_type,
+                    SELECT id, round_number, oasis_username, action_type,
                            platform, content, sentiment
                     FROM simulation_actions
                     WHERE session_id = ? AND content != ''
+                      AND LOWER(action_type) IN ('post', 'create_post', 'create_comment', 'comment', 'reply', 'quote_post', 'repost')
                     ORDER BY round_number DESC, id DESC
                     LIMIT 8
                     """,
@@ -151,6 +155,17 @@ class GroundedReportBuilder:
             "platforms": [dict(r) for r in platform_rows],
             "recent_actions": [dict(r) for r in top_actions],
         }
+
+    async def _load_decisions(self, session_id: str) -> list[dict[str, Any]]:
+        async with get_db() as db:
+            rows = await (await db.execute(
+                "SELECT d.id, d.round_number, d.agent_id, d.decision_type, d.action, "
+                "d.reasoning, p.oasis_username FROM agent_decisions d "
+                "LEFT JOIN agent_profiles p ON p.id=d.agent_id AND p.session_id=d.session_id "
+                "WHERE d.session_id=? ORDER BY d.round_number DESC, d.id DESC LIMIT 40",
+                (session_id,),
+            )).fetchall()
+        return [dict(row) for row in reversed(rows)]
 
     async def _load_hidden_actors(self, session_id: str) -> list[dict[str, Any]]:
         async with get_db() as db:
@@ -315,11 +330,12 @@ def _render_markdown(
     graph_summary: dict[str, Any],
     graph_data: dict[str, Any],
     evidence: tuple[dict[str, Any], ...],
+    decisions: list[dict[str, Any]],
 ) -> str:
     evidence_ids = [e["evidence_id"] for e in evidence[:8]]
     has_actions = action_summary["total_actions"] > 0
     recent_actions = "\n".join(
-        f"- R{a['round_number']} {a['oasis_username']} [{a['platform']}]: {a['content'][:140]}"
+        f"- R{a['round_number']} {a['oasis_username']} [{a['platform']}]: {a['content'][:400]} [simulation_actions:{a['id']}]"
         for a in action_summary["recent_actions"]
     ) or "- No OASIS action timeline was produced; this section is intentionally empty."
     hidden_text = "\n".join(
@@ -345,6 +361,44 @@ def _render_markdown(
 
     sections = _mode_sections(mode)
     forecast = _scenario_forecast_sections(mode, has_actions)
+    # The trajectory is observed in this model run. Canned forecast paths are
+    # prompts for a later experiment, never claimed as generated alternatives.
+    trace = "\n".join(
+        f"- R{d['round_number']} {d['oasis_username'] or d['agent_id']}: "
+        f"{d['decision_type']} → {d['action']}. {d['reasoning'] or ''} [agent_decisions:{d['id']}]"
+        for d in decisions
+    ) or "No recorded agent decisions. Posts alone do not establish a future outcome."
+    if any('\u4e00' <= char <= '\u9fff' for char in query):
+        return f"""# 情境演變紀錄
+
+## 這次探索甚麼
+{query[:1200]}
+
+## 實際出現的路徑
+以下是模型內的角色選擇及理由，並非現實預測。回合先後不等於因果。
+{trace if decisions else '未有角色決策紀錄，不能只靠發言推斷結局。'}
+
+## 最近的互動
+{recent_actions if has_actions else '未有互動紀錄。圖譜整理不代表已完成模擬。'}
+
+## 哪些地方仍可能改變
+這次只觀察到一條路徑，未量度其他結局的機率。
+可從上面的某項決策挑一個分歧，保留其他條件，只改變該選擇再比較。
+新分支要有自己的互動紀錄，才能判斷人物、聯盟或局勢是否出現不同發展。
+
+## 資料不足的位置
+- 角色的內心、信念和情緒都是模型設定或模型推斷。
+- 尚未驗證這個情境的預測準確度，亦未量度更換模型或角色組合後的穩定性。
+- 目前 session 狀態：{session['status']}；已記錄至 R{action_summary['latest_round']}。
+- 對真人或時事的推斷，只能以你提供的有日期、有來源材料作起點。
+
+## 情境來源
+圖譜包含 {graph_summary['node_count']} 個實體、{graph_summary['edge_count']} 條關係。
+{evidence_text}
+
+## 下一個值得比較的問題
+先查看某項重要選擇的原文及依據，再測試一個替代選擇；暫時毋須增加角色數目。
+"""
     return f"""# {_title_for_mode(mode)}
 
 ## Executive Verdict
@@ -353,13 +407,15 @@ def _render_markdown(
 Major claim evidence: {", ".join(evidence_ids) if evidence_ids else "no graph evidence id available"}.
 
 ## Forecast Timeline
-{forecast['timeline']}
+{trace}
 
 ## Stakeholder Reactions
 {recent_actions}
 
 ## Scenario Outcome Matrix
-{forecast['outcomes']}
+One observed model trajectory is available. Alternative outcomes have not been simulated here.
+Choose one recorded decision above and compare a branch that changes only that choice.
+No outcome probabilities have been measured.
 
 ## Graph Structure
 - Nodes: {graph_summary['node_count']}

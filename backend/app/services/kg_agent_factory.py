@@ -318,6 +318,7 @@ class KGAgentFactory:
         edges: list[dict[str, Any]],
         seed_text: str,
         target_count: int | None = None,
+        expand_background: bool = True,
     ) -> list[UniversalAgentProfile]:
         """Generate agent profiles from KG nodes and edges.
 
@@ -379,6 +380,8 @@ class KGAgentFactory:
             eligible_nodes = nodes
 
         resolved_target = target_count if target_count is not None else len(eligible_nodes)
+        if not expand_background:
+            resolved_target = min(resolved_target, len(eligible_nodes))
 
         if os.environ.get("KG_AGENT_STRICT_TEMPLATE_PROFILES") == "1":
             profiles = self._build_fallback_profiles(

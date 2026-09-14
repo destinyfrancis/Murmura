@@ -2,7 +2,7 @@
 
 # Murmura
 
-**A universal prediction workbench for turning raw text into simulated worlds, agent reactions, and explainable possible futures.**
+**An open-source scenario-exploration workbench for turning raw text into simulated worlds, agent reactions, and explainable possible futures.**
 
 將任何文字變成可模擬的世界：人物、動機、集體反應、風險和可能未來。
 
@@ -105,11 +105,15 @@ cp .env.example .env
 docker compose up -d
 ```
 
-Run demo mode without API keys:
+Run the scripted demo without API keys:
 
 ```bash
-docker compose --profile demo up -d
+DEMO_MODE=true docker compose up -d --build
 ```
+
+The demo installs a fixed flood replay in normal application tables. It is a
+UI example, not a newly generated model simulation or a prediction. To explore
+new material, set `DEMO_MODE=false` and configure your own model provider.
 
 Run with observability:
 
@@ -139,7 +143,7 @@ flowchart LR
 | **1. Graph Build** | Seed text becomes a knowledge graph of entities, relationships, and implicit stakeholders. |
 | **2. Environment Setup** | Murmura selects a simulation mode, creates agents, hydrates memory, and builds scenario config. |
 | **3. Simulation** | Agents react across rounds, update beliefs, spread narratives, form factions, and respond to shocks. |
-| **4. Report** | The system generates an explainable report with timelines, drivers, probabilities, and uncertainty. |
+| **4. Report** | The system generates an explainable report with timelines, drivers, action traces, missing evidence, and uncertainty. It does not invent calibrated probabilities. |
 | **5. Interaction** | You can interview simulated agents and explore follow-up scenarios. |
 
 ## Features
@@ -161,6 +165,7 @@ flowchart LR
 
 | Preset | Agents | Rounds | Best For |
 |---|---:|---:|---|
+| `RESEARCH` | up to 16 source-derived actors | 5 | Default small-world exploration; one Twitter platform, no background padding |
 | `FAST` | 100 | 15 | Demos and smoke tests |
 | `STANDARD` | 300 | 20 | General scenario analysis |
 | `DEEP` | 500 | 30 | Research-style runs |
@@ -171,6 +176,8 @@ flowchart LR
 The OASIS simulation engine requires Python 3.10 or 3.11. On Python 3.12+, Murmura degrades gracefully and disables the Simulation step instead of crashing.
 
 ## Architecture
+
+For the current implementation baseline, product design, data flow, and verified versus unverified scope, see [Murmura 現行架構與產品設計](docs/murmura-architecture-design.md). The latest execution evidence and remaining live-model gaps are recorded in the local [implementation checkpoint](reports/implementation_checkpoint.md).
 
 ```text
 backend/
@@ -373,8 +380,10 @@ docker compose up -d
 無 API key demo mode：
 
 ```bash
-docker compose --profile demo up -d
+DEMO_MODE=true docker compose up -d --build
 ```
+
+呢個 demo 會寫入一個固定嘅水災回放，只係用嚟展示介面同流程，唔係新模型推演，更加唔係預測。要探索新材料，請設 `DEMO_MODE=false` 並自行設定 model provider。
 
 ### 運作方式
 
@@ -383,7 +392,7 @@ docker compose --profile demo up -d
 | **1. 建立圖譜** | 將 seed text 轉成實體、關係和隱含持份者。 |
 | **2. 建立環境** | 選擇模擬模式，建立 agents，初始化記憶和 scenario config。 |
 | **3. 運行模擬** | Agents 逐回合反應、更新信念、形成派系並回應衝擊。 |
-| **4. 生成報告** | 輸出時間線、驅動因素、概率、不確定性和可解釋分析。 |
+| **4. 生成報告** | 輸出時間線、驅動因素、行動記錄、資料不足位置和不確定性；沒有足夠證據時，不會湊出看似精準的機率。 |
 | **5. 互動追問** | 訪談模擬角色，或測試新的 what-if 情境。 |
 
 ### 主要功能
@@ -472,3 +481,25 @@ AGPL 允許商業使用。若你修改 Murmura 並分發，或把修改版作為
 This license is OSI-approved and is intended to keep improvements to network-hosted versions available to the community.
 
 Copyright (c) 2026 destinyfrancis. All rights reserved.
+
+## Small-world research workflow
+
+The default quick workflow now starts with up to 16 source-derived actors, five
+rounds and one platform. Paste a fictional scene, dated political material or
+a relationship scenario; read the actual choices and interactions before
+requesting optional model interpretation. A scenario is an exploration under
+assumptions, not a calibrated prediction of real people or events.
+
+For a no-key UI example, use `DEMO_MODE=true docker compose up --build -d`
+after creating `.env` from `.env.example`, or run `scripts/demo.sh` and
+`make frontend` locally. Open **Free demo** on Home. Its flood story is explicitly
+scripted; no model was run. Set `DEMO_MODE=false` and configure your own model
+to explore new material. Existing reports can be reopened from Workspace without
+new model calls. Local API access to ownerless sessions follows the existing
+self-hosted policy; owned records still require their owner's login.
+
+Verification of this revision includes a real OASIS subprocess, native platform
+and SQLite with scripted model actions, plus frontend build and desktop/mobile
+UI checks. A new paid/live model run and a Docker image build have **not** been
+performed. See [the current dashboard](reports/project_dashboard.html) and
+[resumption checkpoint](reports/implementation_checkpoint.md) for exact scope.

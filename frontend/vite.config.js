@@ -13,7 +13,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:5001',
+        target: process.env.MURMURA_BACKEND_URL || 'http://localhost:5001',
         changeOrigin: true,
         ws: true,
       },

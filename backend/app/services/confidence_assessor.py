@@ -13,9 +13,9 @@ class MetricConfidence:
 
     metric: str
     data_coverage: float  # 0-1, % of records with source_type != 'unavailable'
-    model_fit: float  # 0-1, inverse normalized MAPE from backtesting
+    model_fit: float | None  # 0-1, inverse normalized MAPE from backtesting
     agent_consensus: float  # 0-1, 1 - normalized decision variance
-    overall: float  # weighted average
+    overall: float | None  # weighted average
 
 
 @dataclass(frozen=True)
@@ -24,7 +24,7 @@ class ConfidenceReport:
 
     session_id: str
     metrics: tuple[MetricConfidence, ...]
-    overall_score: float  # 0-1
+    overall_score: float | None  # 0-1
     data_freshness_hours: float  # hours since last data update
     total_data_records: int
     unavailable_sources: int
@@ -39,16 +39,10 @@ class ConfidenceAssessor:
         total_records = await self._count_data_records()
         metric_confidences = await self._assess_agent_consensus(session_id, data_coverage)
 
-        # Overall score
-        if metric_confidences:
-            overall = sum(m.overall for m in metric_confidences) / len(metric_confidences)
-        else:
-            overall = data_coverage * 0.6 + 0.4 * 0.5  # baseline when no decisions exist
-
         return ConfidenceReport(
             session_id=session_id,
             metrics=tuple(metric_confidences),
-            overall_score=round(overall, 3),
+            overall_score=None,
             data_freshness_hours=round(freshness_hours, 1),
             total_data_records=total_records,
             unavailable_sources=unavailable,
@@ -63,7 +57,7 @@ class ConfidenceAssessor:
         async with get_db() as db:
             prov_rows = await (
                 await db.execute(
-                    "SELECT source_name, source_type, updated_at FROM data_provenance ORDER BY updated_at DESC"
+                    "SELECT metric AS source_name, source_type, fetch_timestamp AS updated_at FROM data_provenance ORDER BY fetch_timestamp DESC"
                 )
             ).fetchall()
 
@@ -114,9 +108,9 @@ class ConfidenceAssessor:
             decision_rows = await (
                 await db.execute(
                     """SELECT decision_type, COUNT(*) as cnt,
-                              AVG(CASE WHEN outcome = 'approved' THEN 1.0 ELSE 0.0 END) as approval_rate
-                       FROM agent_decisions
-                       WHERE session_id = ?
+                              MAX(action_count) * 1.0 / SUM(action_count) AS agreement
+                       FROM (SELECT decision_type, action, COUNT(*) AS action_count FROM agent_decisions
+                             WHERE session_id = ? GROUP BY decision_type, action)
                        GROUP BY decision_type""",
                     (session_id,),
                 )
@@ -127,17 +121,14 @@ class ConfidenceAssessor:
 
         result: list[MetricConfidence] = []
         for row in decision_rows:
-            approval = row["approval_rate"] if row["approval_rate"] is not None else 0.5
-            # Consensus = how much agents agree (high when approval_rate near 0 or 1)
-            consensus = 1.0 - 4 * approval * (1 - approval)  # quadratic, peaks at 0/1
-            consensus = max(0.0, min(1.0, consensus))
+            consensus = float(row["agreement"])
 
             mc = MetricConfidence(
                 metric=row["decision_type"],
                 data_coverage=data_coverage,
-                model_fit=0.7,  # Default until backtesting is run
+                model_fit=None,  # No claim-scoped backtest evidence available
                 agent_consensus=consensus,
-                overall=round(0.3 * data_coverage + 0.3 * 0.7 + 0.4 * consensus, 3),
+                overall=None,
             )
             result = [*result, mc]
 

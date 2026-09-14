@@ -952,9 +952,22 @@ def _parse_report(session_id: str, content: str) -> dict[str, Any]:
             break
     summary = " ".join(summary_lines[:3])
 
-    # Append simulation cost to the report markdown footer
+    # Provider-reported values cover only calls routed through LLMClient. Native
+    # OASIS/CAMEL usage can be absent, so never present this as the full bill.
     total_cost_usd = get_session_cost(session_id)
-    cost_footer = f"\n\n---\n\n> **模擬成本:** ${total_cost_usd:.4f} USD\n"
+    if total_cost_usd > 0:
+        cost_status = "partial"
+        cost_footer = (
+            "\n\n---\n\n"
+            f"> **已記錄模型成本（不完整）:** ${total_cost_usd:.4f} USD。"
+            "只包括系統成功記錄的模型呼叫。\n"
+        )
+    else:
+        cost_status = "unavailable"
+        cost_footer = (
+            "\n\n---\n\n"
+            "> **成本紀錄:** 未有完整供應商用量；零紀錄不代表本次運行免費。\n"
+        )
     content_with_cost = content + cost_footer
 
     return {
@@ -966,6 +979,7 @@ def _parse_report(session_id: str, content: str) -> dict[str, Any]:
         "charts_data": None,
         "agent_log": [],
         "total_cost_usd": total_cost_usd,
+        "cost_status": cost_status,
     }
 
 

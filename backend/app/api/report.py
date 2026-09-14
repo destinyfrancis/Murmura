@@ -6,7 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel as _BaseModel
 
-from backend.app.api.auth import UserProfile, _limiter, get_current_user
+from backend.app.api.auth import UserProfile, _limiter, get_optional_user
 from backend.app.models.request import (
     AgentInterviewRequest,
     ReportChatRequest,
@@ -79,7 +79,7 @@ async def get_public_report(token: str) -> APIResponse:
 async def generate_report(
     request: Request,
     req: ReportGenerateRequest,
-    user: Annotated[UserProfile, Depends(get_current_user)],
+    user: Annotated[UserProfile | None, Depends(get_optional_user)],
 ) -> APIResponse:
     """Generate an analysis report from a completed simulation."""
     try:
@@ -98,7 +98,8 @@ async def generate_report(
             meta={
                 "session_id": req.session_id,
                 "report_type": req.report_type,
-                "total_cost_usd": report.get("total_cost_usd", 0.0),
+                "total_cost_usd": report.get("total_cost_usd"),
+                "cost_status": report.get("cost_status", "unavailable"),
             },
         )
     except ValueError as exc:
@@ -113,7 +114,7 @@ async def generate_report(
 @router.get("/{session_id}/narrative", response_model=APIResponse)
 async def get_narrative_report(
     session_id: str,
-    user: Annotated[UserProfile, Depends(get_current_user)],
+    user: Annotated[UserProfile | None, Depends(get_optional_user)],
 ) -> APIResponse:
     """Generate or retrieve a narrative-driven dossier for a simulation."""
     try:
@@ -133,7 +134,7 @@ async def get_narrative_report(
 @router.get("/{report_id}", response_model=APIResponse)
 async def get_report(
     report_id: str,
-    user: Annotated[UserProfile, Depends(get_current_user)],
+    user: Annotated[UserProfile | None, Depends(get_optional_user)],
 ) -> APIResponse:
     """Retrieve a previously generated report."""
     try:
@@ -170,7 +171,7 @@ async def get_report(
 @router.post("/chat", response_model=APIResponse)
 async def chat_with_report(
     req: ReportChatRequest,
-    user: Annotated[UserProfile, Depends(get_current_user)],
+    user: Annotated[UserProfile | None, Depends(get_optional_user)],
 ) -> APIResponse:
     """Chat with the report agent for follow-up analysis."""
     try:
@@ -201,7 +202,7 @@ async def chat_with_report(
 @router.post("/interview", response_model=APIResponse)
 async def interview_agent(
     req: AgentInterviewRequest,
-    user: Annotated[UserProfile, Depends(get_current_user)],
+    user: Annotated[UserProfile | None, Depends(get_optional_user)],
 ) -> APIResponse:
     """Interview a specific agent about their decisions.
 
@@ -318,7 +319,7 @@ async def interview_agent(
 @router.get("/{report_id}/pdf")
 async def export_report_pdf(
     report_id: str,
-    user: Annotated[UserProfile, Depends(get_current_user)],
+    user: Annotated[UserProfile | None, Depends(get_optional_user)],
 ):
     """Export report as PDF"""
     import html as html_lib
@@ -399,7 +400,7 @@ async def export_report_pdf(
 @router.post("/{report_id}/share", response_model=APIResponse)
 async def share_report(
     report_id: str,
-    user: Annotated[UserProfile, Depends(get_current_user)],
+    user: Annotated[UserProfile | None, Depends(get_optional_user)],
 ) -> APIResponse:
     """Generate a share token for public access to a report."""
     import secrets
@@ -443,7 +444,7 @@ async def share_report(
 @router.post("/{session_id}/release", response_model=APIResponse)
 async def release_session_subprocess(
     session_id: str,
-    user: Annotated[UserProfile, Depends(get_current_user)],
+    user: Annotated[UserProfile | None, Depends(get_optional_user)],
 ) -> APIResponse:
     """Explicitly release the OASIS subprocess for a session.
 
@@ -469,7 +470,7 @@ class XAIToolRequest(_BaseModel):
 async def invoke_xai_tool(
     session_id: str,
     req: XAIToolRequest,
-    user: Annotated[UserProfile, Depends(get_current_user)],
+    user: Annotated[UserProfile | None, Depends(get_optional_user)],
 ) -> APIResponse:
     """Invoke a single named XAI tool and return its output."""
     from backend.app.services.report_agent import _TOOL_HANDLERS, TOOLS

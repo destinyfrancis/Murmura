@@ -1,7 +1,9 @@
-"""LLM cost estimation for simulation sessions.
+"""Honest pre-run cost availability for simulation sessions.
 
-Provides pre-run cost estimates based on provider pricing,
-agent count, and round count.
+Murmura does not yet account for every OASIS/CAMEL call, hook, retry, or
+model-specific token rate.  A numeric pre-run USD estimate would therefore be
+misleading.  This module preserves the existing API shape while explicitly
+reporting that no reliable estimate is available.
 """
 
 from __future__ import annotations
@@ -13,21 +15,21 @@ from backend.app.utils.llm_client import _PROVIDERS
 
 @dataclass(frozen=True)
 class CostBreakdown:
-    """Immutable cost estimate for a simulation run."""
+    """Immutable pre-run cost-availability envelope."""
 
     provider: str
     model: str
     agent_count: int
     round_count: int
-    estimated_input_tokens: int
-    estimated_output_tokens: int
-    estimated_cost_usd: float
+    estimated_input_tokens: int | None
+    estimated_output_tokens: int | None
+    estimated_cost_usd: float | None
     currency: str = "USD"
-
-
-# Average tokens per agent per round (empirical from HK simulations)
-_AVG_INPUT_TOKENS_PER_AGENT_ROUND = 800
-_AVG_OUTPUT_TOKENS_PER_AGENT_ROUND = 200
+    status: str = "unavailable"
+    reason: str = (
+        "A reliable estimate needs measured model calls, tokens, retries, and "
+        "provider pricing for this exact run."
+    )
 
 
 def estimate_cost(
@@ -36,7 +38,7 @@ def estimate_cost(
     agent_count: int,
     round_count: int,
 ) -> CostBreakdown:
-    """Estimate LLM cost for a simulation run.
+    """Return an explicit unavailable estimate for a simulation run.
 
     Args:
         provider: LLM provider name (openrouter, fireworks, etc.)
@@ -45,25 +47,17 @@ def estimate_cost(
         round_count: Number of simulation rounds.
 
     Returns:
-        Immutable CostBreakdown with token and cost estimates.
+        Immutable CostBreakdown without invented token or USD values.
     """
-    cfg = _PROVIDERS.get(provider, _PROVIDERS["openrouter"])
-    resolved_model = model or cfg.get("default_model", "unknown")
-
-    total_interactions = agent_count * round_count
-    est_input = total_interactions * _AVG_INPUT_TOKENS_PER_AGENT_ROUND
-    est_output = total_interactions * _AVG_OUTPUT_TOKENS_PER_AGENT_ROUND
-
-    input_cost = (est_input / 1000) * cfg.get("cost_per_1k_input", 0.0)
-    output_cost = (est_output / 1000) * cfg.get("cost_per_1k_output", 0.0)
-    total_cost = round(input_cost + output_cost, 4)
+    cfg = _PROVIDERS.get(provider)
+    resolved_model = model or (cfg or {}).get("default_model", "unknown")
 
     return CostBreakdown(
         provider=provider,
         model=resolved_model,
         agent_count=agent_count,
         round_count=round_count,
-        estimated_input_tokens=est_input,
-        estimated_output_tokens=est_output,
-        estimated_cost_usd=total_cost,
+        estimated_input_tokens=None,
+        estimated_output_tokens=None,
+        estimated_cost_usd=None,
     )

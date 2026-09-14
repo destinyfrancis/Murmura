@@ -89,7 +89,6 @@ function renderGraph(tripleData) {
       source: t.subject,
       target: t.object,
       predicate: t.predicate,
-      confidence: t.confidence || 0.85,
     })
   }
 

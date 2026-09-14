@@ -157,9 +157,10 @@ class TestCostEstimator:
         assert result.provider == "openrouter"
         assert result.agent_count == 300
         assert result.round_count == 20
-        assert result.estimated_cost_usd > 0
-        assert result.estimated_input_tokens == 300 * 20 * 800
-        assert result.estimated_output_tokens == 300 * 20 * 200
+        assert result.status == "unavailable"
+        assert result.estimated_cost_usd is None
+        assert result.estimated_input_tokens is None
+        assert result.estimated_output_tokens is None
 
     def test_estimate_cost_fireworks(self):
         from backend.app.services.cost_estimator import estimate_cost
@@ -167,20 +168,20 @@ class TestCostEstimator:
         result = estimate_cost("fireworks", "deepseek-v3", 100, 10)
         assert result.provider == "fireworks"
         assert result.model == "deepseek-v3"
-        assert result.estimated_cost_usd >= 0
+        assert result.estimated_cost_usd is None
 
     def test_estimate_cost_vllm_free(self):
         from backend.app.services.cost_estimator import estimate_cost
 
         result = estimate_cost("vllm", None, 500, 30)
-        assert result.estimated_cost_usd == 0.0
+        assert result.estimated_cost_usd is None
 
     def test_estimate_cost_unknown_provider_fallback(self):
         from backend.app.services.cost_estimator import estimate_cost
 
         result = estimate_cost("unknown_provider", None, 100, 10)
-        # Should fallback to openrouter pricing
-        assert result.estimated_cost_usd > 0
+        assert result.model == "unknown"
+        assert result.estimated_cost_usd is None
 
     def test_cost_breakdown_frozen(self):
         from backend.app.services.cost_estimator import CostBreakdown
@@ -190,9 +191,9 @@ class TestCostEstimator:
             model="m",
             agent_count=10,
             round_count=5,
-            estimated_input_tokens=100,
-            estimated_output_tokens=50,
-            estimated_cost_usd=0.01,
+            estimated_input_tokens=None,
+            estimated_output_tokens=None,
+            estimated_cost_usd=None,
         )
         with pytest.raises(AttributeError):
             breakdown.provider = "new"  # type: ignore[misc]
@@ -201,9 +202,9 @@ class TestCostEstimator:
         from backend.app.services.cost_estimator import estimate_cost
 
         result = estimate_cost("openrouter", None, 10000, 30)
-        # Should handle large agent counts without error
-        assert result.estimated_input_tokens == 10000 * 30 * 800
-        assert result.estimated_cost_usd > 0
+        # Large inputs stay explicit rather than manufacturing a precise bill.
+        assert result.agent_count == 10000
+        assert result.estimated_cost_usd is None
 
 
 class TestSimulationConfig:

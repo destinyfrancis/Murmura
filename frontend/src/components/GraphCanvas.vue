@@ -46,6 +46,15 @@ const tooltipData = ref(null)
 let graphInstance = null
 let resizeObserver = null
 let hullCache = new Map()
+const MAX_AUTO_FIT_ZOOM = 2.5
+
+function fitGraph() {
+  if (!graphInstance) return
+  graphInstance.zoomToFit(0, 30)
+  if (graphInstance.zoom() > MAX_AUTO_FIT_ZOOM) {
+    graphInstance.zoom(MAX_AUTO_FIT_ZOOM, 0)
+  }
+}
 
 // Hull memoization: skip recomputation when cluster membership unchanged
 let lastClusterFingerprint = ''
@@ -421,6 +430,7 @@ function initGraph() {
     .d3Force('collide', forceCollide(22))
     .d3Force('x', forceX(width / 2).strength(0.06))
     .d3Force('y', forceY(height / 2).strength(0.06))
+    .onEngineStop(fitGraph)
 
   containerRef.value.addEventListener('mousemove', handleHullHover)
   containerRef.value.addEventListener('click', handleHullClick)
@@ -493,6 +503,7 @@ onMounted(() => {
     canvasWidth.value = w
     canvasHeight.value = h
     graphInstance.width(w).height(h)
+    fitGraph()
   })
 
   if (containerRef.value) {

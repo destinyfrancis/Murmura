@@ -74,6 +74,21 @@ class TestRegisterEndpoint:
         assert body["data"]["email"] == "test@example.com"
         assert "token" in body["data"]
         assert "user_id" in body["data"]
+        assert body["data"]["is_admin"] is True
+
+    @pytest.mark.asyncio
+    async def test_only_first_registered_user_is_admin(self, test_client):
+        first = await test_client.post(
+            "/api/auth/register",
+            json={"email": "owner@example.com", "password": "password123"},
+        )
+        second = await test_client.post(
+            "/api/auth/register",
+            json={"email": "member@example.com", "password": "password123"},
+        )
+
+        assert first.json()["data"]["is_admin"] is True
+        assert second.json()["data"]["is_admin"] is False
 
     @pytest.mark.asyncio
     async def test_register_with_display_name(self, test_client):
@@ -129,6 +144,7 @@ class TestLoginEndpoint:
         body = resp.json()
         assert body["success"] is True
         assert "token" in body["data"]
+        assert body["data"]["is_admin"] is True
 
     @pytest.mark.asyncio
     async def test_login_wrong_password(self, test_client):
@@ -169,6 +185,7 @@ class TestMeEndpoint:
         body = resp.json()
         assert body["success"] is True
         assert body["data"]["email"] == "me@example.com"
+        assert body["data"]["is_admin"] is True
 
     @pytest.mark.asyncio
     async def test_me_without_token(self, test_client):

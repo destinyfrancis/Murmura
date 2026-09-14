@@ -108,7 +108,7 @@ function renderCognitiveMap(tripleData) {
       source: t.subject,
       target: t.object,
       predicate: t.predicate,
-      confidence: t.confidence || 0.85,
+      confidence: Number.isFinite(Number(t.confidence)) ? Number(t.confidence) : null,
     })
   }
 
@@ -163,7 +163,7 @@ function renderCognitiveMap(tripleData) {
     .data(links)
     .enter().append('line')
     .attr('stroke', d => _PREDICATE_COLORS[d.predicate] || '#888')
-    .attr('stroke-width', d => 1 + d.confidence)
+    .attr('stroke-width', d => d.confidence == null ? 1 : 1 + d.confidence)
     .attr('stroke-opacity', 0.7)
     .attr('marker-end', d => `url(#arrow-${_PREDICATE_COLORS[d.predicate] ? d.predicate : 'default'})`)
 

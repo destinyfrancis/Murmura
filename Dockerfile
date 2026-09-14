@@ -23,7 +23,7 @@ RUN apt-get update && \
 COPY pyproject.toml ./
 COPY README.md ./
 COPY backend/ ./backend/
-RUN pip install --upgrade pip && pip install "."
+RUN pip install --upgrade pip && pip install ".[simulation]"
 
 # Non-root user
 RUN adduser --disabled-password --gecos "" morai && \
@@ -31,4 +31,4 @@ RUN adduser --disabled-password --gecos "" morai && \
 USER morai
 
 EXPOSE 5001
-CMD ["uvicorn", "backend.run:app", "--host", "0.0.0.0", "--port", "5001"]
+CMD ["uvicorn", "backend.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "5001"]

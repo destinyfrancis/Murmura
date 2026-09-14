@@ -2,10 +2,23 @@
 import { computed, ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useSettings } from '../composables/useSettings.js'
-import { testApiKey, listProviderModels, updateSettings } from '../api/settings.js'
+import {
+  clearSettingsAuth,
+  listProviderModels,
+  loginForSettings,
+  registerForSettings,
+  testApiKey,
+  updateSettings,
+} from '../api/settings.js'
 
 const { settings, saveStatus, loadSettings, saveApiKey } = useSettings()
 const { t } = useI18n()
+const authReady = ref(false)
+const authRequired = ref(false)
+const authBusy = ref(false)
+const authMode = ref('login')
+const authError = ref('')
+const authDraft = ref({ email: '', password: '' })
 
 // ── Tab state ──────────────────────────────────────────────────────────────────
 const activeTab = ref('api')
@@ -337,8 +350,7 @@ async function testStepModel(step) {
   }
 }
 
-// ── Lifecycle ─────────────────────────────────────────────────────────────────
-onMounted(async () => {
+async function hydrateModelDrafts() {
   await loadSettings()
   simpleModelDraft.value.provider = settings.llm?.report_provider || settings.llm?.agent_provider || SIMPLE_MODEL_DEFAULT.provider
   simpleModelDraft.value.model = settings.llm?.report_model || settings.llm?.agent_model || SIMPLE_MODEL_DEFAULT.model
@@ -349,6 +361,55 @@ onMounted(async () => {
     if (st.provider) stepDraft.value[s].provider = st.provider
     if (st.model)    stepDraft.value[s].model    = st.model
     if (st.model_lite) stepDraft.value[s].model_lite = st.model_lite
+  }
+}
+
+async function submitAuth() {
+  authBusy.value = true
+  authError.value = ''
+  try {
+    const action = authMode.value === 'register' ? registerForSettings : loginForSettings
+    const account = await action(authDraft.value.email.trim(), authDraft.value.password)
+    if (!account?.is_admin) {
+      clearSettingsAuth()
+      authError.value = t('settings.access.notAdmin')
+      return
+    }
+    await hydrateModelDrafts()
+    authRequired.value = false
+    authDraft.value.password = ''
+  } catch (err) {
+    clearSettingsAuth()
+    authError.value = err.response?.data?.detail || t('settings.access.failed')
+  } finally {
+    authBusy.value = false
+  }
+}
+
+function toggleAuthMode() {
+  authMode.value = authMode.value === 'login' ? 'register' : 'login'
+  authError.value = ''
+}
+
+function logoutSettings() {
+  clearSettingsAuth()
+  authRequired.value = true
+  authMode.value = 'login'
+  authDraft.value = { email: '', password: '' }
+  authError.value = ''
+}
+
+// ── Lifecycle ─────────────────────────────────────────────────────────────────
+onMounted(async () => {
+  try {
+    await hydrateModelDrafts()
+  } catch (err) {
+    authRequired.value = true
+    if (![401, 403].includes(err.response?.status)) {
+      authError.value = t('settings.tabs.api.connFailed')
+    }
+  } finally {
+    authReady.value = true
   }
 })
 
@@ -379,10 +440,33 @@ const saveStatusClass = {
       <div class="save-indicator" :class="saveStatusClass[saveStatus]" aria-live="polite">
         {{ saveStatusLabel[saveStatus] }}
       </div>
+      <button v-if="authReady && !authRequired" type="button" class="logout-button" @click="logoutSettings">
+        {{ $t('settings.access.logout') }}
+      </button>
     </div>
 
+    <div v-if="!authReady" class="auth-card" role="status">{{ $t('settings.access.loading') }}</div>
+    <form v-else-if="authRequired" class="auth-card" @submit.prevent="submitAuth">
+      <span class="auth-eyebrow">LOCAL / SELF-HOSTED</span>
+      <h2>{{ $t('settings.access.title') }}</h2>
+      <p>{{ $t('settings.access.desc') }}</p>
+      <label for="settings-email">{{ $t('settings.access.email') }}</label>
+      <input id="settings-email" v-model.trim="authDraft.email" type="email" autocomplete="username" required />
+      <label for="settings-password">{{ $t('settings.access.password') }}</label>
+      <input id="settings-password" v-model="authDraft.password" type="password" autocomplete="current-password" minlength="8" required />
+      <p v-if="authError" class="auth-error" role="alert">{{ authError }}</p>
+      <div class="auth-actions">
+        <button class="primary-button" type="submit" :disabled="authBusy">
+          {{ authBusy ? $t('settings.access.working') : $t(`settings.access.${authMode}`) }}
+        </button>
+        <button class="text-button" type="button" :disabled="authBusy" @click="toggleAuthMode">
+          {{ $t(`settings.access.${authMode === 'login' ? 'switchToRegister' : 'switchToLogin'}`) }}
+        </button>
+      </div>
+    </form>
+
     <!-- Layout: tab sidebar + content -->
-    <div class="settings-layout">
+    <div v-else class="settings-layout">
 
       <!-- Tab sidebar -->
       <nav class="settings-sidebar" role="navigation" :aria-label="$t('settings.tabs.navLabel')">
@@ -984,6 +1068,35 @@ const saveStatusClass = {
   color: var(--text-secondary);
   margin: 0;
 }
+
+.logout-button,
+.text-button {
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.auth-card {
+  max-width: 520px;
+  padding: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+}
+
+.auth-card h2 { margin: 8px 0; font-size: 20px; }
+.auth-card p { color: var(--text-secondary); line-height: 1.6; }
+.auth-card label { display: block; margin: 16px 0 6px; font-size: 12px; font-weight: 700; }
+.auth-card input { width: 100%; padding: 10px 12px; border: 1px solid var(--border); background: var(--bg-input); color: var(--text-primary); }
+.auth-card input:focus-visible,
+.auth-card button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.auth-eyebrow { color: var(--accent); font-family: var(--font-mono); font-size: 11px; }
+.auth-actions { display: flex; align-items: center; gap: 16px; margin-top: 20px; }
+.auth-actions .primary-button { padding: 9px 16px; border: 1px solid var(--text-primary); background: var(--text-primary); color: var(--bg-card); cursor: pointer; }
+.auth-actions button:disabled { cursor: wait; opacity: 0.6; }
+.auth-error { color: var(--accent-danger) !important; }
 
 /* ── Save indicator ──────────────────────────────────────────────────────── */
 

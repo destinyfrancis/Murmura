@@ -13,7 +13,7 @@ class DemoLLMClient:
     """
     
     def __init__(self, fixture_dir: str = "backend/fixtures/demo"):
-        self.fixture_dir = Path(fixture_dir)
+        self.fixture_dir = Path(__file__).resolve().parents[2] / "fixtures" / "demo" if fixture_dir == "backend/fixtures/demo" else Path(fixture_dir)
         self._cache = {}
 
     def _load_fixture(self, name: str) -> Optional[Dict[str, Any]]:
@@ -39,7 +39,7 @@ class DemoLLMClient:
         p_lower = prompt.lower()
         
         # Routing logic based on common patterns in Murmura
-        if "entity" in p_lower or "extraction" in p_lower:
+        if "entity" in p_lower or "entities" in p_lower or "extraction" in p_lower:
             fixture = self._load_fixture("entity_extraction")
             return json.dumps(fixture) if fixture else "[]"
         

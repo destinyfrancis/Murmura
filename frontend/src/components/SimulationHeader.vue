@@ -5,7 +5,6 @@ defineProps({
   progressPercent: { type: Number,  required: true },
   running:         { type: Boolean, default: false },
   completed:       { type: Boolean, default: false },
-  tokenCostUsd:    { type: Number,  default: 0 },
   modelName:       { type: String,  default: '' },
   simMode:         { type: String,  default: '' },
 })
@@ -34,7 +33,6 @@ function handleAbort() {
       <span v-else            class="status-badge idle">待開始</span>
     </div>
     <span v-if="modelName" class="model-tag">MODEL: {{ modelName }}</span>
-    <span v-if="tokenCostUsd > 0" class="cost-tag">${{ tokenCostUsd.toFixed(4) }} USD</span>
     <button
       v-if="running"
       class="abort-btn"

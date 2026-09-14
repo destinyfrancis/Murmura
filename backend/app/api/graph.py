@@ -704,6 +704,11 @@ async def get_node_evidence(graph_id: str, node_id: str) -> APIResponse:
     """Return evidence for a KG node: matching agent memories + data provenance."""
     try:
         async with get_db() as db:
+            source_rows = await (await db.execute(
+                "SELECT DISTINCT source_text FROM kg_edges WHERE session_id=? "
+                "AND (source_id=? OR target_id=?) AND source_text != '' LIMIT 12",
+                (graph_id, node_id, node_id),
+            )).fetchall()
             # Get node details
             node_row = await (
                 await db.execute(
@@ -743,6 +748,7 @@ async def get_node_evidence(graph_id: str, node_id: str) -> APIResponse:
             success=True,
             data={
                 "node_id": node_id,
+                "source_texts": [row["source_text"] for row in source_rows],
                 "node_label": node_label,
                 "node_type": node_row["entity_type"],
                 "memories": [dict(r) for r in (memory_rows or [])],

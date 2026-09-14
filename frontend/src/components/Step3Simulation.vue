@@ -21,6 +21,8 @@ import MacroPulseBar from './MacroPulseBar.vue'
 
 const props = defineProps({
   session: { type: Object, required: true },
+  autoStart: { type: Boolean, default: true },
+  embedded: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['simulation-complete'])
@@ -35,7 +37,6 @@ const preflight = ref(props.session.preflight || null)
 const preflightLoading = ref(false)
 
 const modelName = ref('')
-const tokenCostUsd = ref(0)
 const simMode = ref('')
 
 // Fork modal state
@@ -299,9 +300,6 @@ async function fetchSessionInfo() {
     const data = res.data?.data || res.data
     modelName.value = data?.llm_model || data?.config?.llm_model || ''
     simMode.value = data?.sim_mode || ''
-    if (data?.estimated_cost_usd != null) {
-      tokenCostUsd.value = parseFloat(data.estimated_cost_usd) || 0
-    }
   } catch { /* silent */ }
 }
 
@@ -493,7 +491,16 @@ onMounted(() => {
   loadGraph()
   fetchSessionInfo()
   if (props.session.sessionId) {
-    start()
+    // Reopening a view must not start another simulation.
+    getSession(props.session.sessionId).then(res => {
+      if (isUnmounted) return
+      const data = res.data?.data || res.data
+      currentRound.value = data.current_round || 0
+      if (data.status === 'completed') { completed.value = true; running.value = false }
+      else if (data.status === 'running') { running.value = true; connectWs() }
+      else if (props.autoStart && (data.status === 'created' || data.status === 'ready')) start()
+      else connectWs()
+    }).catch(err => { if (!isUnmounted) error.value = err.message })
     getSessionAgents(props.session.sessionId)
       .then(r => {
         sessionAgents.value = r.data?.data || []
@@ -557,7 +564,6 @@ const factionAgentColourMap = computed(() => {
       :running="running"
       :completed="completed"
       :model-name="modelName"
-      :token-cost-usd="tokenCostUsd"
       :sim-mode="simMode"
       @open-fork="openForkModal"
       @abort="abortSimulation"
@@ -582,7 +588,7 @@ const factionAgentColourMap = computed(() => {
       </div>
       <div class="preflight-strip-items">
         <span>Model: {{ preflight?.model_check?.model || modelName || '--' }}</span>
-        <span>Cost: {{ preflight?.cost_estimate?.estimated_cost_usd != null ? `$${Number(preflight.cost_estimate.estimated_cost_usd).toFixed(4)}` : '--' }}</span>
+        <span>Cost: {{ preflight?.cost_estimate?.status === 'unavailable' ? 'UNVERIFIED' : '--' }}</span>
         <span>Time: {{ preflight?.time_config?.minutes_per_round || '--' }} min / round</span>
       </div>
       <router-link
@@ -670,7 +676,7 @@ const factionAgentColourMap = computed(() => {
         </div>
       </div>
 
-      <div class="sim-right">
+      <div v-if="!embedded" class="sim-right">
         <div class="graph-container" @drop="handleShockDrop" @dragover.prevent>
           <Transition name="banner-fade">
             <div v-if="shockBanner?.visible" class="shock-banner">
