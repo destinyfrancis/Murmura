@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from backend.app.utils.llm_client import LLMClient, get_agent_provider_model
+from backend.app.utils.llm_client import LLMClient, get_step_provider_model
 from backend.app.utils.logger import get_logger
 from backend.app.utils.prompt_security import sanitize_prompt_seed_text
 from backend.prompts.text_processor_prompts import (
@@ -224,7 +224,8 @@ class TextProcessor:
         try:
             data = await self._llm.chat_json(
                 messages,
-                provider=get_agent_provider_model()[0],
+                provider=get_step_provider_model(1)[0],
+                model=get_step_provider_model(1)[1],
                 temperature=0.3,
                 max_tokens=4096,
             )
@@ -272,7 +273,8 @@ class TextProcessor:
         try:
             data = await self._llm.chat_json(
                 messages,
-                provider=get_agent_provider_model()[0],
+                provider=get_step_provider_model(1)[0],
+                model=get_step_provider_model(1)[1],
                 temperature=0.5,
                 max_tokens=1024,
             )

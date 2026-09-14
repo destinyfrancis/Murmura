@@ -271,11 +271,12 @@ def test_check_exit_code_silent_for_unknown_session():
 
 
 @pytest.mark.asyncio
-async def test_keep_alive_sets_pending_flag():
-    """keep_alive_for_report() should set _report_pending[session_id] = True."""
+async def test_keep_alive_does_not_retain_an_absent_process():
+    """A finished or absent process cannot answer report IPC requests."""
     mgr = SimulationSubprocessManager()
     await mgr.keep_alive_for_report("sess1")
-    assert mgr._report_pending.get("sess1") is True
+    assert not mgr._report_pending.get("sess1")
+    assert not mgr._auto_release_tasks
 
 
 @pytest.mark.asyncio

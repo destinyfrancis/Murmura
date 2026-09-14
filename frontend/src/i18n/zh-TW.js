@@ -1,4 +1,33 @@
 export default {
+  research: {
+    chooseActor: '選擇角色／實體',
+    demoLabel: '示範回放', demoOpen: '打開免費示範', demoHint: '免費示範使用預先編寫的資料，沒有執行模型。要探索自己的材料，請關閉 DEMO_MODE 並設定模型。',
+    novel: { label: '小說：洪水中的村莊', desc: '人物會合作、分裂，還是改變立場？', seed: '虛構故事：山村即將遭遇洪水。村長阿明想保住舊橋；船夫阿玲願意疏散村民，但需要燃料；店主阿康囤有燃料，怕生意受損；醫生阿欣需要先送病人離開。四人曾合作救災，但上次燃料欠款未還。只使用這些設定，探索接下來的互動。', question: '燃料短缺與舊有欠款，會怎樣改變四人的合作？' },
+    politics: { label: '政治：一項有爭議的政策', desc: '從有日期和來源的材料，探索不同持份者的反應。', seed: '假設情境，並非時事報道：某城市計劃把市中心行車線改成巴士專線。市長希望減少塞車；運輸工會支持但要求增聘司機；小店聯盟擔心落貨困難；居民協會要求保留長者接送點。政策仍在諮詢，沒有決定實施日期。', question: '哪個讓步可能促成協議？哪些分歧仍未解決？' },
+    relationship: { label: '關係：一次搬遷決定', desc: '探索互動與選擇，不把角色設定當成真人的內心。', seed: '虛構關係情境：阿彤獲得外地工作機會，希望伴侶阿謙同行。阿謙需要照顧父親，尚未告訴阿彤自己的顧慮。好友阿珊知道兩人的處境，願意協助安排照顧。兩人重視共同生活，但未談過分隔兩地的期限。', question: '當照顧責任被說清楚後，他們會如何調整選擇？' },
+    interpret: '用模型深入解讀（會使用 API）',
+
+    "preset": "小型世界",
+    "presetHint": "最多 16 個角色 · 5 回合 · 單一平台",
+    "world": "情境世界與互動",
+    "worldHint": "隨情境推進，查看角色、關係及互動。",
+    "empty": "材料處理完成後，角色與關係會顯示喺呢度。",
+    "loading": "載入情境世界…",
+    "failed": "未能載入情境世界。",
+    "retry": "再試一次",
+    "nodes": "角色／實體",
+    "edges": "關係",
+    "events": "最近動態",
+    "source": "來源／描述",
+    "unknown": "未有資料",
+    "advanced": "更多研究設定",
+    "scale": "模擬規模",
+    "agents": "角色",
+    "rounds": "回合",
+    "custom": "自訂",
+    "unverified": "情境探索 · 預測準確度未經驗證"
+},
+
   nav: {
     home: '首頁',
     workspace: '工作區',
@@ -474,15 +503,15 @@ export default {
   home: {
     eyebrow: '通用預測工作台',
     subtitle: '通用預測引擎',
-    description: '投放任何種子文字——新聞、劇本、地緣政治事件——AI 自動構建世界、生成代理人並開始模擬。結合多智能體系統、知識圖譜與宏觀預測，預見集體行為。',
+    description: '放入小說、事件材料或關係設定，建立角色與世界，觀察互動如何帶出可能的發展，再追查每個重要選擇的依據。',
     consoleTitle: 'Prediction Console',
     consoleStatus: '系統狀態',
     consoleStatusLive: '可用',
-    consoleSignal: 'Clean-room UI · 5-step workflow',
+    consoleSignal: '角色 · 互動 · 可能的發展',
     pipelineTitle: '五步控制流',
     examplesTitle: '示例場景',
-    betaTitle: 'Beta 工作流',
-    betaHint: '已校準的首發模板，比任意場景更適合作公開測試。',
+    betaTitle: '從一個小情境開始',
+    betaHint: '三個虛構起點，你可以改寫角色、關係與問題。',
     beta: {
       publicNarrative: {
         label: '公共敘事',
@@ -532,7 +561,7 @@ export default {
     workflow: {
       graph: '抽取實體、關係與隱含持份者',
       env: '生成代理人、平台身份與場景配置',
-      sim: '運行多智能體模擬與湧現 hooks',
+      sim: '觀察角色互相影響與選擇變化',
       report: '以 XAI 工具生成可追溯報告',
       interact: '訪談代理人並探索 What-If 分支'
     },
@@ -566,11 +595,11 @@ export default {
     godView: '上帝視角',
     presets: {
       fast: '快速',
-      fastHint: '100 位代理人 · 15 輪模擬 (~2 分鐘)',
+      fastHint: '100 位代理人 · 15 輪模擬',
       standard: '標準',
-      standardHint: '300 位代理人 · 20 輪模擬 (~8 分鐘)',
+      standardHint: '300 位代理人 · 20 輪模擬',
       deep: '深度',
-      deepHint: '500 位代理人 · 30 輪模擬 (~20 分鐘)'
+      deepHint: '500 位代理人 · 30 輪模擬'
     },
     errors: {
       format: '不支援 {ext} 格式，請上傳 PDF、TXT 或 Markdown',
@@ -589,17 +618,23 @@ export default {
     }
   },
   landing: {
+    brandZh: '群飛鳥',
     nav: {
       howItWorks: '運作原理',
       features: '核心功能',
+      github: '開源碼',
       launch: '啟動引擎 →'
     },
     hero: {
-      eyebrow: '通用預測引擎',
-      title: '投放任何文字。',
-      titleAccent: '模擬任何世界。',
-      sub: '餵給 Murmura 一句話、一份文件或一個場景 —— 它會自動構建知識圖譜、生成代理人、運行模擬並預測集體結果。',
-      cta: '開始預測',
+      eyebrow: '群飛鳥 · 通用情境推演引擎',
+      title: 'The future is not a line.',
+      titleAccent: 'It emerges from interaction.',
+      titleZh: '未來唔係一條直線，而係由互動湧現。',
+      sub: '由一段新聞、一份政策文件、一個商業念頭，直到一段關係嘅假設 —— 群飛鳥將文字變成可互動嘅世界，讓你睇見不同持份者如何回應、互相影響，再一步步推演出多條可能嘅未來。',
+      note: '唔係預言。係把未知拆開，逐個可能性睇清楚。',
+      seed: '起點',
+      possibleFutures: '可能嘅未來',
+      cta: '申請預覽',
       workspace: '工作區',
       stats: {
         agents: '單次運行代理人',
@@ -608,47 +643,71 @@ export default {
         xai: '可解釋 AI 工具'
       }
     },
+    promise: {
+      label: '點解要推演',
+      title: '一個決定，從來唔只會有一種反應。',
+      desc: '民調問人哋打算點做；群飛鳥則將環境、立場、記憶、信任同限制放入同一個可運行嘅場景，觀察人與人之間嘅互動點樣令結果改變。你得到嘅唔係一條漂亮但脆弱嘅預測線，而係一張可以追問、比較同反覆測試嘅可能性地圖。',
+    },
+    lenses: {
+      list: {
+        interactions: { title: '睇見互動，而唔係單點意見', desc: '每個代理人都有自己嘅目標、記憶、性格同信任圈；結果由佢哋之間嘅回應逐步形成。' },
+        feedback: { title: '追蹤回饋如何放大', desc: '一個決策可以改變市場信心、輿論、資源同下一輪決策；系統會保留呢條因果鏈。' },
+        emergence: { title: '捕捉未預先寫好嘅湧現', desc: '派系、轉向、臨界點、意外聯盟同連鎖反應，會喺多輪互動後自然浮現。' },
+      }
+    },
     workflow: {
       label: '運作原理',
       title: '五步工作流',
       steps: {
-        graph: { label: '圖譜', title: '知識圖譜', desc: '種子文字 → 實體提取 → 因果網絡自動構建' },
-        env: { label: '環境', title: '環境設定', desc: '代理人工廠依據圖譜節點生成配置，無需手動設定' },
-        sim: { label: '模擬', title: '動態模擬', desc: 'OASIS 多智能體引擎運行，完整捕捉湧現行為' },
-        report: { label: '報告', title: 'ReACT 報告', desc: '三階段 LLM：大綱 → 多路工具調用 → 文檔組裝' },
-        interact: { label: '互動', title: '深度互動', desc: '訪談代理人、注入衝擊、開拓「What-If」分支場景' }
+        graph: { label: '圖譜', title: '先把情境讀懂', desc: '種子文字 → 實體、關係與持份者 → 一張可追溯嘅世界圖譜' },
+        env: { label: '環境', title: '生成一群角色', desc: '由圖譜節點建立有目標、記憶、信任同限制嘅代理人，唔使逐個手動設定' },
+        sim: { label: '模擬', title: '讓世界運行起來', desc: '多輪互動入面，代理人會回應、改變信念，令湧現嘅路徑慢慢浮現' },
+        report: { label: '報告', title: '整理成可追問嘅報告', desc: '由模擬證據組織出概率、關鍵轉折、風險同未解答嘅問題' },
+        interact: { label: '互動', title: '再問一次「如果……」', desc: '訪談代理人、注入衝擊、分叉時間線，將下一個假設帶返入場景' }
       }
     },
     features: {
       label: '引擎能力',
       title: '我們的核心功能',
       list: {
-        universal: { title: '通用模式', desc: '支援任何種子文字 —— 新聞、小說、地緣政治。引擎自動推斷代理人、決策、指標與衝擊。' },
-        kg: { title: '知識圖譜', desc: 'GraphRAG 追蹤實體關係與因果鏈。每 5 輪生成快照，隨互動持續演化。' },
-        emergence: { title: '湧現引擎', desc: '派系形成、臨界點、同溫層、病毒式傳播 —— 全部為自主湧現，而非預設腳本。' },
-        monteCarlo: { title: '蒙地卡羅', desc: '100 次 LHS + t-Copula 採樣。Wilson 得分置信區間。支援高達 10,000 次隨機試驗。' },
+        universal: { title: '由文字開始', desc: '一段新聞、一份文件或一個念頭都可以成為起點。引擎自動抽取角色、決策、指標與可能衝擊。' },
+        kg: { title: '關係先於答案', desc: 'GraphRAG 將證據、實體與因果鏈連起來，讓每一條推演路徑都有脈絡，而唔係只得一個分數。' },
+        emergence: { title: '多智能體湧現', desc: '大量獨立代理人各自按目標、記憶同限制作決定；派系、轉向、臨界點同連鎖反應由互動自然形成。' },
+        monteCarlo: { title: '蒙地卡羅', desc: '以 LHS + t-Copula 做 500 次取樣，配合 Wilson 置信區間，將單一答案還原成一段可理解嘅概率範圍。' },
         macro: { title: '宏觀回饋', desc: '每輪更新 11 個宏觀指標。代理人的微觀決策即時回饋至宏觀狀態。' },
         scenarios: { title: '場景分支', desc: '在任何輪次分叉模擬。並排比較不同時間線的演化結果。' }
       }
     },
     useCases: {
       label: '應用領域',
-      title: '適用於任何領域',
+      title: '由國際局勢，到你下一個決定。',
       list: {
         geopolitics: { tag: '地緣政治', desc: '台海局勢演變、伊以衝突模擬、貿易戰連鎖反應' },
-        finance: { tag: '金融', desc: '聯準會升息外溢效應、加密貨幣恐慌、企業競爭對抗' },
-        society: { tag: '社會', desc: '政策影響建模、社會運動動態、人口結構變遷' },
-        fiction: { tag: '虛構作品', desc: '《紅樓夢》、哈利波特、任何敘事世界' }
+        finance: { tag: '金融與宏觀', desc: '利率、通脹、股市、期貨與匯率變化，點樣透過預期同信心傳到企業同家庭。' },
+        society: { tag: '公共政策', desc: '政策推出後，唔同收入、年齡、地區同立場嘅人會點樣理解、接受或者反彈。' },
+        property: { tag: '樓市與個人投資', desc: '將樓價、息口、供應、收入同置業者信心放埋一齊，探索入市時機嘅多個路徑。' },
+        product: { tag: '產品與市場', desc: '新產品推出前，模擬早期採用者、觀望者、競爭者同渠道夥伴嘅反應。' },
+        reputation: { tag: '品牌與公關', desc: '一個失誤點樣由第一個帖文演變成信任流失、媒體報道同內部決策壓力。' },
+        relationships: { tag: '個人與關係', desc: '把雙方需要、依附、誤解同外在壓力放入場景，理解一段關係可能點樣轉向。' },
+        fiction: { tag: '敘事與創作', desc: '《紅樓夢》、科幻世界、遊戲陣營，或者你自己寫嘅故事，都可以變成可探索嘅世界。' }
       }
     },
+    audiences: {
+      label: '由邊個用',
+      title: '將「如果……會點？」變成可以行嘅場景。',
+      policy: { label: '政策與公共事務', title: '先睇反應，再落決定。', desc: '輸入政策草案、新聞背景或地緣政治事件，睇見政府、盟友、媒體、企業同市民點樣互相影響，為每一條路徑保留證據同不確定性。' },
+      business: { label: '企業與策略', title: '用一個產品念頭測試整個市場。', desc: '由目標客群到競爭者、渠道同輿論，模擬推出、定價、供應受阻或者公關危機，搵出真正會改變結果嘅少數因素。' },
+      individual: { label: '個人與研究', title: '將複雜選擇拆成幾條可比較嘅未來。', desc: '無論係入市、轉工、移民，定係一段關係嘅下一步，群飛鳥幫你整理假設、睇清風險同辨認你未諗過嘅分支。' },
+    },
     cta: {
-      label: '準備好開始模擬了嗎？',
-      title: '投放你的第一個場景',
-      sub: '無需配置。粘貼任何文字，剩下的交給引擎處理。',
-      btn: '啟動引擎 →'
+      label: 'PRIVATE PREVIEW',
+      title: '將你最想知道嘅「如果……」帶入來。',
+      sub: '唔使先學模型。交俾我哋一段文字或者一個問題，先一齊睇清楚邊啲未來值得推演。',
+      btn: '申請預覽 →'
     },
     footer: {
       desc: '通用預測引擎 · 基於代理人的模擬技術',
+      github: '查看 GitHub',
       copy: '構建技術：FastAPI · Vue 3 · OASIS · LanceDB'
     }
   },
@@ -761,6 +820,21 @@ export default {
     header: {
       title: '設定',
       subtitle: '管理 API 金鑰、模型選擇及系統偏好設定'
+    },
+    access: {
+      loading: '正在確認本機設定權限…',
+      title: '管理本機設定',
+      desc: '全新安裝時，第一個註冊帳戶會成為管理員。之後請用同一帳戶登入，管理模型及 API 金鑰。',
+      email: '電郵',
+      password: '密碼（至少 8 個字元）',
+      login: '登入',
+      register: '建立管理員帳戶',
+      working: '處理中…',
+      switchToRegister: '這是全新安裝？建立第一個帳戶',
+      switchToLogin: '已有帳戶？返回登入',
+      notAdmin: '這個帳戶不是管理員，不能修改模型或 API 金鑰。',
+      failed: '登入失敗，請檢查電郵及密碼。',
+      logout: '登出設定'
     },
     tabs: {
       navLabel: '設定分頁',

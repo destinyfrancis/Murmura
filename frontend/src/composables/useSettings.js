@@ -162,6 +162,7 @@ export function useSettings() {
     } catch (err) {
       console.error('[useSettings] loadSettings failed:', err)
       _isHydratingBackend = false
+      throw err
     } finally {
       Promise.resolve().then(() => {
         _isHydratingBackend = false

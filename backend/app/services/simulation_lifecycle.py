@@ -167,6 +167,12 @@ class SimulationLifecycleMixin:
         await self._init_b2b_companies(session_id)
         await self._init_social_network(session_id)
 
+        from backend.app.models.simulation_config import resolve_preset
+        self._session_presets[session_id] = resolve_preset(
+            config.get("preset") or self._preset.name,
+            config.get("agent_count"), config.get("round_count"),
+        )
+
         # Restore macro state from DB if this session was previously interrupted.
         if session_id not in self._macro_state:
             restored = await self._restore_macro_state(session_id)
@@ -247,6 +253,13 @@ class SimulationLifecycleMixin:
         full_config = _build_full_config(config, session_id)
         config_dir = _PROJECT_ROOT / "data" / "sessions" / session_id
         config_dir.mkdir(parents=True, exist_ok=True)
+        # A unique directory prevents a rerun consuming a previous run's state.
+        from uuid import uuid4
+        from backend.scripts.round_context import publish_context
+
+        context_dir = str(config_dir / "round_context" / uuid4().hex)
+        full_config["round_context_dir"] = context_dir
+        publish_context(context_dir, 0, self._kg_sessions.get(session_id))
         config_path = config_dir / "sim_config.json"
         config_path.write_text(
             json.dumps(full_config, indent=2, ensure_ascii=False),
@@ -351,6 +364,7 @@ class SimulationLifecycleMixin:
                 )
                 if completed_round_int is not None:
                     await self._execute_round_hooks(session_id, completed_round_int)
+                    publish_context(context_dir, completed_round_int, self._kg_sessions.get(session_id))
 
             await process.wait()
             self._subprocess_mgr.check_exit_code(session_id)
@@ -383,7 +397,8 @@ class SimulationLifecycleMixin:
 
                 mc = MonteCarloEngine()
                 _domain = config.get("domain_pack_id", "hk_city")
-                await mc.run_mini(session_id, domain_pack_id=_domain)
+                if self._session_presets.get(session_id, self._preset).mc_trials > 0:
+                    await mc.run_mini(session_id, domain_pack_id=_domain)
                 logger.info("Mini-ensemble complete session=%s", session_id)
             except Exception:
                 logger.exception("Mini-ensemble failed session=%s", session_id)
@@ -514,6 +529,7 @@ class SimulationLifecycleMixin:
         self._agent_moderation_risks.pop(session_id, None)
 
         # kg_driven state
+        self._session_presets.pop(session_id, None)
         self._kg_mode.pop(session_id, None)
         self._kg_sessions.pop(session_id, None)
         if self._relationship_lifecycle is not None:

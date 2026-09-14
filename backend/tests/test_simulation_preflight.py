@@ -46,7 +46,8 @@ async def test_preflight_valid_static_model_ready(monkeypatch):
 
     assert report["ready"] is True
     assert report["model_check"]["api_key_present"] is True
-    assert report["cost_estimate"]["estimated_cost_usd"] >= 0
+    assert report["cost_estimate"]["estimated_cost_usd"] is None
+    assert report["cost_estimate"]["status"] == "unavailable"
     assert report["time_config"]["minutes_per_round"] > 0
 
 
@@ -211,7 +212,7 @@ async def test_preflight_endpoint_does_not_enqueue_jobs(monkeypatch, test_client
 
 
 @pytest.mark.asyncio
-async def test_preflight_blocks_cost_hard_cap(monkeypatch):
+async def test_preflight_cost_estimate_never_blocks_research(monkeypatch):
     from backend.app.services.simulation_preflight import SimulationPreflightService
 
     _oasis_available(monkeypatch)
@@ -229,4 +230,5 @@ async def test_preflight_blocks_cost_hard_cap(monkeypatch):
         }
     )
 
-    assert "cost_exceeds_hard_cap" in {e["code"] for e in report["blocking_errors"]}
+    assert report["ready"] is True
+    assert "cost_estimate_unavailable" in {e["code"] for e in report["warnings"]}

@@ -14,10 +14,14 @@ async def _register(client, email: str, *, admin: bool = False) -> tuple[str, st
     )
     assert resp.status_code == 200
     data = resp.json()["data"]
-    if admin:
-        async with get_db() as db:
-            await db.execute("UPDATE users SET is_admin = 1 WHERE id = ?", (data["user_id"],))
-            await db.commit()
+    # Registration intentionally bootstraps the first account as admin.  These
+    # ownership tests need the requested role regardless of registration order.
+    async with get_db() as db:
+        await db.execute(
+            "UPDATE users SET is_admin = ? WHERE id = ?",
+            (int(admin), data["user_id"]),
+        )
+        await db.commit()
     return data["user_id"], data["token"]
 
 

@@ -278,7 +278,14 @@ async def pipeline_db(tmp_path):
         finally:
             await conn.close()
 
-    with patch("backend.app.utils.db.get_db", _mock_get_db):
+    # Keep ActionLogger's module-level DB binding scoped to this fixture even
+    # when SimulationRunner imports it lazily while the provider is patched.
+    from backend.scripts import action_logger as action_logger_module
+
+    with (
+        patch("backend.app.utils.db.get_db", _mock_get_db),
+        patch.object(action_logger_module, "get_db", _mock_get_db),
+    ):
         yield db_path, _mock_get_db
 
 

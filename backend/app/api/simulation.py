@@ -11,6 +11,7 @@ All handlers delegate to real service implementations:
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import uuid
 from pathlib import Path
@@ -221,6 +222,8 @@ async def create_simulation(
 
         manager = get_simulation_manager()
         request_dict = req.model_dump()
+        if 'llm_provider' not in req.model_fields_set:
+            request_dict.pop('llm_provider', None)
         if user:
             request_dict["owner_id"] = user.id
         if mode == "kg_driven":
@@ -451,7 +454,7 @@ async def simulation_preflight(
 
 @router.post("/estimate-cost", response_model=APIResponse)
 async def estimate_simulation_cost(req: dict) -> APIResponse:
-    """Estimate LLM cost for a simulation before running it."""
+    """Report whether a reliable pre-run LLM cost estimate is available."""
     from backend.app.services.cost_estimator import estimate_cost  # noqa: PLC0415
 
     try:
@@ -475,7 +478,7 @@ _QUICK_START_ALLOWED_EXTS = {".pdf", ".txt", ".md", ".markdown"}
 async def _run_quick_start(
     seed_text: str,
     scenario_question: str = "",
-    preset: str = "fast",
+    preset: str = "research",
     owner_id: str | None = None,
 ) -> APIResponse:
     """Shared business logic for both JSON and file-upload quick-start endpoints."""
@@ -493,8 +496,6 @@ async def _run_quick_start(
     resolved = resolve_preset(preset)
     agent_count_final = resolved.agents
     round_count_final = resolved.rounds
-    estimated_duration = round_count_final * agent_count_final // 50
-
     graph_id = str(uuid.uuid4())
     graph_builder = GraphBuilderService()
     graph_result = await graph_builder.build_graph_from_seed(
@@ -598,7 +599,9 @@ async def _run_quick_start(
             "graph_id": graph_id,
             "mode": config.mode,
             "status_url": f"/api/simulation/{session_id}/status",
-            "estimated_duration_seconds": estimated_duration,
+            # Runtime depends on activation, hooks, retries, local hardware, and
+            # provider latency. Do not manufacture a duration from cast size.
+            "estimated_duration_seconds": None,
             "domain_pack_id": config.domain_pack_id,
             "agent_count": agent_count_final,
             "round_count": round_count_final,
@@ -1226,27 +1229,13 @@ async def resume_session(
     session_id: str,
     user: Annotated[UserProfile, Depends(get_current_user)],
 ) -> APIResponse:
-    """Resume a simulation session that was paused due to exceeding the hard cost cap.
-
-    Calls ``cost_tracker.resume(session_id)`` which clears the paused flag and
-    signals the asyncio.Event that the simulation loop is waiting on.
-    """
+    """Compatibility endpoint: cost-based pausing has been removed."""
     try:
         await require_session_access(session_id, user)
-        from backend.app.services import cost_tracker as _ct  # noqa: PLC0415
-
-        if not _ct.is_paused(session_id):
-            return APIResponse(
-                success=True,
-                data={"session_id": session_id, "resumed": False, "message": "Session is not paused"},
-            )
-        _ct.resume(session_id)
-        total_cost = _ct.get_session_cost(session_id)
-        logger.info("resume_session: session=%s total_cost=$%.4f", session_id, total_cost)
-        return APIResponse(
-            success=True,
-            data={"session_id": session_id, "resumed": True, "total_cost": total_cost},
-        )
+        return APIResponse(success=True, data={
+            "session_id": session_id, "resumed": False,
+            "message": "Cost-based pausing is no longer used",
+        })
     except HTTPException:
         raise
     except Exception as exc:
@@ -1372,6 +1361,7 @@ async def get_session_actions(
     round: int | None = None,
     platform: str | None = None,
     limit: int = 200,
+    latest: bool = False,
     user: Annotated[UserProfile | None, Depends(get_optional_user)] = None,
 ) -> APIResponse:
     """Get logged simulation actions for a session."""
@@ -1385,6 +1375,7 @@ async def get_session_actions(
             round_number=round,
             platform=platform,
             limit=min(limit, 1000),
+            latest=latest,
         )
         return APIResponse(
             success=True,

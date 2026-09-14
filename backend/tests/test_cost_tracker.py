@@ -1,4 +1,4 @@
-"""Tests for cost_tracker — async record_cost with lock, budget alerting."""
+"""Tests for partial usage recording and concurrent accumulation."""
 
 from __future__ import annotations
 

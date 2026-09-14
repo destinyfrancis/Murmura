@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from failure_contract import classify_failure
+from round_context import attach_context, prepare_round
 
 logging.basicConfig(
     level=logging.INFO,
@@ -552,6 +553,7 @@ async def run_simulation(config: dict[str, Any]) -> None:
     emit_progress(0, round_count, "Resetting environment")
     await env.reset()
 
+    attach_context(agent_graph, config)
     all_agents_list = agent_graph.get_agents()
     active_limit = _active_agent_limit(config, len(all_agents_list))
     logger.info("Active Twitter agents per round: %d/%d", active_limit, len(all_agents_list))
@@ -569,6 +571,8 @@ async def run_simulation(config: dict[str, Any]) -> None:
         if _shutdown:
             emit_progress(round_num, round_count, "Shutdown")
             break
+
+        await prepare_round(agent_graph, config, round_num)
 
         # Shocks first
         for shock in get_shocks_for_round(shocks, round_num):

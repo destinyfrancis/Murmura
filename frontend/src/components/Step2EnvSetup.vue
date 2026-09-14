@@ -81,7 +81,7 @@ const aiError = ref(null)
 
 // Preset integration
 const presetConfig = ref({
-  name: 'standard',
+  name: props.session.preset?.name || 'research',
   agents: config.agentCount,
   rounds: config.roundCount,
 })
@@ -174,7 +174,6 @@ function applyAiSuggestion() {
 const preflightBlocking = computed(() => preflight.value?.blocking_errors || [])
 const preflightWarnings = computed(() => preflight.value?.warnings || [])
 const preflightReady = computed(() => preflight.value?.ready === true)
-const preflightCost = computed(() => preflight.value?.cost_estimate?.estimated_cost_usd)
 const timeScaleLabel = computed(() => {
   const tc = preflight.value?.time_config
   if (!tc) return '--'
@@ -264,6 +263,7 @@ async function startSimulation() {
     }
     const res = await createSimulation({
       graph_id: props.session.graphId,
+      preset: presetConfig.value.name,
       scenario_type: props.session.scenarioType,
       domain_pack_id: props.session.domainPackId || 'hk_city',
       agent_count: config.agentCount,
@@ -381,8 +381,8 @@ async function startSimulation() {
           <strong>{{ timeScaleLabel }}</strong>
         </div>
         <div class="preflight-metric">
-          <span>EST. COST</span>
-          <strong>{{ preflightCost != null ? `$${Number(preflightCost).toFixed(4)}` : '--' }}</strong>
+          <span>COST STATUS</span>
+          <strong>{{ preflight?.cost_estimate?.status === 'unavailable' ? 'UNVERIFIED' : '--' }}</strong>
         </div>
         <div class="preflight-metric">
           <span>MODEL</span>

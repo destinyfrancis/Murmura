@@ -91,6 +91,13 @@ class SimulationManager:
         Raises:
             ValueError: If required fields are missing or invalid.
         """
+        from backend.app.utils.llm_client import get_step_provider_model
+        configured_provider, configured_model = get_step_provider_model(3)
+        request = {
+            **request,
+            "llm_provider": request.get("llm_provider") or configured_provider,
+            "llm_model": request.get("llm_model") or (configured_model if not request.get("llm_provider") or request["llm_provider"] == configured_provider else ""),
+        }
         graph_id = request.get("graph_id")
         if not graph_id:
             raise ValueError("graph_id is required")
@@ -149,11 +156,10 @@ class SimulationManager:
                 )
 
         logger.info(
-            "Created session %s: %d agents, %d rounds, est $%.4f",
+            "Created session %s: %d agents, %d rounds; pre-run cost unavailable",
             session.id,
             session.agent_count,
             session.round_count,
-            session.cost_estimate.total_estimated_usd if session.cost_estimate else 0,
         )
 
         return {
@@ -161,7 +167,7 @@ class SimulationManager:
             "agent_count": session.agent_count,
             "round_count": session.round_count,
             "status": session.status.value,
-            "estimated_cost_usd": (session.cost_estimate.total_estimated_usd if session.cost_estimate else 0.0),
+            "estimated_cost_usd": None,
             "csv_path": effective_csv_path,
         }
 
@@ -178,7 +184,14 @@ class SimulationManager:
             ValueError: If session not found.
         """
         session = await _load_session(session_id)
-        return _session_to_dict(session)
+        result = _session_to_dict(session)
+        async with get_db() as db:
+            row = await (await db.execute(
+                "SELECT id FROM reports WHERE session_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                (session_id,),
+            )).fetchone()
+        result["report_id"] = row["id"] if row else None
+        return result
 
     async def start_session(self, session_id: str) -> None:
         """Enqueue simulation job instead of starting immediately.
@@ -186,6 +199,9 @@ class SimulationManager:
         Validates state transition and idempotently adds to simulation_jobs.
         The execution is picked up by SimulationWorker.
         """
+        from backend.app.config import get_settings
+        if get_settings().DEMO_MODE:
+            raise ValueError("Demo mode is a scripted replay, not a live simulation")
         if session_id not in _SESSION_START_LOCKS:
             _SESSION_START_LOCKS[session_id] = asyncio.Lock()
 
@@ -527,11 +543,18 @@ async def generate_agents(
             kg_edges,
             seed_text,
             target_count=requested_target or None,
+            expand_background=request.get("preset") != "research",
         )
-        if requested_target > 0 and len(profiles) != requested_target:
+        if request.get("preset") != "research" and requested_target > 0 and len(profiles) != requested_target:
             raise RuntimeError(
                 f"KGAgentFactory produced {len(profiles)} agents but {requested_target} were requested"
             )
+        if not profiles:
+            raise ValueError("No actors were generated from the scenario")
+        if request.get("preset") == "research":
+            async with get_db() as db:
+                await db.execute("UPDATE simulation_sessions SET agent_count=? WHERE id=?", (len(profiles), session_id))
+                await db.commit()
         written_path = factory.generate_agents_csv(profiles, csv_path)
         # Persist platform identities to DB for simulation runtime lookup.
         all_platform_ids = [
@@ -1012,7 +1035,8 @@ async def _persist_session(
     - All required NOT NULL columns (seed_text, llm_model, oasis_db_path).
     - The full request JSON in a dedicated column so start_session can
       recover shocks, family_members, crm_data, and the CSV path.
-    - estimated_cost_usd from the SessionState cost estimate.
+    - ``estimated_cost_usd`` is retained as a legacy DB column and written as
+      ``NULL``; new API responses expose ``null`` rather than a guessed amount.
     """
     llm_model = request.get("llm_model") or ""
     seed_text = request.get("seed_text", session.scenario_type)
@@ -1047,7 +1071,7 @@ async def _persist_session(
                 request.get("macro_scenario_id"),
                 oasis_db_path,
                 session.status.value,
-                (session.cost_estimate.total_estimated_usd if session.cost_estimate else 0.0),
+                (session.cost_estimate.total_estimated_usd if session.cost_estimate else None),
                 json.dumps(enriched_request, ensure_ascii=False),
                 session.created_at,
                 domain_pack_id,
@@ -1075,14 +1099,9 @@ async def _load_session(session_id: str) -> SessionState:
 
     row_keys = row.keys()
 
-    # Reconstruct cost estimate from estimated_cost_usd if present.
-    estimated_cost = row["estimated_cost_usd"] if "estimated_cost_usd" in row_keys else 0.0
+    # Historical rows may contain guessed estimates. Do not reconstruct or
+    # expose them as current evidence.
     cost: CostEstimate | None = None
-    if estimated_cost:
-        cost = CostEstimate.calculate(
-            agent_count=row["agent_count"],
-            round_count=row["round_count"],
-        )
 
     platforms_raw = row["platforms"] if "platforms" in row_keys else None
     platforms: dict[str, bool] = json.loads(platforms_raw) if platforms_raw else {"twitter": True, "reddit": True}
@@ -1247,7 +1266,7 @@ async def _build_runner_config(session: SessionState) -> dict[str, Any]:
         "accounts/fireworks/models/deepseek-v3p2",
         "accounts/fireworks/models/deepseek/deepseek-v3.2",
     }
-    if not llm_model or llm_model in (*known_bad_models, "deepseek/deepseek-v3.2"):
+    if not original_request.get("llm_model") and (not llm_model or llm_model in (*known_bad_models, "deepseek/deepseek-v3.2")):
         # Use AGENT_LLM_MODEL env var if set, else default for the provider
         from backend.app.services.runtime_settings import get_override  # noqa: PLC0415
 
@@ -1273,6 +1292,11 @@ async def _build_runner_config(session: SessionState) -> dict[str, Any]:
         "llm_base_url": base_url,
         "oasis_db_path": oasis_db_path,
         "agent_csv_path": original_request.get("agent_csv_path", ""),
+        "seed_text": original_request.get("seed_text", ""),
+        "scenario_description": original_request.get("scenario_description", ""),
+        "time_config": original_request.get("time_config", {}),
+        "domain_pack_id": original_request.get("domain_pack_id", "hk_city"),
+        "preset": original_request.get("preset"),
         "shocks": original_request.get("shocks", []),
         "family_members": original_request.get("family_members"),
         "crm_data": original_request.get("crm_data"),
@@ -1295,7 +1319,7 @@ def _session_to_dict(session: SessionState) -> dict[str, Any]:
         "scenario_type": session.scenario_type,
         "platforms": session.platforms,
         "llm_provider": session.llm_provider,
-        "estimated_cost_usd": (session.cost_estimate.total_estimated_usd if session.cost_estimate else 0.0),
+        "estimated_cost_usd": None,
         "error_message": session.error_message,
         "created_at": session.created_at,
         "updated_at": session.updated_at,

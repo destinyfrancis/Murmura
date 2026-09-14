@@ -27,7 +27,23 @@ const useCases = computed(() => [
   { tag: t('landing.useCases.list.geopolitics.tag'), desc: t('landing.useCases.list.geopolitics.desc') },
   { tag: t('landing.useCases.list.finance.tag'), desc: t('landing.useCases.list.finance.desc') },
   { tag: t('landing.useCases.list.society.tag'), desc: t('landing.useCases.list.society.desc') },
+  { tag: t('landing.useCases.list.property.tag'), desc: t('landing.useCases.list.property.desc') },
+  { tag: t('landing.useCases.list.product.tag'), desc: t('landing.useCases.list.product.desc') },
+  { tag: t('landing.useCases.list.reputation.tag'), desc: t('landing.useCases.list.reputation.desc') },
+  { tag: t('landing.useCases.list.relationships.tag'), desc: t('landing.useCases.list.relationships.desc') },
   { tag: t('landing.useCases.list.fiction.tag'), desc: t('landing.useCases.list.fiction.desc') },
+])
+
+const lenses = computed(() => [
+  { mark: '01', title: t('landing.lenses.list.interactions.title'), desc: t('landing.lenses.list.interactions.desc') },
+  { mark: '02', title: t('landing.lenses.list.feedback.title'), desc: t('landing.lenses.list.feedback.desc') },
+  { mark: '03', title: t('landing.lenses.list.emergence.title'), desc: t('landing.lenses.list.emergence.desc') },
+])
+
+const audiences = computed(() => [
+  { label: t('landing.audiences.policy.label'), title: t('landing.audiences.policy.title'), desc: t('landing.audiences.policy.desc') },
+  { label: t('landing.audiences.business.label'), title: t('landing.audiences.business.title'), desc: t('landing.audiences.business.desc') },
+  { label: t('landing.audiences.individual.label'), title: t('landing.audiences.individual.title'), desc: t('landing.audiences.individual.desc') },
 ])
 </script>
 
@@ -39,30 +55,33 @@ const useCases = computed(() => [
     <!-- Nav -->
     <nav class="nav">
       <div class="nav-inner">
-        <span class="nav-logo">Murmura</span>
+        <div class="brand-lockup"><a href="#top" class="nav-logo">Murmura</a><span class="nav-zh-name">{{ t('landing.brandZh') }}</span></div>
         <div class="nav-links">
           <a href="#how-it-works" class="nav-link">{{ t('landing.nav.howItWorks') }}</a>
           <a href="#features" class="nav-link">{{ t('landing.nav.features') }}</a>
+          <a href="https://github.com/destinyfrancis/Murmura" class="nav-link nav-github" target="_blank" rel="noreferrer">{{ t('landing.nav.github') }} ↗</a>
           <button class="nav-cta" @click="router.push('/app')">{{ t('landing.nav.launch') }}</button>
         </div>
       </div>
     </nav>
 
     <!-- Hero -->
-    <section class="hero">
+    <section id="top" class="hero">
       <div class="hero-eyebrow">{{ t('landing.hero.eyebrow') }}</div>
       <h1 class="hero-title">
         {{ t('landing.hero.title') }}<br/>
-        <span class="hero-title-accent">{{ t('landing.hero.titleAccent') }}</span>
+        <span class="hero-title-accent">{{ t('landing.hero.titleAccent') }}</span><br/>
+        <span class="hero-title-zh">{{ t('landing.hero.titleZh') }}</span>
       </h1>
       <p class="hero-sub">{{ t('landing.hero.sub') }}</p>
+      <p class="hero-note">{{ t('landing.hero.note') }}</p>
       <div class="hero-actions">
         <button class="btn-primary" @click="router.push('/app')">{{ t('landing.hero.cta') }}</button>
         <button class="btn-ghost" @click="router.push('/app/workspace')">{{ t('landing.hero.workspace') }}</button>
       </div>
       <div class="hero-stats">
         <div class="stat-item">
-          <span class="stat-n">50–10,000</span>
+          <span class="stat-n">50–50,000</span>
           <span class="stat-l">{{ t('landing.hero.stats.agents') }}</span>
         </div>
         <div class="stat-divider" />
@@ -72,39 +91,50 @@ const useCases = computed(() => [
         </div>
         <div class="stat-divider" />
         <div class="stat-item">
-          <span class="stat-n">100+</span>
+          <span class="stat-n">500</span>
           <span class="stat-l">{{ t('landing.hero.stats.monteCarlo') }}</span>
         </div>
         <div class="stat-divider" />
         <div class="stat-item">
-          <span class="stat-n">14</span>
+          <span class="stat-n">18</span>
           <span class="stat-l">{{ t('landing.hero.stats.xai') }}</span>
         </div>
       </div>
-      <!-- Hero visual: animated graph -->
-      <div class="hero-visual">
-        <svg viewBox="0 0 480 200" class="hero-svg" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <!-- connection lines -->
-          <line x1="240" y1="40" x2="80" y2="120" stroke="#ff5a1f" stroke-width="1" stroke-dasharray="4 4" opacity="0.42"/>
-          <line x1="240" y1="40" x2="400" y2="120" stroke="#f59e0b" stroke-width="1" stroke-dasharray="4 4" opacity="0.36"/>
-          <line x1="80" y1="120" x2="160" y2="180" stroke="#047857" stroke-width="1" stroke-dasharray="4 4" opacity="0.38"/>
-          <line x1="400" y1="120" x2="320" y2="180" stroke="#ff5a1f" stroke-width="1" stroke-dasharray="4 4" opacity="0.42"/>
-          <line x1="160" y1="180" x2="320" y2="180" stroke="#f59e0b" stroke-width="1" stroke-dasharray="4 4" opacity="0.3"/>
-          <line x1="80" y1="120" x2="400" y2="120" stroke="#047857" stroke-width="1" stroke-dasharray="4 4" opacity="0.22"/>
-          <!-- nodes -->
-          <circle cx="240" cy="40" r="10" fill="#ff5a1f" opacity="0.9" class="pulse-node"/>
-          <circle cx="80" cy="120" r="8" fill="#047857" opacity="0.8"/>
-          <circle cx="400" cy="120" r="8" fill="#f59e0b" opacity="0.8"/>
-          <circle cx="160" cy="180" r="7" fill="#ff5a1f" opacity="0.7"/>
-          <circle cx="320" cy="180" r="7" fill="#047857" opacity="0.7"/>
-          <circle cx="240" cy="120" r="5" fill="#f59e0b" opacity="0.5"/>
-          <!-- labels -->
-          <text x="240" y="24" text-anchor="middle" fill="#ff5a1f" font-size="9" font-family="monospace" opacity="0.78">SEED EVENT</text>
-          <text x="60" y="116" text-anchor="middle" fill="#9aa8ba" font-size="8" font-family="monospace">ACTOR A</text>
-          <text x="420" y="116" text-anchor="middle" fill="#9aa8ba" font-size="8" font-family="monospace">ACTOR B</text>
-          <text x="150" y="196" text-anchor="middle" fill="#9aa8ba" font-size="8" font-family="monospace">POLICY</text>
-          <text x="330" y="196" text-anchor="middle" fill="#9aa8ba" font-size="8" font-family="monospace">MARKET</text>
+      <!-- A single seed splitting into many possible futures. -->
+      <div class="hero-visual" aria-hidden="true">
+        <svg viewBox="0 0 900 260" class="hero-svg" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="futureLine" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stop-color="#ff5a1f" stop-opacity=".95"/><stop offset="1" stop-color="#f7b955" stop-opacity=".2"/>
+            </linearGradient>
+            <filter id="softGlow"><feGaussianBlur stdDeviation="3" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          </defs>
+          <path class="future-path path-main" d="M20 130 C190 130 220 130 330 130 S440 130 520 130 C650 130 720 50 880 28" stroke="url(#futureLine)" stroke-width="3"/>
+          <path class="future-path" d="M20 130 C190 130 220 130 330 130 S440 130 520 130 C640 130 700 88 880 78" stroke="url(#futureLine)" stroke-width="2"/>
+          <path class="future-path" d="M20 130 C190 130 220 130 330 130 S440 130 520 130 C630 130 700 125 880 130" stroke="url(#futureLine)" stroke-width="2"/>
+          <path class="future-path" d="M20 130 C190 130 220 130 330 130 S440 130 520 130 C640 130 700 170 880 182" stroke="url(#futureLine)" stroke-width="2"/>
+          <path class="future-path" d="M20 130 C190 130 220 130 330 130 S440 130 520 130 C650 130 720 220 880 234" stroke="url(#futureLine)" stroke-width="3"/>
+          <g class="field-points" filter="url(#softGlow)">
+            <circle cx="20" cy="130" r="7" fill="#ff5a1f"/><circle cx="330" cy="130" r="5" fill="#f7b955"/><circle cx="520" cy="130" r="6" fill="#f7b955"/>
+            <circle cx="680" cy="75" r="3" fill="#f7b955"/><circle cx="745" cy="150" r="3" fill="#ff5a1f"/><circle cx="790" cy="210" r="3" fill="#f7b955"/>
+          </g>
+          <text x="20" y="105" fill="#ffb089" font-size="12" font-family="monospace" letter-spacing="2">{{ t('landing.hero.seed') }}</text>
+          <text x="760" y="18" fill="#c9a86a" font-size="11" font-family="monospace" letter-spacing="2">{{ t('landing.hero.possibleFutures') }}</text>
         </svg>
+      </div>
+    </section>
+
+    <!-- The promise, in plain language. -->
+    <section class="promise-section">
+      <div class="promise-copy">
+        <div class="section-label section-label-left">{{ t('landing.promise.label') }}</div>
+        <h2 class="section-title section-title-left">{{ t('landing.promise.title') }}</h2>
+        <p>{{ t('landing.promise.desc') }}</p>
+      </div>
+      <div class="lens-grid">
+        <article v-for="lens in lenses" :key="lens.mark" class="lens-card">
+          <span class="lens-mark">{{ lens.mark }}</span><h3>{{ lens.title }}</h3><p>{{ lens.desc }}</p>
+        </article>
       </div>
     </section>
 
@@ -138,6 +168,19 @@ const useCases = computed(() => [
       </div>
     </section>
 
+    <!-- Audience stories make the product concrete. -->
+    <section class="audience-section">
+      <div class="section-label">{{ t('landing.audiences.label') }}</div>
+      <h2 class="section-title">{{ t('landing.audiences.title') }}</h2>
+      <div class="audience-grid">
+        <article v-for="audience in audiences" :key="audience.label" class="audience-card">
+          <span class="audience-label">{{ audience.label }}</span>
+          <h3>{{ audience.title }}</h3>
+          <p>{{ audience.desc }}</p>
+        </article>
+      </div>
+    </section>
+
     <!-- Example Use Cases -->
     <section class="use-cases">
       <div class="section-label">{{ t('landing.useCases.label') }}</div>
@@ -166,6 +209,7 @@ const useCases = computed(() => [
     <footer class="footer">
       <span class="footer-brand">Murmura</span>
       <span class="footer-desc">{{ t('landing.footer.desc') }}</span>
+      <a class="footer-github" href="https://github.com/destinyfrancis/Murmura" target="_blank" rel="noreferrer">{{ t('landing.footer.github') }} ↗</a>
       <span class="footer-copy">{{ t('landing.footer.copy') }}</span>
     </footer>
   </div>
@@ -209,12 +253,21 @@ const useCases = computed(() => [
   justify-content: space-between;
   align-items: center;
 }
+.brand-lockup { display: flex; align-items: baseline; gap: 8px; }
 .nav-logo {
   font-size: 18px;
   font-weight: 800;
   letter-spacing: 4px;
   color: var(--accent);
   font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  text-decoration: none;
+}
+.nav-zh-name {
+  color: #b4b4b4;
+  font-family: 'Noto Serif TC', 'Songti TC', serif;
+  font-size: 13px;
+  letter-spacing: 1px;
+  font-weight: 500;
 }
 .nav-links { display: flex; align-items: center; gap: 24px; }
 .nav-link {
@@ -224,6 +277,7 @@ const useCases = computed(() => [
   transition: color 0.2s;
 }
 .nav-link:hover { color: #F5F5F5; }
+.nav-github { color: #d7a867; }
 .nav-cta {
   padding: 8px 18px;
   background: rgba(255, 90, 31, 0.12);
@@ -269,6 +323,13 @@ const useCases = computed(() => [
 .hero-title-accent {
   color: var(--accent);
 }
+.hero-title-zh {
+  color: #e9e4db;
+  font-family: 'Noto Serif TC', 'Songti TC', serif;
+  font-size: .48em;
+  font-weight: 500;
+  letter-spacing: .08em;
+}
 .hero-sub {
   font-size: 17px;
   color: #A3A3A3;
@@ -277,6 +338,14 @@ const useCases = computed(() => [
   max-width: 600px;
   margin-left: auto;
   margin-right: auto;
+}
+.hero-note {
+  max-width: 620px;
+  margin: -18px auto 30px;
+  color: #d3ac72;
+  font-family: 'Noto Serif TC', 'Songti TC', serif;
+  font-size: 14px;
+  line-height: 1.8;
 }
 .hero-actions {
   display: flex;
@@ -356,13 +425,59 @@ const useCases = computed(() => [
 .hero-visual {
   display: flex;
   justify-content: center;
+  margin: 12px -8vw 0;
+  overflow: hidden;
 }
 .hero-svg {
   width: 100%;
-  max-width: 480px;
-  height: 200px;
-  opacity: 0.7;
+  max-width: 900px;
+  height: 260px;
+  opacity: 0.92;
 }
+.future-path {
+  stroke-dasharray: 11 16;
+  stroke-linecap: round;
+  animation: drift 18s linear infinite;
+}
+.future-path:nth-of-type(2) { animation-duration: 21s; animation-delay: -5s; }
+.future-path:nth-of-type(3) { animation-duration: 24s; animation-delay: -8s; }
+.future-path:nth-of-type(4) { animation-duration: 20s; animation-delay: -11s; }
+.future-path:nth-of-type(5) { animation-duration: 17s; animation-delay: -3s; }
+.field-points circle { animation: point-breathe 4s ease-in-out infinite; }
+.field-points circle:nth-child(2) { animation-delay: -.8s; }
+.field-points circle:nth-child(3) { animation-delay: -1.7s; }
+@keyframes drift { to { stroke-dashoffset: -600; } }
+@keyframes point-breathe { 0%,100% { opacity: .55; transform: scale(.85); } 50% { opacity: 1; transform: scale(1.2); } }
+
+/* ─── Promise / lenses ──────────────────────────────────────────────────── */
+.promise-section, .audience-section {
+  position: relative;
+  z-index: 1;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 84px 24px;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+.promise-section {
+  display: grid;
+  grid-template-columns: .85fr 1.15fr;
+  gap: 72px;
+  align-items: start;
+}
+.section-label-left, .section-title-left { text-align: left; }
+.promise-copy p { color: #a3a3a3; font-size: 16px; line-height: 1.9; max-width: 440px; }
+.lens-grid { display: grid; gap: 1px; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.1); }
+.lens-card { background: #101010; padding: 24px 26px 26px 62px; position: relative; min-height: 108px; }
+.lens-card h3 { color: #f5f5f5; font-size: 18px; margin: 0 0 8px; }
+.lens-card p { color: #8e8e8e; font-size: 13px; line-height: 1.65; margin: 0; }
+.lens-mark { position: absolute; left: 24px; top: 24px; color: var(--accent); font: 700 11px 'JetBrains Mono', monospace; letter-spacing: 1px; }
+
+/* ─── Audience stories ─────────────────────────────────────────────────── */
+.audience-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.audience-card { border: 1px solid rgba(255,255,255,.1); padding: 28px 26px 30px; min-height: 205px; background: linear-gradient(145deg, rgba(255,255,255,.035), rgba(255,255,255,.01)); }
+.audience-label { color: #d3ac72; font: 700 10px 'JetBrains Mono', monospace; letter-spacing: 2px; text-transform: uppercase; }
+.audience-card h3 { font-size: 20px; color: #f5f5f5; margin: 20px 0 12px; }
+.audience-card p { color: #929292; font-size: 13px; line-height: 1.7; margin: 0; }
 .pulse-node {
   animation: pulse-glow 2.5s ease-in-out infinite;
 }
@@ -601,11 +716,15 @@ const useCases = computed(() => [
   font-size: 11px;
   color: #777;
 }
+.footer-github { color: #d3ac72; font-size: 11px; text-decoration: none; }
+.footer-github:hover { color: #fff; }
 
 /* ─── Responsive ─────────────────────────────────────────────────────────── */
 @media (max-width: 900px) {
   .features-grid { grid-template-columns: repeat(2, 1fr); }
   .use-case-row { grid-template-columns: repeat(2, 1fr); }
+  .promise-section { grid-template-columns: 1fr; gap: 40px; }
+  .audience-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 600px) {
   .features-grid { grid-template-columns: 1fr; }
@@ -615,5 +734,11 @@ const useCases = computed(() => [
   .hero-stats { gap: 24px; }
   .stat-divider { display: none; }
   .footer { flex-direction: column; text-align: center; }
+  .nav-links { gap: 10px; }
+  .nav-link:not(.nav-github) { display: none; }
+  .nav-zh-name { display: none; }
+  .hero { padding-top: 72px; }
+  .hero-visual { margin-left: -24px; margin-right: -24px; }
+  .hero-svg { height: 190px; }
 }
 </style>

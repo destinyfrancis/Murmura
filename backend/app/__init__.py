@@ -135,21 +135,14 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.warning("Simulations will fail. Please set the key in .env or use DEMO_MODE=true.")
         logger.warning("=" * 60)
 
-    # Demo Seed DB (L2)
-    if settings.DEMO_MODE:
-        db_path = Path(settings.DATABASE_PATH)
-        seed_path = Path("data/demo/seed.db")
-        if not db_path.exists() and seed_path.exists():
-            logger.info("Demo Mode: Seeding database from %s", seed_path)
-            db_path.parent.mkdir(parents=True, exist_ok=True)
-            import shutil # noqa: PLC0415
-            shutil.copy(str(seed_path), str(db_path))
-
     # Reap orphaned OASIS simulation subprocesses from a previous server instance.
     await _reap_orphaned_oasis_processes(logger)
 
     await init_db()
     await apply_migrations()
+    if settings.DEMO_MODE:
+        from backend.app.services.demo_replay import ensure_demo_replay
+        await ensure_demo_replay()
 
     # Start the serialised write queue — prevents "database is locked" errors
     # under concurrent load (3-5+ simultaneous users / active simulations).
@@ -176,7 +169,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception:
         logger.warning("session_costs table creation failed", exc_info=True)
 
-    # Restore persisted cost state so hard-cap enforcement survives restarts
+    # Restore informational cost totals across restarts
     try:
         from backend.app.services.cost_tracker import restore_costs_from_db
 
@@ -274,6 +267,16 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "UPDATE simulation_jobs SET status = 'interrupted', updated_at = datetime('now') "
                 "WHERE status = 'running'"
             )
+            await db.execute(
+                "UPDATE simulation_sessions SET status='failed', error_message='Server restarted during simulation' "
+                "WHERE status='running' AND id IN (SELECT session_id FROM simulation_jobs WHERE status='interrupted')"
+            )
+            table = await (await db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='workflow_runs'")).fetchone()
+            if table:
+                await db.execute(
+                    "UPDATE workflow_runs SET status='failed', message='Server restarted; saved artifacts remain available', "
+                    "updated_at=datetime('now') WHERE status='running'"
+                )
             await db.commit()
         logger.info("simulation_jobs table ensured and zombies reaped")
     except Exception:
@@ -623,7 +626,8 @@ def create_app() -> FastAPI:
         from backend.app.services.oasis_compatibility import get_capabilities
         return {
             "status": "ok",
-            "capabilities": get_capabilities()
+            "capabilities": get_capabilities(),
+            "demo_mode": get_settings().DEMO_MODE
         }
 
     @app.get("/api/diagnostics/setup")

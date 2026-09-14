@@ -132,7 +132,7 @@ CREATE TABLE IF NOT EXISTS simulation_sessions (
     status TEXT DEFAULT 'created',
     current_round INTEGER DEFAULT 0,
     total_tokens INTEGER DEFAULT 0,
-    estimated_cost_usd REAL DEFAULT 0.0,
+    estimated_cost_usd REAL DEFAULT NULL,
     error_message TEXT,
     started_at TEXT,
     completed_at TEXT,

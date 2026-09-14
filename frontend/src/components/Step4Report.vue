@@ -1,8 +1,9 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { generateReport, getReportStatus, invokeXaiTool, shareReport } from '../api/report.js'
 import { unwrapApi } from '../api/utils.js'
-import { getConfidenceReport, getConfidenceScore, getSimulationArtifacts } from '../api/simulation.js'
+import { getConfidenceReport, getSimulationArtifacts } from '../api/simulation.js'
 import ConfidenceBadge from './ConfidenceBadge.vue'
 import { escapeHtmlAttr, renderSafeMarkdown, sanitizeHtml } from '../utils/safeMarkdown.js'
 
@@ -13,6 +14,7 @@ const props = defineProps({
 
 const emit = defineEmits(['report-generated', 'update:session', 'switch-step'])
 
+const { t } = useI18n()
 const sharing = ref(false)
 const shareStatus = ref('')
 async function handleShare() {
@@ -70,7 +72,7 @@ const reportContent = ref('')
 const reactSteps = ref([])
 
 // Collapsible "AI 推理過程" section
-const reasoningOpen = ref(true)
+const reasoningOpen = ref(false)
 const collapsedSteps = ref(new Set())
 
 const startTime = ref(null)
@@ -127,7 +129,7 @@ function handleReportClick(e) {
     const type = tag.classList.contains('node-tag') ? 'node' : 'edge'
     
     // Set target in shared session
-    props.session.targetHighlight = { id, type }
+    emit('update:session', { ...props.session, targetHighlight: { id, type } })
     
     // Ask parent to switch to graph step
     emit('switch-step', 1)
@@ -135,25 +137,8 @@ function handleReportClick(e) {
 }
 
 watch(reportContent, (newContent) => {
-  if (!newContent) return
-  // Clear any existing typewriter
-  if (typewriterTimer) {
-    clearInterval(typewriterTimer)
-    typewriterTimer = null
-  }
-  displayedReport.value = ''
-  isTyping.value = true
-  let idx = 0
-  typewriterTimer = setInterval(() => {
-    const chunkSize = Math.floor(Math.random() * 6) + 3   // 3-8 chars
-    idx = Math.min(idx + chunkSize, newContent.length)
-    displayedReport.value = newContent.slice(0, idx)
-    if (idx >= newContent.length) {
-      clearInterval(typewriterTimer)
-      typewriterTimer = null
-      isTyping.value = false
-    }
-  }, 30)
+  displayedReport.value = newContent || ''
+  isTyping.value = false
 })
 
 const stepIcon = (stepType) => {
@@ -230,7 +215,7 @@ function mergeReactSteps(incoming) {
   })
 }
 
-async function pollReportStatus(reportId) {
+async function pollReportStatus(reportId, announce = true) {
   try {
     const res = await getReportStatus(reportId)
     const data = unwrapApi(res)
@@ -242,13 +227,13 @@ async function pollReportStatus(reportId) {
       mergeReactSteps(data.agent_log)
     }
 
-    if (data.status === 'completed') {
+    if (data.status === 'completed' || data.content_markdown) {
       reportContent.value = data.content || data.content_markdown || ''
       completed.value = true
       generating.value = false
       clearInterval(pollTimer)
       pollTimer = null
-      emit('report-generated', { reportId })
+      if (announce) emit('report-generated', { reportId })
       fetchConfidenceScore()
       return
     }
@@ -260,11 +245,12 @@ async function pollReportStatus(reportId) {
       pollTimer = null
     }
   } catch (err) {
-    console.error('Poll error:', err)
+    error.value = err.response?.data?.detail || err.message
+    generating.value = false
   }
 }
 
-async function startGeneration() {
+async function startGeneration(reportType = 'grounded') {
   startElapsedTimer()
   generating.value = true
   error.value = null
@@ -284,6 +270,7 @@ async function startGeneration() {
     const res = await generateReport({
       session_id: props.session.sessionId,
       scenario_type: props.session.scenarioType,
+      report_type: reportType,
       scenario_question: questionInput.value || undefined,
     })
 
@@ -321,7 +308,11 @@ async function startGeneration() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  if (props.session.reportId) {
+    await pollReportStatus(props.session.reportId, false)
+    return
+  }
   startGeneration()
 })
 
@@ -368,16 +359,10 @@ const artifactsSummary = ref(null)
 async function fetchConfidenceScore() {
   const sessionId = props.session?.sessionId
   if (!sessionId) return
-  const [scoreRes, reportRes, artifactRes] = await Promise.allSettled([
-    getConfidenceScore(sessionId),
+  const [reportRes, artifactRes] = await Promise.allSettled([
     getConfidenceReport(sessionId),
     getSimulationArtifacts(sessionId),
   ])
-  if (scoreRes.status === 'fulfilled') {
-    confidenceScore.value = unwrapApi(scoreRes.value, {})?.score ?? null
-  } else {
-    confidenceScore.value = null
-  }
   if (reportRes.status === 'fulfilled') {
     confidenceReport.value = unwrapApi(reportRes.value, null)
   } else {
@@ -409,7 +394,7 @@ async function runXaiTool(toolName) {
 
 <template>
   <div class="step4">
-    <div class="step4-left">
+    <div v-if="generating || reactSteps.length" class="step4-left">
       <!-- AI 推理過程 collapsible panel -->
       <div class="react-panel">
         <div class="react-panel-header" @click="reasoningOpen = !reasoningOpen">
@@ -528,7 +513,8 @@ async function runXaiTool(toolName) {
           <span v-if="shareStatus" class="share-status">{{ shareStatus }}</span>
         </div>
 
-        <div v-if="completed" class="confidence-panel">
+        <button v-if="completed && !session.demoMode" class="pdf-btn" :disabled="generating" @click="startGeneration('full')">{{ t('research.interpret') }}</button>
+        <div v-if="completed && !session.demoMode" class="confidence-panel">
           <div class="confidence-cell">
             <span>CONFIDENCE</span>
             <strong>
@@ -560,7 +546,7 @@ async function runXaiTool(toolName) {
 
         <div v-else-if="error" class="report-error">
           <p>{{ error }}</p>
-          <button class="retry-btn" @click="startGeneration">重試</button>
+          <button class="retry-btn" @click="startGeneration()">重試</button>
         </div>
 
         <div v-else class="report-body" @click="handleReportClick">
@@ -569,7 +555,7 @@ async function runXaiTool(toolName) {
         </div>
 
         <!-- Question input — always visible so user can set context before generating -->
-        <div class="report-question-row">
+        <div v-if="!session.demoMode" class="report-question-row">
           <input
             v-model="questionInput"
             class="report-question-input"
@@ -579,15 +565,15 @@ async function runXaiTool(toolName) {
         </div>
 
         <!-- Regen button — only after first completion -->
-        <div v-if="completed" class="report-regen-row">
-          <button class="report-regen-btn" @click="startGeneration">重新生成</button>
+        <div v-if="completed && !session.demoMode" class="report-regen-row">
+          <button class="report-regen-btn" @click="startGeneration()">重新生成</button>
         </div>
       </div>
     </div>
 
     <!-- XAI sidebar — visible only after report is complete -->
-    <div v-if="completed" class="xai-sidebar">
-      <h3 class="xai-title">XAI TOOLS</h3>
+    <details v-if="completed && !session.demoMode" class="xai-sidebar">
+      <summary class="xai-title">{{ t('research.advanced') }}</summary>
       <button
         v-for="tool in XAI_TOOLS"
         :key="tool.name"
@@ -606,7 +592,7 @@ async function runXaiTool(toolName) {
         <h4 class="xai-result-title">{{ name }}</h4>
         <pre class="xai-result-body">{{ JSON.stringify(result, null, 2) }}</pre>
       </div>
-    </div>
+    </details>
   </div>
 </template>
 

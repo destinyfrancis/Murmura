@@ -42,7 +42,7 @@ class WorkflowRunner:
         *,
         seed_text: str,
         scenario_question: str = "",
-        preset: str = "fast",
+        preset: str = "research",
         owner_id: str | None = None,
     ) -> dict[str, Any]:
         await self._ensure_schema()
@@ -91,7 +91,7 @@ class WorkflowRunner:
 
         seed_text = row["seed_text"]
         scenario_question = row["scenario_question"] or ""
-        preset = row["preset"] or "fast"
+        preset = row["preset"] or "research"
         owner_id = row["owner_id"]
 
         try:
@@ -126,7 +126,7 @@ class WorkflowRunner:
                     timeout=max(1.0, graph_timeout_s),
                 )
             except Exception as exc:  # noqa: BLE001
-                if os.environ.get("MURMURA_STRICT_LIVE") == "1":
+                if not _allow_internal_degraded():
                     raise RuntimeError(f"oasis_runtime_error: graph_build_failed:{exc.__class__.__name__}") from exc
                 logger.warning("Graph build degraded for workflow %s: %s", workflow_id, exc)
                 graph_result = await self._build_fallback_graph(
@@ -166,7 +166,8 @@ class WorkflowRunner:
                     "round_count": resolved.rounds,
                     "graph_id": graph_id,
                     "domain_pack_id": config.domain_pack_id,
-                    "platforms": {"twitter": True, "reddit": True},
+                    "platforms": {"twitter": True, "reddit": resolved.name != "research"},
+                    "preset": resolved.name,
                     "time_config": time_config.to_dict(),
                     "owner_id": owner_id,
                 },
@@ -213,7 +214,7 @@ class WorkflowRunner:
                 profiles, csv_path = await asyncio.wait_for(
                     generate_agents(
                         session_id=session_id,
-                        request={"graph_id": graph_id, "seed_text": seed_text, "agent_count": resolved.agents},
+                        request={"graph_id": graph_id, "seed_text": seed_text, "agent_count": resolved.agents, "preset": resolved.name},
                         mode="kg_driven",
                     ),
                     timeout=max(1.0, agent_timeout_s),
@@ -304,6 +305,7 @@ class WorkflowRunner:
                     {"session_id": session_id, "reason": reason},
                 )
 
+            report_id = None
             await self._update(workflow_id, step="report", step_index=4, message="Generating report")
             try:
                 from backend.app.services.report_agent import ReportAgent  # noqa: PLC0415
@@ -334,22 +336,24 @@ class WorkflowRunner:
 
             await self._update(
                 workflow_id,
-                status="degraded" if simulation_skipped else "completed",
+                status="degraded" if simulation_skipped or not report_id else "completed",
                 step="interaction",
                 step_index=5,
                 message=(
                     "Workflow completed with graph forecast fallback"
                     if simulation_skipped
+                    else "Simulation finished; report unavailable" if not report_id
                     else "Workflow completed"
                 ),
             )
             await self._event(
                 workflow_id,
-                "degraded" if simulation_skipped else "completed",
+                "degraded" if simulation_skipped or not report_id else "completed",
                 "interaction",
                 (
                     "Workflow completed with graph forecast fallback"
                     if simulation_skipped
+                    else "Simulation finished; report unavailable" if not report_id
                     else "Workflow completed"
                 ),
                 {},
@@ -402,14 +406,14 @@ class WorkflowRunner:
     async def _monitor_simulation(self, workflow_id: str, session_id: str) -> None:
         manager = get_simulation_manager()
         last_status = ""
-        timeout_s = float(os.environ.get("WORKFLOW_SIM_MONITOR_TIMEOUT_S", "480"))
-        deadline = asyncio.get_running_loop().time() + max(1.0, timeout_s)
-        while asyncio.get_running_loop().time() < deadline:
+        # The worker owns run timeouts; a view monitor must not abandon a healthy job.
+        last_round = -1
+        while True:
             session = await manager.get_session(session_id)
             status = str(session.get("status") or "")
             current_round = int(session.get("current_round") or 0)
             total_rounds = int(session.get("round_count") or 0)
-            if status != last_status or current_round:
+            if status != last_status or current_round != last_round:
                 from backend.app.services.simulation_artifacts import collect_simulation_artifacts  # noqa: PLC0415
 
                 artifact_summary: dict[str, Any] = {}
@@ -449,12 +453,12 @@ class WorkflowRunner:
                     },
                 )
                 last_status = status
+                last_round = current_round
             if status in {"completed", "failed"}:
                 if status == "failed":
                     raise RuntimeError(session.get("error_message") or "simulation_failed")
                 return
             await asyncio.sleep(2)
-        raise TimeoutError("round_timeout: simulation monitor timed out")
 
     async def _build_fallback_graph(
         self,

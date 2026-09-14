@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from backend.app.api.auth import UserProfile, get_optional_user
 from backend.app.models.response import APIResponse
+from backend.app.config import get_settings
 from backend.app.services.workflow_runner import WorkflowRunner
 from backend.app.utils.logger import get_logger
 
@@ -23,7 +24,7 @@ _QUICK_START_MAX_BYTES = 10 * 1024 * 1024
 class WorkflowQuickStartRequest(BaseModel):
     seed_text: str
     scenario_question: str = ""
-    preset: str = "fast"
+    preset: str = "research"
 
 
 @router.post("/quick-start", response_model=APIResponse)
@@ -32,6 +33,8 @@ async def create_quick_workflow(
     user: Annotated[UserProfile | None, Depends(get_optional_user)] = None,
 ) -> APIResponse:
     """Create a background workflow and return immediately."""
+    if get_settings().DEMO_MODE:
+        raise HTTPException(status_code=409, detail="Demo mode contains scripted replay only. Disable DEMO_MODE to run your own scenario.")
     seed_text = req.seed_text.strip()
     if not seed_text:
         raise HTTPException(status_code=400, detail="seed_text is required")
@@ -66,10 +69,12 @@ async def create_quick_workflow(
 async def create_quick_workflow_upload(
     file: Annotated[UploadFile, File(...)],
     scenario_question: str = "",
-    preset: str = "fast",
+    preset: str = "research",
     user: Annotated[UserProfile | None, Depends(get_optional_user)] = None,
 ) -> APIResponse:
     """Create a background workflow from an uploaded PDF/TXT/MD seed."""
+    if get_settings().DEMO_MODE:
+        raise HTTPException(status_code=409, detail="Demo mode contains scripted replay only. Disable DEMO_MODE to run your own scenario.")
     try:
         content = await file.read()
         from backend.app.services.scenario_intake import ScenarioIntakeService  # noqa: PLC0415

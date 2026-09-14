@@ -63,7 +63,7 @@ class EnsembleResult:
     session_id: str
     n_trials: int
     distributions: list[DistributionBand]
-    data_integrity_score: float = 1.0  # 0.0–1.0: 1.0 = all real data, 0.0 = all synthetic
+    data_integrity_score: float | None = None  # 0.0–1.0: 1.0 = all real data, 0.0 = all synthetic
     sampling_method: str = "lhs_t_copula"
 
     def to_dict(self) -> dict:
@@ -72,7 +72,7 @@ class EnsembleResult:
             "session_id": self.session_id,
             "n_trials": self.n_trials,
             "distributions": [d.to_dict() for d in self.distributions],
-            "data_integrity_score": round(self.data_integrity_score, 2),
+            "data_integrity_score": round(self.data_integrity_score, 2) if self.data_integrity_score is not None else None,
             "sampling_method": self.sampling_method,
         }
 

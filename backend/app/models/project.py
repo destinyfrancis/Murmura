@@ -69,13 +69,15 @@ class AgentProfile:
 
 @dataclass(frozen=True)
 class CostEstimate:
-    """Immutable cost estimate for a simulation run."""
+    """Legacy-compatible cost envelope without invented numeric values."""
 
     agent_count: int
     round_count: int
-    cost_per_call_usd: float
-    total_estimated_usd: float
-    token_estimate: int
+    cost_per_call_usd: float | None
+    total_estimated_usd: float | None
+    token_estimate: int | None
+    status: str = "unavailable"
+    reason: str = "Complete per-run model usage and pricing have not been measured."
 
     @staticmethod
     def calculate(
@@ -84,17 +86,14 @@ class CostEstimate:
         avg_tokens_per_call: int = 500,
         cost_per_1k_tokens: float = 0.00002,
     ) -> CostEstimate:
-        """Calculate cost estimate for a Qwen 3.5 9B via OpenRouter simulation."""
-        total_calls = agent_count * round_count
-        total_tokens = total_calls * avg_tokens_per_call
-        cost_per_call = (avg_tokens_per_call / 1000) * cost_per_1k_tokens
-        total_cost = total_calls * cost_per_call
+        """Preserve the old constructor without presenting guessed costs."""
+        del avg_tokens_per_call, cost_per_1k_tokens
         return CostEstimate(
             agent_count=agent_count,
             round_count=round_count,
-            cost_per_call_usd=cost_per_call,
-            total_estimated_usd=round(total_cost, 4),
-            token_estimate=total_tokens,
+            cost_per_call_usd=None,
+            total_estimated_usd=None,
+            token_estimate=None,
         )
 
 
@@ -132,7 +131,6 @@ class SessionState:
         """Create a new session state with generated ID and timestamps."""
         now = datetime.utcnow().isoformat()
         default_platforms = {"twitter": True, "reddit": True}
-        cost = CostEstimate.calculate(agent_count, round_count)
         return SessionState(
             id=str(uuid4()),
             name=name,
@@ -145,7 +143,7 @@ class SessionState:
             scenario_type=scenario_type,
             platforms=platforms or default_platforms,
             llm_provider=llm_provider,
-            cost_estimate=cost,
+            cost_estimate=None,
             created_at=now,
             updated_at=now,
         )

@@ -39,7 +39,7 @@ class TestCreateSessionStoresInDB:
         assert session.round_count == 5
         assert session.graph_id == "graph-001"
         assert session.current_round == 0
-        assert session.cost_estimate is not None
+        assert session.cost_estimate is None
         assert session.id is not None
         assert len(session.id) == 36  # UUID format
 
@@ -52,16 +52,6 @@ class TestCreateSessionStoresInDB:
             round_count=sample_session_request["round_count"],
             graph_id=sample_session_request["graph_id"],
             scenario_type=sample_session_request["scenario_type"],
-        )
-
-        cost_json = json.dumps(
-            {
-                "agent_count": session.cost_estimate.agent_count,
-                "round_count": session.cost_estimate.round_count,
-                "cost_per_call_usd": session.cost_estimate.cost_per_call_usd,
-                "total_estimated_usd": session.cost_estimate.total_estimated_usd,
-                "token_estimate": session.cost_estimate.token_estimate,
-            }
         )
 
         # Note: The schema has different columns from _persist_session,
@@ -346,32 +336,17 @@ class TestAgentProfilesMatchCensusDistribution:
 
 
 class TestCostEstimation:
-    """Test CostEstimate calculation logic."""
+    """Legacy cost objects must not manufacture precise values."""
 
     def test_basic_cost_calculation(self):
         cost = CostEstimate.calculate(agent_count=300, round_count=40)
 
         assert cost.agent_count == 300
         assert cost.round_count == 40
-        assert cost.token_estimate == 300 * 40 * 500  # 6,000,000
-        assert cost.total_estimated_usd > 0
-        assert cost.cost_per_call_usd > 0
-
-    def test_cost_scales_with_agents(self):
-        small = CostEstimate.calculate(agent_count=10, round_count=10)
-        large = CostEstimate.calculate(agent_count=100, round_count=10)
-
-        assert large.total_estimated_usd > small.total_estimated_usd
-        # Should scale linearly
-        ratio = large.total_estimated_usd / small.total_estimated_usd
-        assert abs(ratio - 10.0) < 0.001
-
-    def test_cost_scales_with_rounds(self):
-        few = CostEstimate.calculate(agent_count=100, round_count=5)
-        many = CostEstimate.calculate(agent_count=100, round_count=50)
-
-        ratio = many.total_estimated_usd / few.total_estimated_usd
-        assert abs(ratio - 10.0) < 0.001
+        assert cost.token_estimate is None
+        assert cost.total_estimated_usd is None
+        assert cost.cost_per_call_usd is None
+        assert cost.status == "unavailable"
 
     def test_cost_estimate_is_frozen(self):
         cost = CostEstimate.calculate(agent_count=10, round_count=5)

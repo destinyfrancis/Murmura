@@ -183,21 +183,9 @@ class GraphBuilderService:
 
         node_count = int(node_count_row[0] or 0) if node_count_row else 0
         edge_count = int(edge_count_row[0] or 0) if edge_count_row else 0
-        if node_count == 0 or edge_count == 0:
-            logger.warning(
-                "Graph build produced incomplete KG for %s: nodes=%d edges=%d; using fallback graph",
-                graph_id,
-                node_count,
-                edge_count,
-            )
-            fallback = await self._build_fallback_graph(
-                graph_id=graph_id,
-                seed_text=safe_seed,
-            )
-            node_count = fallback["node_count"]
-            edge_count = fallback["edge_count"]
-            entity_types = fallback["entity_types"]
-            relation_types = fallback["relation_types"]
+        if node_count == 0:
+            raise ValueError("No entities could be extracted from the supplied material")
+        # A disconnected cast is valid. Do not invent relations to fill the canvas.
 
         return {
             "graph_id": graph_id,

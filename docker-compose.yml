@@ -31,9 +31,6 @@ services:
           cpus: '1'
           memory: 1G
     pids_limit: 100
-    profiles:
-      - default
-      - demo
 
   frontend:
     image: ghcr.io/destinyfrancis/murmura-frontend:latest
@@ -47,9 +44,6 @@ services:
       backend:
         condition: service_healthy
     restart: unless-stopped
-    profiles:
-      - default
-      - demo
 
   # ---------------------------------------------------------------------------
   # Observability stack — run with: docker compose --profile observability up -d

@@ -11,7 +11,7 @@ export function getReport(reportId) {
 }
 
 export function getReportStatus(reportId) {
-  return api.get(`/report/${reportId}/status`)
+  return api.get(`/report/${reportId}`)
 }
 
 export function chatWithReport(data) {

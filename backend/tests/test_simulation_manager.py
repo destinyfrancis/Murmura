@@ -208,10 +208,9 @@ class TestSessionToDict:
         assert d["agent_count"] == 100
         assert d["round_count"] == 20
         assert d["graph_id"] == "g1"
-        assert isinstance(d["estimated_cost_usd"], float)
-        assert d["estimated_cost_usd"] > 0
+        assert d["estimated_cost_usd"] is None
 
-    def test_none_cost_estimate_defaults_to_zero(self):
+    def test_none_cost_estimate_stays_unknown(self):
         session = SessionState(
             id="t1",
             name="t",
@@ -229,7 +228,7 @@ class TestSessionToDict:
             updated_at="2026-01-01",
         )
         d = _session_to_dict(session)
-        assert d["estimated_cost_usd"] == 0.0
+        assert d["estimated_cost_usd"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -248,7 +247,7 @@ class TestCreateSession:
         assert result["agent_count"] == 10
         assert result["round_count"] == 5
         assert result["status"] == "created"
-        assert isinstance(result["estimated_cost_usd"], float)
+        assert result["estimated_cost_usd"] is None
         assert result["csv_path"].endswith("agents.csv")
 
     @pytest.mark.asyncio

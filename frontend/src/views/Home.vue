@@ -12,10 +12,11 @@ import { useOnboarding } from '../composables/useOnboarding.js'
 const router = useRouter()
 const { t, tm } = useI18n()
 const { steps: onboardingSteps, currentStep, dismissed: onboardingDismissed, nextStep: onboardingNext, dismiss: onboardingDismiss } = useOnboarding()
+const demoMode = ref(false)
 const quickStartText = ref('')
 const quickStartLoading = ref(false)
 const quickStartQuestion = ref('')
-const quickStartPreset = ref('fast')
+const quickStartPreset = ref('research')
 const quickStartFile = ref(null)
 const quickStartDragging = ref(false)
 const quickStartError = ref(null)
@@ -35,6 +36,7 @@ const showAdvancedTools = ref(false)
 const customDomainPack = ref(null)
 
 const PRESETS = computed(() => [
+  { key: 'research', label: t('research.preset'), hint: t('research.presetHint') },
   { key: 'fast',     label: t('home.presets.fast'),     hint: t('home.presets.fastHint') },
   { key: 'standard', label: t('home.presets.standard'), hint: t('home.presets.standardHint') },
   { key: 'deep',     label: t('home.presets.deep'),     hint: t('home.presets.deepHint') },
@@ -54,12 +56,9 @@ const EXAMPLE_SEEDS = computed(() => [
   t('home.sampleCompany'),
 ])
 
-const BETA_WORKFLOWS = computed(() => [
-  { key: 'public_narrative', preset: 'fast', ...tm('home.beta.publicNarrative') },
-  { key: 'supply_chain', preset: 'standard', ...tm('home.beta.supplyChain') },
-  { key: 'company_competition', preset: 'standard', ...tm('home.beta.companyCompetition') },
-  { key: 'policy_shock', preset: 'fast', ...tm('home.beta.policyShock') },
-])
+const BETA_WORKFLOWS = computed(() => ['novel', 'politics', 'relationship'].map(key => ({
+  key, preset: 'research', ...tm(`research.${key}`),
+})))
 
 function useExampleSeed(seed) {
   quickStartFile.value = null
@@ -167,6 +166,10 @@ async function selectDomain(packId) {
 
 onMounted(async () => {
   try {
+    const health = await (await fetch('/api/health')).json()
+    demoMode.value = health.demo_mode === true
+  } catch { /* Backend state remains unknown. */ }
+  try {
     const res = await fetch('/api/domain-packs')
     if (res.ok) {
       const data = await res.json()
@@ -178,6 +181,7 @@ onMounted(async () => {
 })
 
 async function handleQuickStart() {
+  if (demoMode.value) { quickStartError.value = t('research.demoHint'); return }
   if (!canQuickStart.value) return
   quickStartLoading.value = true
   quickStartError.value = null
@@ -219,11 +223,12 @@ async function handleQuickStart() {
 
 <template>
   <div class="home workbench-page">
+    <div v-if="demoMode" class="demo-notice"><p>{{ t('research.demoHint') }}</p><button @click="router.push({ path: '/process/quick', query: { express: '1', sessionId: 'murmura-scripted-flood-demo' } })">{{ t('research.demoOpen') }}</button></div>
     <section class="home-console">
       <div class="mission-panel workbench-panel">
         <div class="mission-topline">
           <span class="workbench-label">{{ t('home.eyebrow') }}</span>
-          <span class="live-chip">{{ t('home.consoleStatusLive') }}</span>
+          <span class="live-chip">{{ demoMode ? t('research.demoLabel') : t('home.consoleStatusLive') }}</span>
         </div>
 
         <h1 class="hero-title">Murmura</h1>
@@ -283,7 +288,7 @@ async function handleQuickStart() {
         </div>
         <p class="qs-subtitle">{{ t('home.startSubtitle') }}</p>
 
-        <div class="reality-seed-box">
+        <div v-if="showAdvancedTools" class="reality-seed-box">
           <div class="reality-seed-head">
             <div>
               <span class="workbench-label">{{ t('home.realitySeed.label') }}</span>
@@ -1088,4 +1093,9 @@ async function handleQuickStart() {
     grid-template-columns: 1fr;
   }
 }
+</style>
+
+<style scoped>
+.demo-notice { border: 1px solid var(--border); background: var(--accent-subtle); padding: 16px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; }
+.demo-notice button { background: var(--accent); color: white; border: 0; padding: 10px 16px; cursor: pointer; }
 </style>
