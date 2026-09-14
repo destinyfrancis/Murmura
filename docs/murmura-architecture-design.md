@@ -2,7 +2,7 @@
 
 > **文件狀態：** Current implementation baseline
 > **更新日期：** 2026 年 9 月 14 日
-> **適用 checkout：** `feat/multi-platform-identity`，baseline `f24f05a` 加上未提交、範圍明確的 research-workbench 更新
+> **適用 checkout：** `feat/multi-platform-identity`，baseline `78f4fa9`
 > **用途：** 集中記錄現行產品設計、程式架構、資料流，以及已實作但仍未完成 live 驗證的部分。
 
 這份文件以 current checkout 的 source、schema、frontend routes 和現有驗證紀錄為準。它是架構與設計基準，不是 release certification；文件中寫到「已實作」，只代表程式碼存在並已接上相應入口，不等於整條真實外部流程已重新跑通。
@@ -120,6 +120,32 @@ Express workflow 的 backend 實作位於 `WorkflowRunner`，現時會在 reques
 核心 app 採用黑、白、灰、橙的 workbench 視覺語言，使用細邊框、低圓角、compact mono labels、明顯的五步狀態和左右工作區。Landing page 可以有較完整的產品敘事，但不應將 marketing hero 的視覺語言帶回核心 simulation workbench。
 
 所有 frontend user-facing strings 原則上經 `vue-i18n` 的 `zh-TW.js` 和 `en-US.js` 管理；API response 以 `{ success, data, meta }` envelope 為主，frontend 透過 `res.data?.data || res.data` 取出資料。
+
+### 2.4 Pre-simulation Intake Chat（已確認設計，待實作）
+
+`ScenarioIntakeConsultant.vue` 會放在 Home 的 seed 入口前面，不會成為第六個 simulation step。使用者已有完整 seed 時，仍可直接貼上或上載，跳過 Intake。否則，Intake 以兩至三輪對話收集：推演類型和問題、時間範圍、主要角色、初始條件，以及使用者已知的數據或限制。
+
+前端採用 Pinia 的 `useScenarioIntakeStore`，管理 `phase`、`messages`、`roundCount`、`collectedFacts`、`missingFields`、`evidenceSources`、`assumptions`、`draft`、`requestSeq` 和 `error`。狀態只在本次 browser session 以 `sessionStorage` 暫存，讓使用者重新整理後可繼續，但不把敏感業務資料永久寫入瀏覽器。每次請求都以 sequence number 和 abortable request 防止較慢的舊回覆覆蓋新回覆。
+
+```text
+Home
+  → ScenarioIntakeConsultant + Pinia store
+  → /api/intake/message 或 /api/intake/finalize
+  → IntakeConsultantService
+  → 使用者檢閱 seed draft
+  → 現有 POST /api/workflow/quick-start
+  → WorkflowRunner / GraphBuilder
+```
+
+Intake backend 不會取代現有 `ScenarioIntakeService`，後者仍專責 PDF、TXT 和 Markdown 的文字抽取。新 `IntakeConsultantService` 只負責對話、固定 completeness rule 和草稿合成；route 會放在 `/api/intake`，避免名字和文件 intake 混淆。
+
+只有以下資料齊備時，系統才會標記為可生成草稿：模擬類型、核心問題、時間範圍、至少一組主要角色或持份者，以及足夠交代初始狀態的已知事實或明示假設。`finalize` 回傳 `seed_text`、`scenario_question`、`scenario_type`、`time_horizon`、`actors`、`provided_facts`、`retrieved_sources`、`assumptions`、`missing_evidence` 和 `suggested_preset`。使用者可編輯後才按「建立圖譜」；Intake 不會自行發起 workflow 或模型 simulation。
+
+Web Search／RAG 是第二階段、預設關閉的功能。開啟後只可經 backend evidence gateway 取資料，畫面必須展示 query、來源和日期；網頁內容一律當成不可信材料，不能改寫 system 指令。Seed 會清楚標示使用者提供事實、外部來源與系統假設，並沿用 `sanitize_seed_text()` 和 `sanitize_scenario_description()` 的邊界。
+
+Intake 會優先使用支援 structured output 的 `google/gemini-3.8-flash`。Simulation Step 3 的 Canary 路由則使用 `deepseek/deepseek-v4.1-flash` 處理主要持份者，`qwen/qwen3.8-flash` 處理背景角色。三者均透過 OpenRouter 的同一 provider contract；這是非 secret 的 routing 設計，實際 key 必須由操作者在本機設定，不能寫入文件、測試 fixture 或版本控制。
+
+驗收會分開做：Pinia state transition 和 stale-response unit tests、Intake API schema／sanitize／readiness tests、確認 accepted draft 只經現有 workflow API 交畀 GraphBuilder 的 contract test，以及 component 的鍵盤、loading、error 和窄螢幕檢查。可選 search 另加 provenance test。這些測試與真正付費模型、OASIS 或預測準確度驗證是不同層次，不能互相代替。
 
 ## 3. 系統總體架構
 
