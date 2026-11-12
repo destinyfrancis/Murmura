@@ -55,7 +55,7 @@ dependencies = [
 simulation = [
     # Provides the importable `oasis` package used by backend/scripts/run_*_simulation.py.
     # Keep pinned because CAMEL/OASIS currently ships a tightly pinned dependency set.
-    "camel-oasis==0.2.5",
+    "camel-oasis==0.2.6",
 ]
 dev = [
     "pytest>=8.0",
